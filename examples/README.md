@@ -24,7 +24,8 @@ examples/
     ├── presentation.{md,sh,pptx}
     ├── animations.{md,sh,pptx}
     ├── video.{md,py,pptx}
-    └── 3d-model.{md,sh,pptx}
+    ├── 3d-model.{md,sh,pptx}
+    └── tables-<topic>.{md,sh,pptx}    # basic, styled, merged, borders, rows-cols, financial
 ```
 
 Each example follows the same trio: `<name>.md` (walkthrough), `<name>.sh`/`.py` (build script), `<name>.<ext>` (pre-generated output).
@@ -60,6 +61,12 @@ bash presentation.sh         # Morph transitions / full deck
 bash animations.sh           # Animation effects
 python video.py              # Video embedding
 bash 3d-model.sh             # 3D model embedding
+bash tables-basic.sh         # Tables — minimal create + populate
+bash tables-styled.sh        # 9 built-in styles + banding flags + rowHeight/name=
+bash tables-merged.sh        # gridSpan horizontal merge
+bash tables-borders.sh       # Per-side / per-cell borders
+bash tables-rows-cols.sh     # add row/column, per-row height, gridSpan + merge.down
+bash tables-financial.sh     # End-to-end financial deck
 ```
 
 ---
@@ -81,6 +88,7 @@ bash 3d-model.sh             # 3D model embedding
 - Slide / shape construction
 - Morph transitions and animations
 - Video and 3D model embedding
+- Tables — basic, built-in styles, merged cells, borders, row/column ops, real-world financial deck
 
 ---
 

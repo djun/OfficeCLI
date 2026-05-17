@@ -146,6 +146,17 @@ public partial class PowerPointHandler
             if (extents.Cy is not null) node.Format["height"] = FormatEmu(extents.Cy!);
         }
 
+        // CONSISTENCY(zorder): mirror shape/picture/connector/table — emit
+        // when parented to a ShapeTree so dump/replay preserves stacking.
+        if (gf.Parent is ShapeTree chartZTree)
+        {
+            var chartZContent = chartZTree.ChildElements
+                .Where(e => e is Shape or Picture or GraphicFrame or GroupShape or ConnectionShape)
+                .ToList();
+            var chartZIdx = chartZContent.IndexOf(gf);
+            if (chartZIdx >= 0) node.Format["zorder"] = chartZIdx + 1;
+        }
+
         // Read chart data from ChartPart (shared logic)
         var chartRef = gf.Descendants<C.ChartReference>().FirstOrDefault();
         if (chartRef?.Id?.Value != null)

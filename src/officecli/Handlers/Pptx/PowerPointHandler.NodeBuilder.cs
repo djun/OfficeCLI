@@ -214,6 +214,17 @@ public partial class PowerPointHandler
             if (extents.Cy is not null) node.Format["height"] = FormatEmu(extents.Cy!);
         }
 
+        // CONSISTENCY(zorder): mirror shape/picture/connector — emit when
+        // parented to a ShapeTree so dump/replay preserves stacking order.
+        if (gf.Parent is ShapeTree tblZTree)
+        {
+            var tblZContent = tblZTree.ChildElements
+                .Where(e => e is Shape or Picture or GraphicFrame or GroupShape or ConnectionShape)
+                .ToList();
+            var tblZIdx = tblZContent.IndexOf(gf);
+            if (tblZIdx >= 0) node.Format["zorder"] = tblZIdx + 1;
+        }
+
         if (depth > 0)
         {
             int rIdx = 0;
@@ -1389,6 +1400,17 @@ public partial class PowerPointHandler
         }
         if (picXfrm?.Rotation != null && picXfrm.Rotation.Value != 0)
             node.Format["rotation"] = $"{picXfrm.Rotation.Value / 60000.0:0.######}";
+
+        // CONSISTENCY(zorder): mirror shape/connector — emit for any
+        // ShapeTree-rooted picture so Add(picture, zorder=N) round-trips.
+        if (pic.Parent is ShapeTree picZTree)
+        {
+            var picZContent = picZTree.ChildElements
+                .Where(e => e is Shape or Picture or GraphicFrame or GroupShape or ConnectionShape)
+                .ToList();
+            var picZIdx = picZContent.IndexOf(pic);
+            if (picZIdx >= 0) node.Format["zorder"] = picZIdx + 1;
+        }
 
         // Opacity (via AlphaModulateFixedEffect on blip)
         var picBlip = pic.BlipFill?.GetFirstChild<Drawing.Blip>();
