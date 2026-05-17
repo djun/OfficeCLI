@@ -1347,7 +1347,18 @@ internal static partial class ChartHelper
                         .OfType<OpenXmlCompositeElement>())
                     {
                         ct.RemoveAllChildren<C.VaryColors>();
-                        ct.PrependChild(new C.VaryColors { Val = varyVal });
+                        // ECMA-376: in every chart-type element (CT_BarChart,
+                        // CT_LineChart, CT_PieChart, CT_AreaChart, ...) varyColors
+                        // sits between barDir/grouping (when present) and ser*.
+                        // PrependChild lands it before barDir which the validator
+                        // rejects with "unexpected child element 'varyColors';
+                        // expected: barDir".
+                        var vc = new C.VaryColors { Val = varyVal };
+                        var anchor = ct.GetFirstChild<C.Grouping>() as OpenXmlElement
+                            ?? ct.GetFirstChild<C.BarGrouping>() as OpenXmlElement
+                            ?? ct.GetFirstChild<C.BarDirection>() as OpenXmlElement;
+                        if (anchor != null) anchor.InsertAfterSelf(vc);
+                        else ct.PrependChild(vc);
                     }
                     break;
                 }
