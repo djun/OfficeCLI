@@ -280,7 +280,14 @@ public partial class PowerPointHandler
         try
         {
             var rel = part.HyperlinkRelationships.FirstOrDefault(r => r.Id == id);
-            if (rel?.Uri != null) return rel.Uri.ToString();
+            // Prefer Uri.OriginalString over Uri.ToString(): ToString() normalises
+            // path-empty URIs by injecting a "/" before the query (so
+            // https://example.com round-trips as https://example.com/, and
+            // ppaction://hlinkshowjump?jump=firstslide as
+            // ppaction://hlinkshowjump/?jump=firstslide). OriginalString preserves
+            // the exact form the user supplied at Add/Set time, matching how
+            // PowerPoint persists rels/*.rels Target= verbatim.
+            if (rel?.Uri != null) return rel.Uri.OriginalString;
             // Internal slide-jump: relationship is to another SlidePart, not a hyperlink relationship
             if (part is SlidePart sp)
             {
