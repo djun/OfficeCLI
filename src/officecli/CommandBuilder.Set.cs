@@ -201,8 +201,16 @@ static partial class CommandBuilder
                 stillUnsupported.Add(u);
             }
 
-            // unsupported entries may contain help text like "key (valid props: ...)" — extract raw keys
-            var unsupportedKeys = stillUnsupported.Select(u => u.Contains(' ') ? u[..u.IndexOf(' ')] : u).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // unsupported entries may contain help text like "key (valid props: ...)"
+            // or "key=value (reason)" (e.g. geometry=invalid_preset). Trim trailing
+            // help text on the first space, then split on '=' so the membership
+            // test matches the raw property key in `properties`.
+            var unsupportedKeys = stillUnsupported.Select(u =>
+            {
+                var head = u.Contains(' ') ? u[..u.IndexOf(' ')] : u;
+                var eq = head.IndexOf('=');
+                return eq >= 0 ? head[..eq] : head;
+            }).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var autoCorrectedKeys = autoCorrected.Select(ac => ac.Original).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var applied = properties.Where(kv => !unsupportedKeys.Contains(kv.Key) && !autoCorrectedKeys.Contains(kv.Key)).ToList();
             // Include auto-corrected props in applied list with the corrected key name

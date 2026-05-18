@@ -1495,8 +1495,18 @@ public class ResidentServer : IDisposable
                 $"path '{path}' must start with '/'. Did you mean '/{path}'?");
 
         var unsupported = _handler.Set(path, properties);
+        // CONSISTENCY(unsupported-key-extract): mirrored in CommandBuilder.Set.cs.
+        // Handler entries may be "key (reason)" or "key=value (reason)" (e.g.
+        // geometry=invalid_preset). Trim trailing help text, then strip the
+        // optional "=value" so the membership test below matches the raw
+        // property key in `properties`.
         var unsupportedKeys = unsupported
-            .Select(u => u.Contains(' ') ? u[..u.IndexOf(' ')] : u)
+            .Select(u =>
+            {
+                var head = u.Contains(' ') ? u[..u.IndexOf(' ')] : u;
+                var eq = head.IndexOf('=');
+                return eq >= 0 ? head[..eq] : head;
+            })
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var applied = properties.Where(kv => !unsupportedKeys.Contains(kv.Key)).ToList();
 
