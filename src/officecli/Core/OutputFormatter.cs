@@ -342,6 +342,18 @@ internal static class OutputFormatter
             return;
         }
 
+        // Pattern: "Unknown <thing>: ..." — handlers throw this when a token
+        // (chart type, geometry, anchor, …) doesn't match any known value.
+        // Same semantic class as "Invalid <…>" — surface invalid_value.
+        if (msg.StartsWith("Unknown ", StringComparison.Ordinal))
+        {
+            result.Code = "invalid_value";
+            var validMatch = System.Text.RegularExpressions.Regex.Match(msg, @"Valid values?:\s*(.+?)\.?$");
+            if (validMatch.Success)
+                result.ValidValues = validMatch.Groups[1].Value.Split(", ");
+            return;
+        }
+
         // Pattern: "<thing> already exists: <name>" — uniqueness violation
         // (duplicate sheet name, defined name, etc). Distinct from
         // invalid_value: the value is well-formed but collides with an
