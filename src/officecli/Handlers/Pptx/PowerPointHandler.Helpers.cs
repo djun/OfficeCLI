@@ -1656,9 +1656,16 @@ public partial class PowerPointHandler
             case "y": offset.Y = emu; return true;
             case "width":
                 if (emu < 0) throw new ArgumentException($"Negative width is not allowed: '{value}'.");
+                // ECMA-376 a:ext/@cx is ST_PositiveCoordinate (xsd:long, max
+                // 27273042316900), but PowerPoint's drawing pipeline rejects
+                // anything past INT32_MAX EMU (~5688 km worth of slide). A
+                // larger value silently corrupts the layout instead of round-
+                // tripping. Reject up front.
+                if (emu > int.MaxValue) throw new ArgumentException($"Width '{value}' exceeds the maximum supported shape coordinate (INT32_MAX EMU).");
                 extents.Cx = emu; return true;
             case "height":
                 if (emu < 0) throw new ArgumentException($"Negative height is not allowed: '{value}'.");
+                if (emu > int.MaxValue) throw new ArgumentException($"Height '{value}' exceeds the maximum supported shape coordinate (INT32_MAX EMU).");
                 extents.Cy = emu; return true;
             default: return false;
         }
