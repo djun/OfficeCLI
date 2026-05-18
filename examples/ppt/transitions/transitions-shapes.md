@@ -44,10 +44,20 @@ suffix and use plain 'transition=circle'.
 ```bash
 officecli set deck.pptx /slide[N] --prop transition=zoom-in
 officecli set deck.pptx /slide[N] --prop transition=zoom-out
+officecli set deck.pptx /slide[N] --prop transition=box-in
+officecli set deck.pptx /slide[N] --prop transition=box-out
 ```
 
-The default is `-in`; bare `zoom` round-trips as `zoom` (default
-collapses on readback), `zoom-out` round-trips as `zoom-out`.
+The default is `-in`; bare `zoom` / `box` round-trip as `zoom` / `box`
+(default collapses on readback), `zoom-out` / `box-out` round-trip with
+the suffix intact.
+
+**Box uses a different OOXML element than the others here.** The basic
+`<p:transition>` schema's allowed-child list does not include `<p:box>`;
+Box is a PowerPoint 2013+ "modern" transition stored as
+`<p15:prstTrans prst="box">` (with `invX="1" invY="1"` for the `-out`
+variant) inside an `mc:AlternateContent` wrapper. Older PowerPoint that
+doesn't recognize the p15 namespace plays the inline fallback fade.
 
 ### 3. Spoke count — `wheel-N`
 
@@ -61,14 +71,6 @@ The integer suffix (1..32) is the spoke count, not a duration. To set
 both spokes and duration: combine — `wheel-8-1500` writes 8 spokes +
 1500 ms duration. Readback returns `wheel-N` for non-default counts;
 `wheel-4` collapses to bare `wheel`.
-
-## Known officecli limitation
-
-`transition=box[-in|-out]` writes `<p:box>` which is not a valid
-`<p:transition>` child in OOXML (the schema lists circle/diamond/plus/
-wedge/zoom but not box). The token is accepted by the parser but the
-resulting .pptx fails `officecli validate`. The box variant is **not**
-included in this trio — tracked as a separate parser bug.
 
 ## Related
 

@@ -235,11 +235,12 @@ public partial class PowerPointHandler
             "pull" or "uncover" => new PullTransition { Direction = ParseSlideDirStr(direction ?? "right") },
             "wheel" => new WheelTransition { Spokes = new UInt32Value(wheelSpokes) },
             "zoom" => new ZoomTransition { Direction = ParseInOutDir(direction ?? "in") },
-            // <p:box> shares CT_OptionalBlackTransition with <p:zoom> but is a distinct
-            // schema element. OpenXml SDK 3.x models only ZoomTransition, so emit <p:box>
-            // via a raw OpenXmlUnknownElement so set transition=box doesn't silently
-            // collapse to the same <p:zoom> XML.
-            "box" => BuildBoxTransition(direction),
+            // Box is NOT a <p:transition> child in OOXML — the basic ns
+            // schema's allowed-children list (circle/diamond/.../zoom/...)
+            // omits it. PowerPoint 2013+ stores Box via the p15 PresetTransition
+            // element (<p15:prstTrans prst="box"/>) inside mc:AlternateContent.
+            // Handled specially below, after the switch.
+            "box" => null,
             "split" => BuildSplitTransition(direction),
             "blinds" or "venetian" => new BlindsTransition { Direction = ParseOrientation(direction ?? "horizontal") },
             "checker" or "checkerboard" => new CheckerTransition { Direction = ParseOrientation(direction ?? "horizontal") },
@@ -284,6 +285,32 @@ public partial class PowerPointHandler
             morphElem.SetAttribute(new OpenXmlAttribute("", "option", null!, morphOption));
 
             InsertTransitionWithMcWrapper(slide, morphElem, "p159", p159Ns, speed, durationMs);
+            return;
+        }
+
+        // Box transition (PowerPoint 2013+): stored as <p15:prstTrans prst="box">
+        // inside mc:AlternateContent — there's no <p:box> in the basic-ns schema.
+        // The OOXML schema also defines invX / invY booleans on prstTrans which
+        // PowerPoint's UI surfaces as the in / out variants.
+        if (typeName == "box")
+        {
+            var p15Ns = "http://schemas.microsoft.com/office/powerpoint/2012/main";
+            var boxElem = new OpenXmlUnknownElement("p15", "prstTrans", p15Ns);
+            boxElem.SetAttribute(new OpenXmlAttribute("", "prst", null!, "box"));
+            // direction maps to invX/invY: box-in keeps the defaults (false),
+            // box-out flips both. Other tokens are rejected — see whitelist.
+            var dir = direction?.ToLowerInvariant();
+            if (dir is "out")
+            {
+                boxElem.SetAttribute(new OpenXmlAttribute("", "invX", null!, "1"));
+                boxElem.SetAttribute(new OpenXmlAttribute("", "invY", null!, "1"));
+            }
+            else if (dir is not (null or "in"))
+            {
+                throw new ArgumentException(
+                    $"Box transition only accepts -in or -out (got '-{direction}').");
+            }
+            InsertTransitionWithMcWrapper(slide, boxElem, "p15", p15Ns, speed, durationMs);
             return;
         }
 
@@ -456,18 +483,6 @@ public partial class PowerPointHandler
             "rd" or "rightdown" or "downright" => TransitionCornerDirectionValues.RightDown,
             _ => throw new ArgumentException($"Invalid corner direction: '{dir}'. Valid values: leftup, rightup, leftdown, rightdown.")
         };
-
-    private static OpenXmlUnknownElement BuildBoxTransition(string? direction)
-    {
-        var pNs = "http://schemas.openxmlformats.org/presentationml/2006/main";
-        var box = new OpenXmlUnknownElement("p", "box", pNs);
-        // dir attribute mirrors ZoomTransition: ST_TransitionInOutDirectionType (in/out).
-        var dir = (direction ?? "in").ToLowerInvariant();
-        if (dir != "in" && dir != "out")
-            throw new ArgumentException($"Invalid box transition direction: '{direction}'. Valid values: in, out.");
-        box.SetAttribute(new OpenXmlAttribute("", "dir", null!, dir));
-        return box;
-    }
 
     private static SplitTransition BuildSplitTransition(string? direction)
     {
@@ -1728,19 +1743,27 @@ public partial class PowerPointHandler
     /// </summary>
     internal static void ReadSlideTransition(SlidePart slidePart, OfficeCli.Core.DocumentNode node)
     {
-        // First try SDK typed access
         var slide = slidePart.Slide;
-        var trans = slide?.Transition;
-        if (trans != null)
+        if (slide == null) return;
+
+        // Prefer the typed SDK path for bare <p:transition><p:wipe.../></p:transition>
+        // — it understands typed direction enums and surfaces canonical full-word
+        // forms (wipe-up, not wipe-u). Fall back to regex when:
+        //   1. slide.Transition is null (mc:AlternateContent wraps the real
+        //      transition for morph/p14/p15 — typed access returns null).
+        //   2. slide.Transition is non-null but ChildElements is empty —
+        //      happens in PublishTrimmed builds where the SDK strips unknown
+        //      elements (e.g. <p15:prstTrans>) from the typed object graph
+        //      even though they're still present in OuterXml.
+        var trans = slide.Transition;
+        if (trans != null &&
+            trans.ChildElements.Any(c => c.LocalName != "extLst"))
         {
-            ReadSlideTransition(slide!, node);
+            ReadSlideTransition(slide, node);
             return;
         }
 
-        // SDK typed access failed — try parsing from the slide's serialized XML.
-        // The OuterXml may contain the transition even when the typed property is null.
-        if (slide != null)
-            ParseTransitionFromXml(slide.OuterXml, node);
+        ParseTransitionFromXml(slide.OuterXml, node);
     }
 
     private static void ParseTransitionFromXml(string xml, OfficeCli.Core.DocumentNode node)
@@ -1776,6 +1799,37 @@ public partial class PowerPointHandler
                     if (clickM.Success) node.Format["advanceClick"] = clickM.Groups[1].Value == "1";
                 }
                 return;
+            }
+
+            // Look for p15 preset transitions: <p15:prstTrans prst="box" [invX="1"] [invY="1"]/>
+            // PowerPoint 2013+ stores box (and a wider gallery of "modern"
+            // transitions not yet routed by officecli) through this element.
+            // invX + invY together flip the box-in direction to box-out.
+            var p15Match = System.Text.RegularExpressions.Regex.Match(
+                mcInner, @"<p15:prstTrans(?:\s+([^/]*))?/?>");
+            if (p15Match.Success)
+            {
+                var p15Attrs = p15Match.Groups[1].Value;
+                var prstMatch = System.Text.RegularExpressions.Regex.Match(p15Attrs, @"prst=""(\w+)""");
+                if (prstMatch.Success)
+                {
+                    var prst = prstMatch.Groups[1].Value.ToLowerInvariant();
+                    var invX = System.Text.RegularExpressions.Regex.IsMatch(p15Attrs, @"invX=""(1|true)""");
+                    var invY = System.Text.RegularExpressions.Regex.IsMatch(p15Attrs, @"invY=""(1|true)""");
+                    // box-out = invX + invY both set; default (no invs) reads as box (== box-in).
+                    var canonical = prst == "box" && invX && invY ? "box-out" : prst;
+                    node.Format["transition"] = canonical;
+
+                    var transInMc = System.Text.RegularExpressions.Regex.Match(
+                        mcInner, @"<p:transition([^>]*?)(?:/>|>)");
+                    if (transInMc.Success)
+                    {
+                        var transAttrs = transInMc.Groups[1].Value;
+                        var spdM = System.Text.RegularExpressions.Regex.Match(transAttrs, @"spd=""(\w+)""");
+                        if (spdM.Success) node.Format["transitionSpeed"] = spdM.Groups[1].Value;
+                    }
+                    return;
+                }
             }
 
             // Look for p14 transitions (vortex, switch, flip, etc.) with dir attribute

@@ -6,15 +6,14 @@
 #   circle, diamond, plus, wedge
 #
 # Direction-ful (-in / -out):
-#   zoom
+#   box, zoom
 #
 # Spoke-count (wheel-N where N = number of spokes, 1..8 typical):
 #   wheel-1, wheel-2, wheel-3, wheel-4 (default), wheel-8
 #
-# Known officecli limitation: `transition=box` writes `<p:box>` which is
-# not a valid `<p:transition>` child per OOXML — schema validator rejects
-# the file. The token is accepted by the parser but the resulting .pptx
-# fails `officecli validate`. Avoided here; tracked separately.
+# Box is stored as PowerPoint 2013+ `<p15:prstTrans prst="box">` inside
+# mc:AlternateContent (older PowerPoint plays the fallback fade). `box-in`
+# is the default (no invX/invY); `box-out` flips both invX and invY.
 
 set -e
 
@@ -46,7 +45,7 @@ for t in circle diamond plus wedge; do
 done
 
 # In/out direction masks
-for combo in zoom-in zoom-out; do
+for combo in zoom-in zoom-out box-in box-out; do
     add_demo_slide "$combo" "$combo" "2E75B6"
 done
 
