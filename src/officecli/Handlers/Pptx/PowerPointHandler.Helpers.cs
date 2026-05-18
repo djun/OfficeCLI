@@ -771,39 +771,66 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
-    /// Read a single border line's properties (color, width, dash) following POI's pattern:
-    /// - Returns nothing if line is null, has NoFill, or lacks SolidFill
-    /// - Reads width from w attribute, color from SolidFill, dash from PresetDash
+    /// Read a single border line's properties (color, width, dash, compound).
+    /// Width / dash / compound are emitted independently — a border with only
+    /// `w="25400"` (and no SolidFill) still surfaces a `border.width` readback
+    /// so callers can see what they wrote. Returns silently only when the
+    /// element itself is null, NoFill is set, or none of the child sub-props
+    /// (color, width, dash, compound) are present.
     /// </summary>
     private static void ReadBorderLine(OpenXmlCompositeElement? lineProps, string prefix, DocumentNode node)
     {
         if (lineProps == null) return;
         // POI: if NoFill is set, the border is invisible — skip
         if (lineProps.GetFirstChild<Drawing.NoFill>() != null) return;
-        var solidFill = lineProps.GetFirstChild<Drawing.SolidFill>();
-        if (solidFill == null) return; // POI: !isSetSolidFill → null
 
-        var color = ReadColorFromFill(solidFill);
-        if (color != null) node.Format[$"{prefix}.color"] = color;
+        // Color (only when a SolidFill is present; gradient/picture borders
+        // would need separate handling and aren't surfaced via the simple
+        // border.color key).
+        string? color = null;
+        var solidFill = lineProps.GetFirstChild<Drawing.SolidFill>();
+        if (solidFill != null)
+        {
+            color = ReadColorFromFill(solidFill);
+            if (color != null) node.Format[$"{prefix}.color"] = color;
+        }
 
         // Width from "w" attribute (EMU) — POI: Units.toPoints(ln.getW())
         var wAttr = lineProps.GetAttributes().FirstOrDefault(a => a.LocalName == "w");
-        if (!string.IsNullOrEmpty(wAttr.Value) && long.TryParse(wAttr.Value, out var wEmu) && wEmu > 0)
-            node.Format[$"{prefix}.width"] = FormatEmu(wEmu);
+        bool hasWidth = !string.IsNullOrEmpty(wAttr.Value) && long.TryParse(wAttr.Value, out var wEmu) && wEmu > 0;
+        if (hasWidth)
+        {
+            long.TryParse(wAttr.Value, out var wEmuOut);
+            node.Format[$"{prefix}.width"] = FormatEmu(wEmuOut);
+        }
 
         // Dash style from PresetDash — POI: ln.getPrstDash().getVal()
         var dash = lineProps.GetFirstChild<Drawing.PresetDash>();
-        if (dash?.Val?.HasValue == true)
-            node.Format[$"{prefix}.dash"] = dash.Val.InnerText;
+        bool hasDash = dash?.Val?.HasValue == true;
+        if (hasDash)
+            node.Format[$"{prefix}.dash"] = dash!.Val!.InnerText;
+
+        // Compound line style (cmpd attribute on the line element).
+        var cmpdAttr = lineProps.GetAttributes().FirstOrDefault(a => a.LocalName == "cmpd");
+        bool hasCompound = !string.IsNullOrEmpty(cmpdAttr.Value);
+        if (hasCompound)
+            node.Format[$"{prefix}.compound"] = cmpdAttr.Value!;
+
+        // If none of color / width / dash / compound surfaced, don't emit a
+        // summary key — there's nothing meaningful to report.
+        if (color is null && !hasWidth && !hasDash && !hasCompound) return;
 
         // Summary key: "1pt solid FF0000" format for convenience
         var parts = new List<string>();
-        if (!string.IsNullOrEmpty(wAttr.Value) && long.TryParse(wAttr.Value, out var wEmu2) && wEmu2 > 0)
+        if (hasWidth)
+        {
+            long.TryParse(wAttr.Value, out var wEmu2);
             parts.Add(FormatEmu(wEmu2));
-        if (dash?.Val?.HasValue == true) parts.Add(dash.Val.InnerText!);
+        }
+        if (hasDash) parts.Add(dash!.Val!.InnerText!);
         else parts.Add("solid");
         if (color is not null) parts.Add(color);
-        if (parts.Count > 0) node.Format[prefix] = string.Join(" ", parts);
+        node.Format[prefix] = string.Join(" ", parts);
     }
 
     private static string GetShapeText(Shape shape)
