@@ -394,6 +394,23 @@ internal static class ParseHelpers
     }
 
     /// <summary>
+    /// Parse a rotation value in degrees. Rejects non-finite, NaN, and values
+    /// outside [-3600, 3600] degrees (ten full revolutions either direction).
+    /// OOXML stores rotation as ST_Angle (60000ths of a degree) which fits in
+    /// an Int32 up to ~±35790°, but values above ~±3600° are functionally
+    /// indistinguishable from their modulo-360 reduction while opening the
+    /// door to silent overflow on the (deg * 60000) multiply. The clamp is
+    /// applied uniformly across pptx shape/group/connector add+set sites.
+    /// </summary>
+    public static double SafeParseRotationDegrees(string value, string propertyName)
+    {
+        var deg = SafeParseDouble(value, propertyName);
+        if (deg < -3600 || deg > 3600)
+            throw new ArgumentException($"Invalid '{propertyName}' value '{value}': degrees must be in [-3600, 3600].");
+        return deg;
+    }
+
+    /// <summary>
     /// Safely parse a string as uint, throwing ArgumentException with a clear message on failure.
     /// </summary>
     public static uint SafeParseUint(string value, string propertyName)

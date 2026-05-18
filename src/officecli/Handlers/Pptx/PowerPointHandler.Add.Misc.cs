@@ -215,7 +215,7 @@ public partial class PowerPointHandler
                     || properties.TryGetValue("rotate", out cxnRot))
                 {
                     connector.ShapeProperties.Transform2D!.Rotation =
-                        (int)(ParseHelpers.SafeParseDouble(cxnRot, "rotation") * 60000);
+                        (int)(ParseHelpers.SafeParseRotationDegrees(cxnRot, "rotation") * 60000);
                 }
                 connector.ShapeProperties.AppendChild(cxnOutline);
 

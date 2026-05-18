@@ -453,8 +453,7 @@ public partial class PowerPointHandler
                     };
                     if (properties.TryGetValue("rotation", out var rotVal) || properties.TryGetValue("rotate", out rotVal))
                     {
-                        if (!double.TryParse(rotVal, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rotDbl) || double.IsNaN(rotDbl) || double.IsInfinity(rotDbl))
-                            throw new ArgumentException($"Invalid 'rotation' value: '{rotVal}'. Expected a finite number in degrees (e.g. 45, -90, 180.5).");
+                        var rotDbl = ParseHelpers.SafeParseRotationDegrees(rotVal!, "rotation");
                         xfrm.Rotation = (int)(rotDbl * 60000);
                     }
                     newShape.ShapeProperties!.Transform2D = xfrm;
