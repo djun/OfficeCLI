@@ -64,11 +64,60 @@ internal static class TemplateMerger
             };
 
         var data = new Dictionary<string, string>();
+        // Pass 1: literal top-level keys win. {{a.b}} with data {"a.b":"X"}
+        // resolves to "X" regardless of whether {"a":{"b":...}} also exists.
+        // CONSISTENCY(merge-literal-key-precedence): mirrors the hyphen-key
+        // contract (R21) — literal lookup is the canonical path; nested
+        // dot-path flattening is a convenience layered on top, not a
+        // replacement.
         foreach (var kvp in jsonObj)
         {
             data[kvp.Key] = kvp.Value?.ToString() ?? "";
         }
+        // Pass 2: flatten nested objects into dot paths ("a"→{"b":"v"} →
+        // "a.b":"v"). Only fill keys that pass 1 did NOT already write, so
+        // a literal "a.b" sibling at the root stays authoritative. Arrays
+        // are skipped — there is no canonical placeholder indexing syntax.
+        foreach (var kvp in jsonObj)
+        {
+            if (kvp.Value is JsonObject nested)
+                FlattenNested(nested, kvp.Key, data);
+        }
         return data;
+    }
+
+    /// <summary>
+    /// Recursively walk a JsonObject and write <c>prefix.child</c> entries into
+    /// <paramref name="data"/>, skipping any path a literal sibling already
+    /// populated. Nested arrays are skipped (no canonical placeholder index
+    /// syntax). Primitive leaves use the same <c>ToString()</c> projection as
+    /// the top-level pass for output parity.
+    /// </summary>
+    private static void FlattenNested(JsonObject obj, string prefix, Dictionary<string, string> data)
+    {
+        foreach (var kvp in obj)
+        {
+            var path = $"{prefix}.{kvp.Key}";
+            if (kvp.Value is JsonObject child)
+            {
+                // Recurse first, then write the object's own ToString only
+                // as a last resort (matches how Pass 1 stores top-level
+                // objects: stringified JSON when no deeper match exists).
+                FlattenNested(child, path, data);
+                if (!data.ContainsKey(path))
+                    data[path] = kvp.Value?.ToString() ?? "";
+            }
+            else if (kvp.Value is JsonArray)
+            {
+                // No canonical array placeholder syntax — leave the path
+                // unresolved so ScanUnresolved* surfaces it.
+                continue;
+            }
+            else if (!data.ContainsKey(path))
+            {
+                data[path] = kvp.Value?.ToString() ?? "";
+            }
+        }
     }
 
     /// <summary>
