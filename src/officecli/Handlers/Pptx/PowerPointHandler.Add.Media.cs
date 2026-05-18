@@ -733,11 +733,17 @@ public partial class PowerPointHandler
         // 3. Icon image part (placeholder PNG or user-supplied).
         var (_, oleIconRelId) = OfficeCli.Core.OleHelper.CreateIconPart(oleSlidePart, properties);
 
-        // 4. Dimensions.
+        // 4. Dimensions. width/height must be >= 1 EMU — zero / negative would
+        // produce a <a:ext cx="0"/> which Office silently rejects on open and
+        // throws the whole shape away (matches shape size validation).
         long oleCx = properties.TryGetValue("width", out var wv)
             ? ParseEmu(wv) : OfficeCli.Core.OleHelper.DefaultOleWidthEmu;
         long oleCy = properties.TryGetValue("height", out var hv)
             ? ParseEmu(hv) : OfficeCli.Core.OleHelper.DefaultOleHeightEmu;
+        if (oleCx < 1)
+            throw new ArgumentException($"Invalid ole width '{properties.GetValueOrDefault("width")}': must be >= 1 EMU.");
+        if (oleCy < 1)
+            throw new ArgumentException($"Invalid ole height '{properties.GetValueOrDefault("height")}': must be >= 1 EMU.");
         long oleX = properties.TryGetValue("x", out var xv) ? ParseEmu(xv) : 457200;
         long oleY = properties.TryGetValue("y", out var yv) ? ParseEmu(yv) : 457200;
 
