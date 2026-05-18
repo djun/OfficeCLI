@@ -329,6 +329,25 @@ public partial class PowerPointHandler
             ?? throw new ArgumentException(
                 "background.mode/alpha/scale requires an existing image background; " +
                 "set background=image:<path> first");
+
+        // Symmetric Get/Set: Get readback emits background.alpha for translucent
+        // solid backgrounds (a:srgbClr/a:alpha), so Set must accept the same key
+        // on a solid bg. Rewrite the solid color's alpha child rather than
+        // demanding an image bg. Mode/scale remain image-only.
+        var solidFill = bgPr.GetFirstChild<Drawing.SolidFill>();
+        if (solidFill != null && opts.Mode == null && opts.Scale == null && opts.Alpha is int sAlpha)
+        {
+            if (sAlpha < 0 || sAlpha > 100)
+                throw new ArgumentException($"background.alpha must be 0..100, got {sAlpha}");
+            var colorEl = (OpenXmlElement?)solidFill.GetFirstChild<Drawing.RgbColorModelHex>()
+                       ?? solidFill.GetFirstChild<Drawing.SchemeColor>();
+            if (colorEl == null) return;
+            colorEl.Elements<Drawing.Alpha>().ToList().ForEach(e => e.Remove());
+            if (sAlpha < 100)
+                colorEl.AppendChild(new Drawing.Alpha { Val = sAlpha * 1000 });
+            return;
+        }
+
         var blipFill = bgPr.GetFirstChild<Drawing.BlipFill>()
             ?? throw new ArgumentException(
                 "background.mode/alpha/scale requires an image background, but the current " +
