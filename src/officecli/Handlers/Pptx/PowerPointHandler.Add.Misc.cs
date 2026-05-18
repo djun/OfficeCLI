@@ -782,18 +782,29 @@ public partial class PowerPointHandler
                 var (effectStripped, suffixCls) = ParseEffectClassSuffix(effect);
                 effect = effectStripped;
                 var cls = explicitCls ?? suffixCls ?? "entrance";
+                // Validate class enum up front — composite animValue parsing
+                // silently falls back to entrance on unknown class tokens
+                // (stderr warning only), so callers got success + wrong cls.
+                // Mirror the hard-reject pattern used for trigger / effect.
+                ValidateAnimationClass(cls);
                 // CONSISTENCY(animation-dur-alias): accept "dur" as alias for
                 // "duration" — mirrors the short name used elsewhere (transition
                 // dur attribute) and matches user intuition.
                 var duration = properties.GetValueOrDefault("duration")
                     ?? properties.GetValueOrDefault("dur", "500");
-                // OOXML @dur is ST_PositiveUniversalMeasure (>= 0). Reject
-                // leading-minus values up front; otherwise they would round-
-                // trip into the composite animation token as "--200", whose
-                // split('-') silently drops the sign and the duration field.
-                if (!string.IsNullOrEmpty(duration) && duration.TrimStart().StartsWith('-'))
-                    throw new ArgumentException($"Invalid animation duration: '{duration}' (must be >= 0).");
+                // OOXML @dur is ST_PositiveUniversalMeasure (>= 0). Schema declares
+                // duration as integer ms — reject unit suffixes (500ms), fractions
+                // (500.7), non-numeric garbage, and bare negatives. The composite
+                // animValue parser would silently default these to 400 with a
+                // stderr-only warning.
+                ValidateAnimationDuration(duration);
                 var trigger = properties.GetValueOrDefault("trigger", "onclick");
+
+                // Validate delay symmetrically with duration. The composite
+                // animValue split('-') silently drops the minus sign on a
+                // negative delay token, leaving delay=0 with no error.
+                if (properties.TryGetValue("delay", out var rawDelay))
+                    ValidateAnimationDelay(rawDelay);
 
                 // Map trigger property to animation format
                 var triggerPart = trigger.ToLowerInvariant() switch

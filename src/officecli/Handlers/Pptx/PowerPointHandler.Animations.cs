@@ -10,6 +10,43 @@ namespace OfficeCli.Handlers;
 
 public partial class PowerPointHandler
 {
+    // ==================== Property Validators (animation) ====================
+    // Centralised validators shared by Add (Add.Misc.AddAnimation) and
+    // Set (Set.Shape.SetShapeAnimationByPath). All throw ArgumentException
+    // on rejection so the framework surfaces a hard error rather than the
+    // composite animValue parser's silent fallback + stderr warning.
+
+    private static readonly HashSet<string> _animClassValues =
+        new(StringComparer.OrdinalIgnoreCase) { "entrance", "exit", "emphasis" };
+
+    internal static void ValidateAnimationClass(string? cls)
+    {
+        if (string.IsNullOrEmpty(cls)) return;
+        if (!_animClassValues.Contains(cls))
+            throw new ArgumentException(
+                $"Invalid animation class: '{cls}'. Valid values: entrance, exit, emphasis.");
+    }
+
+    internal static void ValidateAnimationDuration(string? duration)
+    {
+        if (string.IsNullOrEmpty(duration)) return;
+        var trimmed = duration.Trim();
+        if (!int.TryParse(trimmed, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var ms) || ms < 0)
+            throw new ArgumentException(
+                $"Invalid animation duration: '{duration}' (expected a non-negative integer in milliseconds, e.g. duration=500).");
+    }
+
+    internal static void ValidateAnimationDelay(string? delay)
+    {
+        if (string.IsNullOrEmpty(delay)) return;
+        var trimmed = delay.Trim();
+        if (!int.TryParse(trimmed, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var ms) || ms < 0)
+            throw new ArgumentException(
+                $"Invalid animation delay: '{delay}' (expected a non-negative integer in milliseconds, e.g. delay=200).");
+    }
+
     // ==================== Slide Transitions ====================
 
     /// <summary>

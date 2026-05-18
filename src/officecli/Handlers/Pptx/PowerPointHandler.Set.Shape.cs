@@ -789,6 +789,19 @@ public partial class PowerPointHandler
             throw new ArgumentException(
                 $"Animation {animIdx} not found on shape {shapeIdx} (total: {ctns.Count})");
 
+        // Reject schema set:false keys up front. Without this, the merge
+        // loop silently dropped them and Set returned success with the
+        // value unchanged. Schema: presetId / easein / easeout / motionPath
+        // are read-only (Get-only).
+        var readOnlyAnimKeys = new[] { "presetId", "presetid", "easein", "easeout", "motionPath", "motionpath" };
+        foreach (var k in readOnlyAnimKeys)
+        {
+            if (properties.ContainsKey(k))
+                throw new ArgumentException(
+                    $"Animation property '{k}' is read-only (Get-only per schema). " +
+                    "It is derived from the effect preset and cannot be set directly.");
+        }
+
         // Read current animation properties via PopulateAnimationNode, then merge
         // with user-provided overrides, then re-apply via the standard pipeline.
         // Limitation: like Set on /slide/shape with animation=, this replaces ALL
@@ -812,17 +825,21 @@ public partial class PowerPointHandler
         var cls = explicitCls
             ?? suffixCls
             ?? (existing.Format.TryGetValue("class", out var exCls) ? exCls?.ToString() ?? "entrance" : "entrance");
+        // Validate class enum (composite parser silently falls back to entrance).
+        ValidateAnimationClass(cls);
+        // Validate user-supplied duration / delay against the integer-ms schema
+        // contract. We only validate values that came in via this Set call —
+        // values pulled from `existing` are already-stored and were validated
+        // (or originated outside this code path).
+        if (properties.TryGetValue("duration", out var setDurRaw))
+            ValidateAnimationDuration(setDurRaw);
+        else if (properties.TryGetValue("dur", out var setDurRaw2))
+            ValidateAnimationDuration(setDurRaw2);
+        if (properties.TryGetValue("delay", out var setDelayRaw))
+            ValidateAnimationDelay(setDelayRaw);
         var duration = properties.TryGetValue("duration", out var dv) ? dv
             : properties.TryGetValue("dur", out var dv2) ? dv2
             : (existing.Format.TryGetValue("duration", out var ed) ? ed?.ToString() ?? "500" : "500");
-        // OOXML @dur is ST_PositiveUniversalMeasure (>= 0). Bare negatives
-        // would round-trip into the composite "effect-class-DURATION-trigger"
-        // string as "--200", whose split('-') silently drops the minus sign
-        // and the duration token, leaving the animation at its existing
-        // duration with a misleading "unrecognized segments" warning. Reject
-        // up front, mirroring SetAdvanceTime's >= 0 guard.
-        if (!string.IsNullOrEmpty(duration) && duration.TrimStart().StartsWith('-'))
-            throw new ArgumentException($"Invalid animation duration: '{duration}' (must be >= 0).");
         var trigger = Get("trigger", "onclick");
         var triggerPart = trigger.ToLowerInvariant() switch
         {
