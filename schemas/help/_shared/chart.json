@@ -740,7 +740,7 @@
       "add": true,
       "set": true,
       "get": true,
-      "description": "data label position. Values: center|ctr, insideEnd|inEnd|inside, insideBase|inBase|base, outsideEnd|outEnd|outside, bestFit|best|auto, top|t, bottom|b, left|l, right|r. Restrictions: not supported on doughnut/area/radar/stock; pie maps everything to bestFit; stacked series clamp to ctr/inBase/inEnd; combo charts skip entirely.",
+      "description": "data label position. Values: center|ctr, insideEnd|inEnd|inside, insideBase|inBase|base, outsideEnd|outEnd|outside, bestFit|best|auto, top|t, bottom|b, left|l, right|r. Restrictions: not supported on doughnut/area/radar/stock; pie/pie3D restricted to ctr/inEnd/inBase/bestFit (other tokens rejected, per OOXML ST_DLblPosPie); stacked series clamp to ctr/inBase/inEnd; combo charts skip entirely.",
       "examples": [
         "--prop labelPos=outsideEnd"
       ],
