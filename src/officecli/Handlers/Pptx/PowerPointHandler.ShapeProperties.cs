@@ -92,7 +92,10 @@ public partial class PowerPointHandler
             if (!int.TryParse(value, out var iv)) return false;
             // OOXML ST_TextNonNegativePoint refuses negative kern. Writing
             // kern=-100 produces a file PowerPoint silently rewrites on open.
-            if (key == "kern" && iv < 0) return false;
+            // Upper bound mirrors ST_TextPoint's 400000 hundredths-of-a-point
+            // ceiling — beyond that PowerPoint clamps on open, so reject up
+            // front instead of letting an out-of-band value land on disk.
+            if (key == "kern" && (iv < 0 || iv > 400000)) return false;
             // OOXML ST_TextPoint clamps spc to [-400000, 400000] hundredths
             // of a point. Out-of-band values get silently dropped on open.
             if (key == "spc" && (iv < -400000 || iv > 400000)) return false;
