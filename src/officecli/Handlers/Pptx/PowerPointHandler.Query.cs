@@ -214,6 +214,25 @@ public partial class PowerPointHandler
             if (lp.SlideLayout?.Type?.HasValue == true)
                 layoutNode.Format["type"] = lp.SlideLayout.Type.InnerText;
             ReadBackground(lp.SlideLayout?.CommonSlideData, layoutNode);
+
+            // Populate child shapes — mirror what the slide Get branch does so
+            // a layout-rooted Get exposes the same shape tree visible at
+            // /slidelayout[N]/shape[K]. Previously childCount was always 0,
+            // making layout edits non-discoverable via tree walk even though
+            // the direct shape path worked.
+            var layoutShapeTree = lp.SlideLayout?.CommonSlideData?.ShapeTree;
+            if (layoutShapeTree != null)
+            {
+                int sIdx = 0;
+                foreach (var sh in layoutShapeTree.Elements<Shape>())
+                {
+                    sIdx++;
+                    var childNode = ShapeToNode(sh, slideNum: 0, sIdx,
+                        depth: 0, part: null, parentPathPrefix: resolvedPath);
+                    layoutNode.Children.Add(childNode);
+                }
+                layoutNode.ChildCount = layoutNode.Children.Count;
+            }
             return layoutNode;
         }
 
