@@ -550,6 +550,10 @@ internal static partial class ChartHelper
         "title.glow", "titleglow", "title.shadow", "titleshadow",
         // Area fill
         "areafill", "area.fill",
+        // R24 — bar chart bar-direction (rtl reverses category order on bar
+        // groupings). Was previously skipped on Add because it wasn't deferred,
+        // so dump→replay dropped the prop.
+        "direction",
     };
 
     /// <summary>
