@@ -109,6 +109,43 @@ public partial class ExcelHandler
             return listNode;
         }
 
+        // Bare /sheet (no index): list all sheets as children.
+        // CONSISTENCY(bare-path-lister): mirrors /namedrange so agents can
+        // discover top-level collections without first knowing names.
+        var bareSheet = Regex.Match(path.TrimStart('/'), @"^sheet$", RegexOptions.IgnoreCase);
+        if (bareSheet.Success)
+        {
+            var listNode = new DocumentNode { Path = "/sheet", Type = "sheet_list" };
+            foreach (var (sheetName, worksheetPart) in GetWorksheets())
+            {
+                var sheetNode = new DocumentNode { Path = $"/{sheetName}", Type = "sheet", Preview = sheetName };
+                var sd = GetSheet(worksheetPart).GetFirstChild<SheetData>();
+                var rowCount = sd?.Elements<Row>().Count() ?? 0;
+                var chartCount = worksheetPart.DrawingsPart != null ? CountExcelCharts(worksheetPart.DrawingsPart) : 0;
+                sheetNode.ChildCount = rowCount + chartCount;
+                sheetNode.Format["name"] = sheetName;
+                listNode.Children.Add(sheetNode);
+            }
+            listNode.ChildCount = listNode.Children.Count;
+            return listNode;
+        }
+
+        // Bare /table (no index): list every table across every sheet.
+        // CONSISTENCY(bare-path-lister): mirrors /namedrange.
+        var bareTable = Regex.Match(path.TrimStart('/'), @"^table$", RegexOptions.IgnoreCase);
+        if (bareTable.Success)
+        {
+            var listNode = new DocumentNode { Path = "/table", Type = "table_list" };
+            foreach (var (sheetName, worksheetPart) in GetWorksheets())
+            {
+                var tParts = worksheetPart.TableDefinitionParts.ToList();
+                for (int i = 0; i < tParts.Count; i++)
+                    listNode.Children.Add(TableToNode(sheetName, worksheetPart, i + 1, 0));
+            }
+            listNode.ChildCount = listNode.Children.Count;
+            return listNode;
+        }
+
         // Handle /namedrange[N] or /namedrange[Name] or /namedrange[@name=X]
         var namedRangeMatch = Regex.Match(path.TrimStart('/'), @"^namedrange\[(.+?)\]$", RegexOptions.IgnoreCase);
         if (namedRangeMatch.Success)
