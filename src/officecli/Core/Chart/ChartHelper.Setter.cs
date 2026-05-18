@@ -303,39 +303,43 @@ internal static partial class ChartHelper
                         // (line 256-259), so any area-stacked check below
                         // would be unreachable dead code.
 
+                    // OOXML ST_DLblPosPie restricts pie/pie3D to {bestFit, ctr, inEnd, inBase}.
+                    // outEnd/t/b/l/r are not legal here — reject up front instead of
+                    // silently remapping to BestFit and reporting "Updated labelPos=...".
+                    if (isPie)
+                    {
+                        var lc = value.ToLowerInvariant();
+                        var pieAllowed = lc is "bestfit" or "best" or "auto"
+                            or "center" or "ctr"
+                            or "insideend" or "inend" or "inside"
+                            or "insidebase" or "inbase" or "base";
+                        if (!pieAllowed)
+                            throw new ArgumentException(
+                                $"Invalid labelPos '{value}' for pie chart: ST_DLblPosPie allows only bestFit, ctr, inEnd, inBase.");
+                    }
                     var dlblPos = value.ToLowerInvariant() switch
                     {
                         "center" or "ctr" => C.DataLabelPositionValues.Center,
                         "insideend" or "inend" or "inside" => C.DataLabelPositionValues.InsideEnd,
                         "insidebase" or "inbase" or "base" => C.DataLabelPositionValues.InsideBase,
-                        "outsideend" or "outend" or "outside" => isPie
-                            ? C.DataLabelPositionValues.BestFit
-                            : isStacked
-                                ? C.DataLabelPositionValues.InsideEnd
-                                : C.DataLabelPositionValues.OutsideEnd,
+                        "outsideend" or "outend" or "outside" => isStacked
+                            ? C.DataLabelPositionValues.InsideEnd
+                            : C.DataLabelPositionValues.OutsideEnd,
                         "bestfit" or "best" or "auto" => isStacked
                             ? C.DataLabelPositionValues.Center
                             : C.DataLabelPositionValues.BestFit,
-                        "top" or "t" => isPie
-                            ? C.DataLabelPositionValues.BestFit
-                            : isStacked
-                                ? C.DataLabelPositionValues.InsideEnd
-                                : C.DataLabelPositionValues.Top,
-                        "bottom" or "b" => isPie
-                            ? C.DataLabelPositionValues.BestFit
-                            : isStacked
-                                ? C.DataLabelPositionValues.InsideBase
-                                : C.DataLabelPositionValues.Bottom,
-                        "left" or "l" => isPie
-                            ? C.DataLabelPositionValues.BestFit
-                            : isStacked
-                                ? C.DataLabelPositionValues.InsideEnd
-                                : C.DataLabelPositionValues.Left,
-                        "right" or "r" => isPie
-                            ? C.DataLabelPositionValues.BestFit
-                            : isStacked
-                                ? C.DataLabelPositionValues.InsideEnd
-                                : C.DataLabelPositionValues.Right,
+                        "top" or "t" => isStacked
+                            ? C.DataLabelPositionValues.InsideEnd
+                            : C.DataLabelPositionValues.Top,
+                        "bottom" or "b" => isStacked
+                            ? C.DataLabelPositionValues.InsideBase
+                            : C.DataLabelPositionValues.Bottom,
+                        "left" or "l" => isStacked
+                            ? C.DataLabelPositionValues.InsideEnd
+                            : C.DataLabelPositionValues.Left,
+                        "right" or "r" => isStacked
+                            ? C.DataLabelPositionValues.InsideEnd
+                            : C.DataLabelPositionValues.Right,
                         // Schema enum: {ctr, inBase, inEnd, outEnd, t, b, l, r, bestFit}
                         // plus the long-form aliases handled above. Anything else
                         // is a typo or fuzz garbage — reject up front rather than
