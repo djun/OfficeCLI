@@ -355,6 +355,18 @@ internal static class OutputFormatter
             return;
         }
 
+        // Pattern: "Cell <ref> not found" — raised by RemoveCell when the
+        // caller targets an empty/missing cell. Symmetric with the
+        // existing "Path not found:" / "Sheet not found:" rules; without
+        // it the message fell through to internal_error and agents had
+        // no stable code to distinguish a missing-cell remove from a
+        // genuine handler crash.
+        if (System.Text.RegularExpressions.Regex.IsMatch(msg, @"^Cell\s+[A-Z]+\d+\s+not found"))
+        {
+            result.Code = "not_found";
+            return;
+        }
+
         // Pattern: "Invalid font size: ..." / "Invalid color value: ..." / "Invalid ... value"
         if (msg.StartsWith("Invalid "))
         {
