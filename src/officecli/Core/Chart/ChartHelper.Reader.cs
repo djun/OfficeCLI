@@ -660,7 +660,11 @@ internal static partial class ChartHelper
                     {
                         var alphaUnits = (int)alphaEl.Val.Value;
                         seriesNode.Format["alpha"] = alphaUnits;
-                        seriesNode.Format["transparency"] = 100000 - alphaUnits;
+                        // transparency setter expects 0..100 percent — emit in
+                        // the same unit so dump→batch round-trips cleanly.
+                        // OOXML alpha is 0..100000 (100000 = fully opaque), so
+                        // transparency% = (100000 - alpha) / 1000.
+                        seriesNode.Format["transparency"] = Math.Round((100000 - alphaUnits) / 1000.0, 2);
                     }
                 }
                 // Gradient — emit the round-trippable spec form when possible.
