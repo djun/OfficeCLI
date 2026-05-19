@@ -415,19 +415,18 @@ public static partial class PptxBatchEmitter
             }
             if (runOnly.Count > 0)
             {
-                // Placeholder's seeded first paragraph has no <a:r>, so target
-                // `set run[1]` would miss. The collapsed paragraph set already
-                // wrote text, which causes AddParagraph/PowerPoint to materialize
-                // a run, but only when text is non-empty. When the seeded
-                // paragraph has no run, prefer `add run` (Set on a missing run
-                // would fail; AddRun on a paragraph that already has one created
-                // by the set-with-text is harmless — placeholder paragraph after
-                // text-set still has only the run we just authored, the run-only
-                // attrs apply to that run via Set targeting run[1]). For the
-                // no-text collapsed case where the seeded paragraph still has
-                // zero runs, switch to `add run` so the run-only attrs land on
-                // a freshly added run instead of failing.
+                // CONSISTENCY(empty-paragraph-no-run): when the paragraph carried
+                // no text and the run-only attrs reduce to AddRun's hard-coded
+                // seeds (lang/altLang), there is no useful round-trip — emitting
+                // `add run` would only re-seed the same values and grow noise
+                // each cycle. Skip the row entirely (matches EmitRun /
+                // EmitFirstRunAsSet's RunDefaultOnlyKeys filter).
                 bool collapseHasText = props.ContainsKey("text");
+                if (!collapseHasText
+                    && runOnly.Keys.All(k => RunDefaultOnlyKeys.Contains(k)))
+                {
+                    return;
+                }
                 if (firstParagraph && !seededParaHasRun && !collapseHasText)
                 {
                     items.Add(new BatchItem
