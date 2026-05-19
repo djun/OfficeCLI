@@ -2123,6 +2123,13 @@ internal static partial class ChartHelper
                     var lc = plotArea2?.GetFirstChild<C.LineChart>();
                     if (lc == null) { unsupported.Add(key); break; }
                     lc.RemoveAllChildren<C.DropLines>();
+                    // "false"/"none" remove the overlay; both must skip the
+                    // build path. The bool check (IsTruthy) used to gate this,
+                    // but a falsy bool like "false" still slipped past
+                    // !value.Equals("none") and reached BuildLineShapeProperties,
+                    // which threw on the non-spec string.
+                    if (value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                        || value.Equals("false", StringComparison.OrdinalIgnoreCase)) break;
                     if ((ParseHelpers.IsValidBooleanString(value) && ParseHelpers.IsTruthy(value)) || !value.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
                         var dl = new C.DropLines();
@@ -2139,6 +2146,8 @@ internal static partial class ChartHelper
                     var lc = plotArea2?.GetFirstChild<C.LineChart>();
                     if (lc == null) { unsupported.Add(key); break; }
                     lc.RemoveAllChildren<C.HighLowLines>();
+                    if (value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                        || value.Equals("false", StringComparison.OrdinalIgnoreCase)) break;
                     if ((ParseHelpers.IsValidBooleanString(value) && ParseHelpers.IsTruthy(value)) || !value.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
                         var hl = new C.HighLowLines();
