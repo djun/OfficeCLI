@@ -2881,11 +2881,21 @@ internal static partial class ChartHelper
             _ => C.MarkerStyleValues.Circle
         };
 
+        // Snapshot existing per-series marker children so a fan-out (e.g.
+        // `marker=circle` after `markerSize=10`) does not blow away
+        // previously-set size/spPr/extLst. Spec parts override snapshots.
+        var existing = series.GetFirstChild<C.Marker>();
+        var existingSize = existing?.GetFirstChild<C.Size>()?.CloneNode(true) as C.Size;
+        var existingSpPr = existing?.GetFirstChild<C.ChartShapeProperties>()?.CloneNode(true) as C.ChartShapeProperties;
+        var existingExtLst = existing?.GetFirstChild<C.ExtensionList>()?.CloneNode(true) as C.ExtensionList;
+
         series.RemoveAllChildren<C.Marker>();
         var marker = new C.Marker();
         marker.AppendChild(new C.Symbol { Val = style });
         if (parts.Length > 1 && byte.TryParse(parts[1], out var size))
             marker.AppendChild(new C.Size { Val = size });
+        else if (existingSize != null)
+            marker.AppendChild(existingSize);
         if (parts.Length > 2)
         {
             var mSpPr = new C.ChartShapeProperties();
@@ -2894,6 +2904,10 @@ internal static partial class ChartHelper
             mSpPr.AppendChild(fill);
             marker.AppendChild(mSpPr);
         }
+        else if (existingSpPr != null)
+            marker.AppendChild(existingSpPr);
+        if (existingExtLst != null)
+            marker.AppendChild(existingExtLst);
 
         // Insert marker before data references (xVal, yVal, cat, val, bubbleSize)
         // to satisfy schema order for all chart types including scatter/bubble.
