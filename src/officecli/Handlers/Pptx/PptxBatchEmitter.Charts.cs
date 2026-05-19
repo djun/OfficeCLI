@@ -147,11 +147,24 @@ public static partial class PptxBatchEmitter
                     if (s.Format.TryGetValue(key, out var val) && val != null)
                     {
                         var sval = val.ToString();
-                        if (!string.IsNullOrEmpty(sval))
-                        {
-                            props[$"series{seriesIdx}.{key}"] = sval;
-                            if (key == "trendline") anySeriesTrendline = true;
-                        }
+                        if (string.IsNullOrEmpty(sval)) continue;
+                        // Idempotence: when the chart-level `key` (Reader's
+                        // first-series summary, replayed at chart Setter time
+                        // by fanning to every series) already carries the
+                        // exact same value, the per-series row would be a
+                        // no-op on replay but would surface as a phantom
+                        // `series{N}.{key}=…` row in dump output that wasn't
+                        // present in the source OOXML. Skip the duplicate.
+                        // Trendline is excluded — its chart-level form is
+                        // stripped below when any series trendline is emitted,
+                        // and the per-series row carries spec details (type/
+                        // order) that the chart-level summary loses.
+                        if (key != "trendline"
+                            && props.TryGetValue(key, out var chartLevel)
+                            && string.Equals(chartLevel, sval, StringComparison.Ordinal))
+                            continue;
+                        props[$"series{seriesIdx}.{key}"] = sval;
+                        if (key == "trendline") anySeriesTrendline = true;
                     }
                 }
             }
