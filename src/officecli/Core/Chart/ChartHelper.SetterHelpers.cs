@@ -568,8 +568,12 @@ internal static partial class ChartHelper
                 // the read-side names directly so dump→batch replays one prop
                 // per emit. Update only the SolidFill child; preserve any
                 // existing width / dash on the outline element.
-                var spPr = ser.GetFirstChild<C.ChartShapeProperties>();
-                if (spPr == null) { spPr = new C.ChartShapeProperties(); ser.AppendChild(spPr); }
+                // Route through the schema-aware helper — appending spPr at
+                // the end of CT_ScatterSer / CT_LineSer breaks the required
+                // child-element order (idx, order, tx, spPr, marker, …) and
+                // PowerPoint rejects the file (Error 0x80070570 / "needs
+                // repair"). CONSISTENCY(chart-schema-order).
+                var spPr = GetOrCreateSeriesShapeProperties(ser);
                 var ln = spPr.GetFirstChild<Drawing.Outline>();
                 if (ln == null)
                 {
@@ -596,8 +600,7 @@ internal static partial class ChartHelper
 
             case "shadow":
             {
-                var spPr = ser.GetFirstChild<C.ChartShapeProperties>();
-                if (spPr == null) { spPr = new C.ChartShapeProperties(); ser.AppendChild(spPr); }
+                var spPr = GetOrCreateSeriesShapeProperties(ser);
                 var effectList = spPr.GetFirstChild<Drawing.EffectList>() ?? new Drawing.EffectList();
                 if (effectList.Parent == null)
                     InsertEffectListInChartSpPr(spPr, effectList);
@@ -609,8 +612,7 @@ internal static partial class ChartHelper
 
             case "outline":
             {
-                var spPr = ser.GetFirstChild<C.ChartShapeProperties>();
-                if (spPr == null) { spPr = new C.ChartShapeProperties(); ser.AppendChild(spPr); }
+                var spPr = GetOrCreateSeriesShapeProperties(ser);
                 spPr.RemoveAllChildren<Drawing.Outline>();
                 if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
                 {
