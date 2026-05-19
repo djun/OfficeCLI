@@ -174,7 +174,7 @@ internal static partial class ChartHelper
                 break;
             case "scatter":
                 var scatterStyle = properties.GetValueOrDefault("scatterStyle", "lineMarker");
-                chartElement = BuildScatterChart(categories, seriesData, catAxisId, valAxisId, scatterStyle);
+                chartElement = BuildScatterChart(categories, seriesData, catAxisId, valAxisId, scatterStyle, colors);
                 break;
             case "bubble":
                 chartElement = BuildBubbleChart(categories, seriesData, catAxisId, valAxisId, colors);
@@ -777,7 +777,8 @@ internal static partial class ChartHelper
 
     internal static C.ScatterChart BuildScatterChart(
         string[]? categories, List<(string name, double[] values)> seriesData,
-        uint catAxisId, uint valAxisId, string scatterStyle = "lineMarker")
+        uint catAxisId, uint valAxisId, string scatterStyle = "lineMarker",
+        string[]? colors = null)
     {
         var styleVal = scatterStyle.ToLowerInvariant() switch
         {
@@ -813,6 +814,12 @@ internal static partial class ChartHelper
                 spPr.RemoveAllChildren<Drawing.Outline>();
                 spPr.AppendChild(new Drawing.Outline(new Drawing.NoFill()));
             }
+            // CONSISTENCY(series-color-builder): mirror BuildBarChart /
+            // BuildLineChart — when user supplied colors[] via series{N}.color
+            // or a colors property, apply per-series so scatter rounds-trip
+            // a non-default palette through dump→replay.
+            if (colors != null && i < colors.Length && !string.IsNullOrEmpty(colors[i]))
+                ApplySeriesColor(ser, colors[i]);
             scatterChart.AppendChild(ser);
         }
 
