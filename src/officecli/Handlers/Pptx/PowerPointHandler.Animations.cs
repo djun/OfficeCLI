@@ -1175,7 +1175,8 @@ public partial class PowerPointHandler
         // verbatim. Skip the manual builder branches below.
         if (template != null)
         {
-            var rendered = RenderEffectTemplate(template, shapeId, ref nextId, chartTemplateTarget);
+            var rendered = RenderEffectTemplate(template, shapeId, ref nextId, chartTemplateTarget,
+                durationMsOverride: durationMs > 0 ? durationMs : (int?)null);
             var tplChildList = ParseTemplateChildTimeNodeList(rendered);
             var tplEffectId = nextId++;
             var tplEffectCTn = new CommonTimeNode
@@ -1956,6 +1957,34 @@ public partial class PowerPointHandler
     /// </summary>
     internal static string ResolveAnimEffectName(string filter, int presetId, string cls)
     {
+        // Emphasis presetIDs are the canonical signal (templates may embed an
+        // <p:animEffect filter="fade"> as part of a larger primitive list, e.g.
+        // Pulse uses filter="fade" + animScale). Resolve by preset id first.
+        if (cls == "emphasis")
+        {
+            var emphName = presetId switch
+            {
+                1  => "fillColor",
+                6  => "grow",  // PowerPoint's "Grow/Shrink" — readback uses short canonical name
+                7  => "lineColor",
+                8  => "spin",
+                9  => "transparency",
+                10 => "fade",
+                14 => "wave",
+                19 => "objectColor",
+                21 => "complementaryColor",
+                22 => "complementaryColor2",
+                23 => "contrastingColor",
+                24 => "darken",
+                25 => "desaturate",
+                26 => "pulse",
+                27 => "colorPulse",
+                30 => "lighten",
+                32 => "teeter",
+                _  => null
+            };
+            if (emphName != null) return emphName;
+        }
         return filter switch
         {
             var f when f.StartsWith("blinds")           => "blinds",
@@ -1975,15 +2004,7 @@ public partial class PowerPointHandler
             var f when f.StartsWith("wheel")            => "wheel",
             var f when f.StartsWith("wipe")             => "wipe",
             _ => cls == "emphasis"
-                ? presetId switch
-                {
-                    1  => "bold",
-                    10 => "fade",
-                    14 => "wave",
-                    26 => "grow",
-                    27 => "spin",
-                    _  => "unknown"
-                }
+                ? "unknown"  // emphasis preset id table handled at top of this method
                 : presetId switch
                 {
                     // Entrance/exit preset IDs (mirror GetAnimPreset table)
@@ -2572,7 +2593,9 @@ public partial class PowerPointHandler
                     "Template-backed exit effects (verbatim PowerPoint OOXML): contract, centerRevolve, collapse, " +
                     "floatOut, shrinkTurn, sinkDown, spinner, basicZoom, stretchy, boomerang, credits, " +
                     "curveDown, pinwheel, spiralOut, basicSwivel. " +
-                    "Supported emphasis effects (require class=emphasis): spin, grow, bold, wave, fade. " +
+                    "Supported emphasis effects (require class=emphasis): spin, grow/growShrink/shrink, bold, wave, fade, " +
+                    "fillColor, lineColor, transparency, complementaryColor, complementaryColor2, contrastingColor, " +
+                    "darken, desaturate, lighten, objectColor, pulse, colorPulse, teeter. " +
                     "Use 'none' to remove.")
             };
         }

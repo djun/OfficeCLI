@@ -66,6 +66,38 @@ public partial class PowerPointHandler
             [("pinwheel",       TimeNodePresetClassValues.Exit)] = new(35, 0,  "OfficeCli.Handlers.Pptx.EffectTemplates.exit_pinwheel.xml"),
             [("spiralout",      TimeNodePresetClassValues.Exit)] = new(15, 0,  "OfficeCli.Handlers.Pptx.EffectTemplates.exit_spiral_out.xml"),
             [("basicswivel",    TimeNodePresetClassValues.Exit)] = new(19, 10, "OfficeCli.Handlers.Pptx.EffectTemplates.exit_basic_swivel.xml"),
+
+            // Emphasis effects — Basic / Subtle / Moderate that PowerPoint
+            // emits with multi-anim primitives (animClr / animRot / animScale /
+            // animEffect). Captured from a PowerPoint-authored deck.
+            [("fillcolor",          TimeNodePresetClassValues.Emphasis)] = new(1,  2, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_fillcolor.xml"),
+            [("growshrink",         TimeNodePresetClassValues.Emphasis)] = new(6,  0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_growshrink.xml"),
+            [("linecolor",          TimeNodePresetClassValues.Emphasis)] = new(7,  2, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_linecolor.xml"),
+            // 'spin' was previously preset 27 (no template); the PowerPoint-authored
+            // form is preset 8 with an <p:animRot> primitive. Template wins.
+            [("spin",               TimeNodePresetClassValues.Emphasis)] = new(8,  0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_spin.xml"),
+            [("transparency",       TimeNodePresetClassValues.Emphasis)] = new(9,  0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_transparency.xml"),
+            [("complementarycolor", TimeNodePresetClassValues.Emphasis)] = new(21, 0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_complementarycolor.xml"),
+            [("complementarycolor2",TimeNodePresetClassValues.Emphasis)] = new(22, 0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_complementarycolor2.xml"),
+            [("contrastingcolor",   TimeNodePresetClassValues.Emphasis)] = new(23, 0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_contrastingcolor.xml"),
+            [("darken",             TimeNodePresetClassValues.Emphasis)] = new(24, 0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_darken.xml"),
+            [("desaturate",         TimeNodePresetClassValues.Emphasis)] = new(25, 0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_desaturate.xml"),
+            [("lighten",            TimeNodePresetClassValues.Emphasis)] = new(30, 0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_lighten.xml"),
+            [("objectcolor",        TimeNodePresetClassValues.Emphasis)] = new(19, 0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_objectcolor.xml"),
+            [("pulse",              TimeNodePresetClassValues.Emphasis)] = new(26, 0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_pulse.xml"),
+            [("colorpulse",         TimeNodePresetClassValues.Emphasis)] = new(27, 0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_colorpulse.xml"),
+            [("teeter",             TimeNodePresetClassValues.Emphasis)] = new(32, 0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_teeter.xml"),
+            // Aliases (NormalizeEffectName strips non-alnum + lowercases, but
+            // distinct stems still need explicit entries).
+            [("grow",               TimeNodePresetClassValues.Emphasis)] = new(6,  0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_growshrink.xml"),
+            [("shrink",             TimeNodePresetClassValues.Emphasis)] = new(6,  0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_growshrink.xml"),
+            [("rotate",             TimeNodePresetClassValues.Emphasis)] = new(8,  0, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_spin.xml"),
+            // Legacy 'bold' / 'boldflash' aliases: prior versions wrote presetID 1
+            // (which is actually Fill Color in PowerPoint's table). Route through
+            // the fillColor template so previously-written 'bold-emphasis-*' inputs
+            // produce a working animation. Readback returns "fillColor" (canonical).
+            [("bold",               TimeNodePresetClassValues.Emphasis)] = new(1,  2, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_fillcolor.xml"),
+            [("boldflash",          TimeNodePresetClassValues.Emphasis)] = new(1,  2, "OfficeCli.Handlers.Pptx.EffectTemplates.emph_fillcolor.xml"),
         };
 
     // Aliases accepted on input — normalized to the canonical name before lookup.
@@ -106,9 +138,20 @@ public partial class PowerPointHandler
         EffectTemplate tpl,
         string shapeId,
         ref uint nextId,
-        (int seriesIdx, int categoryIdx, string bldStep)? chartTarget = null)
+        (int seriesIdx, int categoryIdx, string bldStep)? chartTarget = null,
+        int? durationMsOverride = null)
     {
         var body = LoadEffectTemplateBody(tpl.ResourceName);
+        // Optional duration override: rewrite the dur attribute on the {ID0}
+        // cTn (the outermost primitive's timeline). Internal child durations
+        // (autoRev pulses, sub-keyframes) are preserved — only the top-level
+        // length scales with user-supplied duration.
+        if (durationMsOverride is int durMs && durMs > 0)
+        {
+            body = Regex.Replace(body,
+                @"(id=""\{ID0\}""\s+)dur=""\d+""",
+                $"$1dur=\"{durMs}\"");
+        }
         // Count placeholders and allocate sequential IDs.
         var maxIdx = -1;
         foreach (Match m in Regex.Matches(body, @"\{ID(\d+)\}"))
