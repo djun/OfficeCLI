@@ -20,8 +20,8 @@
   "properties": {
     "effect": {
       "type": "enum",
-      "description": "animation preset. spin/grow/bold/wave require class=emphasis; appear/fade/fly/zoom/wipe/bounce/float/swivel/split/wheel/checkerboard/blinds/dissolve/flash/box/circle/diamond/plus/strips/wedge/random work for entrance and exit. (disappear is not supported — use class=exit + appear or fade.)",
-      "values": ["appear", "fade", "fly", "zoom", "wipe", "bounce", "float", "swivel", "split", "wheel", "checkerboard", "blinds", "dissolve", "flash", "box", "circle", "diamond", "plus", "strips", "wedge", "random", "spin", "grow", "wave", "bold"],
+      "description": "animation preset. spin/grow/bold/wave require class=emphasis; appear/fade/fly/zoom/wipe/bounce/float/swivel/split/wheel/checkerboard/blinds/dissolve/flash/box/circle/diamond/plus/strips/wedge/random work for entrance and exit. Sixteen additional exit effects are backed by verbatim PowerPoint OOXML templates (anim primitives copied byte-for-byte from a PowerPoint-authored deck): contract, centerRevolve, collapse, floatOut, shrinkTurn, sinkDown, spinner, basicZoom, stretchy, boomerang, credits, curveDown, pinwheel, spiralOut, basicSwivel — these require class=exit. The plain 'float' effect is the Exciting-menu Float (preset 30); use 'floatOut' for the Moderate-menu Float Out (preset 42). Template effects ignore the duration prop (they keep PowerPoint's authored timing). (disappear is not supported — use class=exit + appear or fade.)",
+      "values": ["appear", "fade", "fly", "zoom", "wipe", "bounce", "float", "swivel", "split", "wheel", "checkerboard", "blinds", "dissolve", "flash", "box", "circle", "diamond", "plus", "strips", "wedge", "random", "spin", "grow", "wave", "bold", "contract", "centerRevolve", "collapse", "floatOut", "shrinkTurn", "sinkDown", "spinner", "basicZoom", "stretchy", "boomerang", "credits", "curveDown", "pinwheel", "spiralOut", "basicSwivel"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop effect=fade", "--prop effect=spin --prop class=emphasis"],
       "readback": "effect name",

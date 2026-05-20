@@ -34,6 +34,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="Resources/chartex-colors.xml" />
     <EmbeddedResource Include="Resources/chartex-style.xml" />
+    <EmbeddedResource Include="Handlers/Pptx/EffectTemplates/*.xml">
+      <LogicalName>OfficeCli.Handlers.Pptx.EffectTemplates.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>

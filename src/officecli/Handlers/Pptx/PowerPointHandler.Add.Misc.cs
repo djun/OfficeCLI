@@ -1476,12 +1476,30 @@ public partial class PowerPointHandler
 
         // Strip only a trailing class suffix from the effect name (preserve
         // pre-existing direction/duration tokens that other parsers handle).
+        // Exception: when the full-form name (normalized, dashes removed) is
+        // a known template effect — e.g. "float-out" ↔ Float Out preset, "fade-out"
+        // ↔ Fade Out exit — keep the full name so the registry lookup hits the
+        // right template. CONSISTENCY(animation-template-name): registry keys
+        // are normalized identifiers, so "float-out" and "floatout" both map.
         var dashIdx = effect.LastIndexOf('-');
         if (dashIdx > 0)
         {
             var tailCls = ClassOf(effect[(dashIdx + 1)..].ToLowerInvariant());
             if (tailCls != null)
+            {
+                // Probe both class buckets — if the full-form effect resolves to
+                // a template under the suffix-implied class, do NOT strip.
+                var classEnum = tailCls switch
+                {
+                    "exit" => DocumentFormat.OpenXml.Presentation.TimeNodePresetClassValues.Exit,
+                    "entrance" => DocumentFormat.OpenXml.Presentation.TimeNodePresetClassValues.Entrance,
+                    "emphasis" => DocumentFormat.OpenXml.Presentation.TimeNodePresetClassValues.Emphasis,
+                    _ => (DocumentFormat.OpenXml.Presentation.TimeNodePresetClassValues?)null
+                };
+                if (classEnum.HasValue && TryGetEffectTemplate(effect, classEnum.Value) != null)
+                    return (effect, tailCls);
                 return (effect[..dashIdx], tailCls);
+            }
         }
         return (effect, seenClass);
     }

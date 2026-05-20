@@ -867,9 +867,27 @@ public partial class PowerPointHandler
                 ? AnimTrigger.AfterPrevious : AnimTrigger.OnClick;
         }
 
-        // Get filter string, preset ID, and subtype from effect name
-        var (presetId, filter) = GetAnimPreset(effectName, presetClass);
-        var presetSubtype = GetAnimPresetSubtype(effectName, direction);
+        // Template-based effects (Boomerang, Pinwheel, ...) live in
+        // _templateRegistry and bypass the simple filter-based path. Look up
+        // first so the standard preset/filter path doesn't reject them as
+        // unknown.
+        var effectTemplate = TryGetEffectTemplate(effectName, presetClass);
+
+        // Get filter string, preset ID, and subtype from effect name.
+        // Template effects keep the lookup so the schema-described
+        // preset/subtype is reported, but the actual XML comes from the template.
+        int presetId; string? filter; int presetSubtype;
+        if (effectTemplate != null)
+        {
+            presetId = effectTemplate.PresetId;
+            presetSubtype = effectTemplate.PresetSubtype;
+            filter = null;
+        }
+        else
+        {
+            (presetId, filter) = GetAnimPreset(effectName, presetClass);
+            presetSubtype = GetAnimPresetSubtype(effectName, direction);
+        }
         var nodeType = trigger switch
         {
             AnimTrigger.AfterPrevious => TimeNodeValues.AfterEffect,
@@ -917,7 +935,9 @@ public partial class PowerPointHandler
                         durationMs, filter, grpId, outerDelay, presetSubtype, ref nextId,
                         delayMs, easingAccel, easingDecel,
                         repeatRaw, restartRaw, autoReverse,
-                        makeTarget: subTargetFactory);
+                        makeTarget: subTargetFactory,
+                        template: effectTemplate,
+                        chartTemplateTarget: effectTemplate != null ? (sIdx, cIdx, bldStep) : null);
                     mainSeqCTn.ChildTimeNodeList!.AppendChild(subGroup);
                 }
                 goto applyBldLst;
@@ -929,7 +949,8 @@ public partial class PowerPointHandler
             shapeId.ToString(), presetId, presetClass, nodeType,
             durationMs, filter, grpId, outerDelay, presetSubtype, ref nextId,
             delayMs, easingAccel, easingDecel,
-            repeatRaw, restartRaw, autoReverse);
+            repeatRaw, restartRaw, autoReverse,
+            template: effectTemplate);
 
         if (trigger == AnimTrigger.WithPrevious)
         {
@@ -1139,13 +1160,56 @@ public partial class PowerPointHandler
         string? repeat = null,
         string? restart = null,
         bool? autoReverse = null,
-        Func<TargetElement>? makeTarget = null)
+        Func<TargetElement>? makeTarget = null,
+        EffectTemplate? template = null,
+        (int seriesIdx, int categoryIdx, string bldStep)? chartTemplateTarget = null)
     {
         // makeTarget lets callers substitute the default plain-shape spTgt with
         // a chart sub-element target (<p:spTgt><p:graphicEl><a:chart .../></p:graphicEl></p:spTgt>).
         // Default keeps the long-standing shape-only behaviour.
         TargetElement Tgt() => makeTarget?.Invoke()
             ?? new TargetElement(new ShapeTarget { ShapeId = shapeId });
+
+        // Template-based effect (Boomerang, Pinwheel, Curve Down, etc.): the
+        // effectPar's childTnLst comes from a PowerPoint-authored OOXML fragment
+        // verbatim. Skip the manual builder branches below.
+        if (template != null)
+        {
+            var rendered = RenderEffectTemplate(template, shapeId, ref nextId, chartTemplateTarget);
+            var tplChildList = ParseTemplateChildTimeNodeList(rendered);
+            var tplEffectId = nextId++;
+            var tplEffectCTn = new CommonTimeNode
+            {
+                Id = tplEffectId,
+                PresetId = template.PresetId,
+                PresetClass = presetClass,
+                PresetSubtype = template.PresetSubtype,
+                Fill = TimeNodeFillValues.Hold,
+                GroupId = (uint)grpId,
+                NodeType = nodeType,
+                StartConditionList = new StartConditionList(new Condition { Delay = "0" }),
+                ChildTimeNodeList = tplChildList
+            };
+            var tplEffectPar = new ParallelTimeNode { CommonTimeNode = tplEffectCTn };
+            var tplMidId = nextId++;
+            var tplMidCTn = new CommonTimeNode
+            {
+                Id = tplMidId,
+                Fill = TimeNodeFillValues.Hold,
+                StartConditionList = new StartConditionList(new Condition { Delay = delayMs > 0 ? delayMs.ToString() : "0" }),
+                ChildTimeNodeList = new ChildTimeNodeList(tplEffectPar)
+            };
+            var tplMidPar = new ParallelTimeNode { CommonTimeNode = tplMidCTn };
+            var tplOuterId = nextId++;
+            var tplOuterCTn = new CommonTimeNode
+            {
+                Id = tplOuterId,
+                Fill = TimeNodeFillValues.Hold,
+                StartConditionList = new StartConditionList(new Condition { Delay = outerDelay }),
+                ChildTimeNodeList = new ChildTimeNodeList(tplMidPar)
+            };
+            return new ParallelTimeNode { CommonTimeNode = tplOuterCTn };
+        }
         var isEntrance = presetClass == TimeNodePresetClassValues.Entrance;
         var isEmphasis = presetClass == TimeNodePresetClassValues.Emphasis;
         var animTransition = isEntrance || isEmphasis ? AnimateEffectTransitionValues.In : AnimateEffectTransitionValues.Out;
@@ -2505,6 +2569,9 @@ public partial class PowerPointHandler
                         : "") +
                     "Supported entrance/exit effects: appear, fade, fly, zoom, wipe, bounce, float, split, " +
                     "wheel, swivel, checkerboard, blinds, dissolve, flash, box, circle, diamond, plus, strips, wedge, random. " +
+                    "Template-backed exit effects (verbatim PowerPoint OOXML): contract, centerRevolve, collapse, " +
+                    "floatOut, shrinkTurn, sinkDown, spinner, basicZoom, stretchy, boomerang, credits, " +
+                    "curveDown, pinwheel, spiralOut, basicSwivel. " +
                     "Supported emphasis effects (require class=emphasis): spin, grow, bold, wave, fade. " +
                     "Use 'none' to remove.")
             };
