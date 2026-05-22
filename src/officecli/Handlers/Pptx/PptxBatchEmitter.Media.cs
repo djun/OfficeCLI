@@ -220,4 +220,63 @@ public static partial class PptxBatchEmitter
             });
         }
     }
+
+    // Phase 3c-ole. Mirrors EmitMediaForSlide (Phase 3c-media) and
+    // EmitModel3dForSlide (Phase 3c-3d). Per slide, scan for
+    // <p:graphicFrame> blocks whose <a:graphicData uri=".../ole"> carries
+    // a <p:oleObj>; emit an `add-part ole` row that creates the underlying
+    // EmbeddedPackagePart (OOXML containers) or EmbeddedObjectPart (generic
+    // binaries) + thumbnail icon ImagePart with SOURCE rIds pinned via
+    // --prop. Then emit a raw-set append on /p:sld/p:cSld/p:spTree
+    // carrying the graphicFrame XML verbatim — the pinned rIds make the
+    // p:oleObj r:id AND the inner p:pic's a:blip r:embed both resolve to
+    // the just-created parts.
+    //
+    // Slice handling: the graphicFrame block is canonicalised via the
+    // same NormalizeSlideRawSlice pass as smartart / media / 3d. The
+    // ambient namespaces (p / a / r) are stripped at the slice root;
+    // anything exotic the OLE shape brings in stays on the slice as a
+    // local xmlns declaration.
+    internal static void EmitOleForSlide(PowerPointHandler ppt, int slideNum,
+                                          string slidePath, List<BatchItem> items,
+                                          SlideEmitContext ctx)
+    {
+        IReadOnlyList<PowerPointHandler.OleInfo> oles;
+        try { oles = ppt.GetOlesOnSlide(slideNum); }
+        catch { return; }
+        if (oles.Count == 0) return;
+
+        foreach (var o in oles)
+        {
+            var props = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["data"] = Convert.ToBase64String(o.OleBytes),
+                ["content-type"] = o.OleContentType,
+                ["extension"] = o.OleExtension,
+                ["ole-rid"] = o.OleRelId,
+                ["thumbnail-data"] = Convert.ToBase64String(o.ThumbnailBytes),
+                ["thumbnail-content-type"] = o.ThumbnailContentType,
+                ["thumbnail-rid"] = o.ThumbnailRelId,
+            };
+            items.Add(new BatchItem
+            {
+                Command = "add-part",
+                Parent = slidePath,
+                Type = "ole",
+                Props = props,
+            });
+
+            string gfCanon;
+            try { gfCanon = NormalizeSlideRawSlice(o.GraphicFrameXml); }
+            catch { gfCanon = o.GraphicFrameXml; }
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = slidePath,
+                Xpath = "/p:sld/p:cSld/p:spTree",
+                Action = "append",
+                Xml = gfCanon,
+            });
+        }
+    }
 }

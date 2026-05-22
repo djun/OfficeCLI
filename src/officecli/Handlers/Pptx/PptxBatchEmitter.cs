@@ -508,9 +508,16 @@ public static partial class PptxBatchEmitter
                     // walk skips them here to avoid double-emit.
                     break;
                 case "ole":
+                    // Phase 3c-ole: routed through EmitOleForSlide (a
+                    // per-slide pass at slide-end) so the <p:graphicFrame>
+                    // hosting <p:oleObj> + its EmbeddedPackagePart /
+                    // EmbeddedObjectPart payload + the thumbnail icon
+                    // ImagePart survive via add-part + raw-set passthrough.
+                    // The typed walk skips it here to avoid double-emit.
+                    break;
                 case "zoom":
                     // PR3+ scope. ProbeUnsupportedOnSlide already records the
-                    // OLE markers via raw-XML sniff; this branch catches
+                    // zoom markers via raw-XML sniff; this branch catches
                     // the children that surfaced via the typed Get tree
                     // (when NodeBuilder learns to tag them).
                     ctx.Unsupported.Add(new UnsupportedWarning(
@@ -559,6 +566,13 @@ public static partial class PptxBatchEmitter
         // 3dmodel/model3d children above.
         EmitModel3dForSlide(ppt, slideNum, slidePath, items, ctx);
 
+        // Phase 3c-ole: <p:graphicFrame> hosting <p:oleObj> with the
+        // underlying EmbeddedPackagePart (OOXML containers) or
+        // EmbeddedObjectPart (generic binaries) + thumbnail icon ImagePart,
+        // mirroring the model3d passthrough. The typed walk skipped the
+        // OLE child above.
+        EmitOleForSlide(ppt, slideNum, slidePath, items, ctx);
+
         // Notes body content — stub for PR1. Notes part presence does not
         // surface in the slide subtree's children today (notes live under
         // /slide[N]/notes); PR2 will reach in and emit them.
@@ -598,10 +612,10 @@ public static partial class PptxBatchEmitter
         // falls back to a missing slice — caller sees a degraded slide but
         // no crash.
 
-        // OLE / video / audio / 3D — element names are distinctive enough.
-        if (xml.Contains("<p:oleObj", StringComparison.Ordinal))
-            ctx.Unsupported.Add(new UnsupportedWarning("oleObj", slidePath,
-                "embedded OLE object present"));
+        // Phase 3c-ole: <p:oleObj> hosts round-trip via EmitOleForSlide
+        // (add-part ole + raw-set). No probe warning — the slice owns the
+        // entire emit. EmbeddedPackagePart / EmbeddedObjectPart auto-select
+        // is by source content-type.
         // Phase 3c-media: video/audio <p:pic> hosts round-trip via
         // EmitMediaForSlide (add-part + raw-set). No probe warning here —
         // even if the slide carries a <p:video>/<p:audio> timing node, the

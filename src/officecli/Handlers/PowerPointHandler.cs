@@ -807,9 +807,159 @@ public partial class PowerPointHandler : IDocumentHandler
                 var encodedM3d = $"model3d={m3dActualRid};thumbnail={m3dThumbActualRid}";
                 return (encodedM3d, parentPartPath);
 
+            case "ole":
+            case "oleobject":
+                // Phase 3c-ole. Mirrors Phase 3c-media (video/audio) and
+                // Phase 3c-3d. PPT OLE embed lives inside a <p:graphicFrame>:
+                //   <a:graphicData uri=".../presentationml/2006/ole">
+                //     <p:oleObj progId="…" showAsIcon="1" r:id="rIdA" …>
+                //       <p:embed/>
+                //       <p:pic>... <a:blip r:embed="rIdB"/> ...</p:pic>
+                //     </p:oleObj>
+                // Two rels back the slice:
+                //  - relType .../officeDocument/2006/relationships/oleObject
+                //    -> the embedded payload. EmbeddedPackagePart for OOXML
+                //       containers (.xlsx/.docx/.pptx + macro/template
+                //       siblings, content type vnd.openxmlformats-…), else
+                //       EmbeddedObjectPart for generic binaries (.bin OLE10,
+                //       legacy .doc/.xls, PDF, etc.).
+                //  - relType .../officeDocument/2006/relationships/image
+                //    -> the icon/thumbnail ImagePart for the inner <p:pic>.
+                //
+                // Props (all optional except data + thumbnail-data):
+                //   data                   = base64 OLE payload bytes
+                //   content-type           = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                //                            (for .xlsx), or any package /
+                //                            generic OLE content-type. Drives
+                //                            the Package vs Object auto-select.
+                //   extension              = ".xlsx" / ".docx" / ".bin" (drives
+                //                            the part URI extension when we
+                //                            fall through to EmbeddedObjectPart;
+                //                            EmbeddedPackagePart picks its own
+                //                            extension from the PartTypeInfo).
+                //   ole-rid                = pinned OLE part rId
+                //   thumbnail-data         = base64 icon image bytes
+                //   thumbnail-content-type = "image/png" (default) / "image/jpeg"
+                //   thumbnail-rid          = pinned thumbnail ImagePart rId
+                //
+                // Returned encoded relId: "ole=rIdA;thumbnail=rIdB".
+                // No shape XML is inserted under the slide; the companion
+                // raw-set append carries the full <p:graphicFrame> verbatim
+                // with the matching pinned rIds.
+                var oleSlideMatchAP = System.Text.RegularExpressions.Regex.Match(
+                    parentPartPath, @"^/slide\[(\d+)\]$");
+                if (!oleSlideMatchAP.Success)
+                    throw new ArgumentException(
+                        $"{partType} must be added under a slide: add-part <file> '/slide[N]' --type {partType}");
+                var oleSlideIdxAP = int.Parse(oleSlideMatchAP.Groups[1].Value);
+                var oleSlidePartsAP = GetSlideParts().ToList();
+                if (oleSlideIdxAP < 1 || oleSlideIdxAP > oleSlidePartsAP.Count)
+                    throw new ArgumentException($"Slide index {oleSlideIdxAP} out of range");
+                var oleSlidePartAP = oleSlidePartsAP[oleSlideIdxAP - 1];
+
+                if (properties == null || !properties.TryGetValue("data", out var oleB64) || string.IsNullOrEmpty(oleB64))
+                    throw new ArgumentException(
+                        $"add-part {partType} requires property 'data' (base64 OLE payload bytes)");
+                byte[] oleBytes;
+                try { oleBytes = Convert.FromBase64String(oleB64); }
+                catch (FormatException) { throw new ArgumentException($"add-part {partType}: 'data' is not valid base64"); }
+
+                var oleContentTypeAP = properties.TryGetValue("content-type", out var olct) && !string.IsNullOrEmpty(olct)
+                    ? olct
+                    : "application/vnd.openxmlformats-officedocument.oleObject";
+                var oleExtAP = properties.TryGetValue("extension", out var olxt) && !string.IsNullOrEmpty(olxt)
+                    ? (olxt.StartsWith('.') ? olxt : "." + olxt)
+                    : ".bin";
+
+                string? pinnedOleRid   = properties.TryGetValue("ole-rid", out var olr) ? olr : null;
+                string? pinnedOleThumb = properties.TryGetValue("thumbnail-rid", out var oltr) ? oltr : null;
+
+                // Auto-select EmbeddedPackagePart vs EmbeddedObjectPart by
+                // content-type. The OOXML package family carries content
+                // types starting with "application/vnd.openxmlformats-".
+                // Everything else (oleObject generic, application/pdf,
+                // application/octet-stream, vnd.ms-excel for legacy .xls,
+                // etc.) goes through EmbeddedObjectPart with its raw
+                // content-type preserved on the part. EmbeddedPackagePart
+                // requires a typed PartTypeInfo (EmbeddedPackagePartType.*);
+                // map extension → typed value via OleHelper, fall back to
+                // EmbeddedObjectPart if the extension is unrecognized.
+                OpenXmlPart olePart;
+                PartTypeInfo? packagePti = null;
+                bool oleIsPackage = oleContentTypeAP.StartsWith(
+                    "application/vnd.openxmlformats-officedocument.",
+                    StringComparison.OrdinalIgnoreCase)
+                    && !oleContentTypeAP.Equals(
+                        "application/vnd.openxmlformats-officedocument.oleObject",
+                        StringComparison.OrdinalIgnoreCase);
+                if (oleIsPackage)
+                {
+                    // GetPackagePartTypeInfo takes a path; we feed a synthetic
+                    // path with the extension. Returns null for unknown exts
+                    // — in that case route to EmbeddedObjectPart so the bytes
+                    // still survive (with a generic part type).
+                    packagePti = OfficeCli.Core.OleHelper.GetPackagePartTypeInfo("x" + oleExtAP);
+                    if (packagePti == null) oleIsPackage = false;
+                }
+                if (oleIsPackage)
+                {
+                    olePart = !string.IsNullOrEmpty(pinnedOleRid)
+                        ? oleSlidePartAP.AddEmbeddedPackagePart(packagePti!.Value, pinnedOleRid)
+                        : oleSlidePartAP.AddEmbeddedPackagePart(packagePti!.Value);
+                }
+                else
+                {
+                    olePart = !string.IsNullOrEmpty(pinnedOleRid)
+                        ? oleSlidePartAP.AddEmbeddedObjectPart(oleContentTypeAP, pinnedOleRid)
+                        : oleSlidePartAP.AddEmbeddedObjectPart(oleContentTypeAP);
+                }
+                using (var s = new MemoryStream(oleBytes)) olePart.FeedData(s);
+                var oleActualRid = oleSlidePartAP.GetIdOfPart(olePart);
+
+                // Thumbnail icon image. Caller may omit thumbnail-data; we
+                // then seed the same 1x1 transparent PNG used by video/audio
+                // and the model3d placeholder paths.
+                byte[] oleThumbBytes;
+                PartTypeInfo oleThumbType;
+                if (properties.TryGetValue("thumbnail-data", out var oltdB64) && !string.IsNullOrEmpty(oltdB64))
+                {
+                    try { oleThumbBytes = Convert.FromBase64String(oltdB64); }
+                    catch (FormatException) { throw new ArgumentException($"add-part {partType}: 'thumbnail-data' is not valid base64"); }
+                    var oleThumbCT = properties.TryGetValue("thumbnail-content-type", out var oltct) && !string.IsNullOrEmpty(oltct)
+                        ? oltct
+                        : "image/png";
+                    oleThumbType = oleThumbCT switch {
+                        "image/png" => ImagePartType.Png, "image/jpeg" => ImagePartType.Jpeg,
+                        "image/gif" => ImagePartType.Gif, "image/bmp" => ImagePartType.Bmp,
+                        "image/tiff" => ImagePartType.Tiff,
+                        "image/x-emf" => ImagePartType.Emf, "image/x-wmf" => ImagePartType.Wmf,
+                        _ => ImagePartType.Png };
+                }
+                else
+                {
+                    oleThumbBytes = new byte[]
+                    {
+                        0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,
+                        0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52,
+                        0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x08,0x06,0x00,0x00,0x00,0x1F,0x15,0xC4,0x89,
+                        0x00,0x00,0x00,0x0D,0x49,0x44,0x41,0x54,
+                        0x08,0xD7,0x63,0x60,0x60,0x60,0x60,0x00,0x00,0x00,0x05,0x00,0x01,0x87,0xA1,0x4E,0xD4,
+                        0x00,0x00,0x00,0x00,0x49,0x45,0x4E,0x44,0xAE,0x42,0x60,0x82
+                    };
+                    oleThumbType = ImagePartType.Png;
+                }
+                var oleThumbPart = !string.IsNullOrEmpty(pinnedOleThumb)
+                    ? oleSlidePartAP.AddImagePart(oleThumbType, pinnedOleThumb)
+                    : oleSlidePartAP.AddImagePart(oleThumbType);
+                using (var s = new MemoryStream(oleThumbBytes)) oleThumbPart.FeedData(s);
+                var oleThumbActualRid = oleSlidePartAP.GetIdOfPart(oleThumbPart);
+
+                var encodedOle = $"ole={oleActualRid};thumbnail={oleThumbActualRid}";
+                return (encodedOle, parentPartPath);
+
             default:
                 throw new ArgumentException(
-                    $"Unknown part type: {partType}. Supported: chart, smartart, video, audio, model3d");
+                    $"Unknown part type: {partType}. Supported: chart, smartart, video, audio, model3d, ole");
         }
     }
 
@@ -1248,6 +1398,131 @@ public partial class PowerPointHandler : IDocumentHandler
                 Model3dBytes: m3dBytes,
                 Model3dContentType: m3dCT!,
                 Model3dExtension: m3dExt,
+                ThumbnailBytes: thumbBytes,
+                ThumbnailContentType: thumbCT!));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Per-slide OLE-embed info for PptxBatchEmitter Phase 3c-ole passthrough.
+    /// Returns one entry per &lt;p:graphicFrame&gt; whose
+    /// &lt;a:graphicData uri="…/presentationml/2006/ole"&gt; carries a
+    /// &lt;p:oleObj&gt; element. Each entry includes the graphicFrame XML
+    /// verbatim plus the source's two rIds (the OLE part and the icon
+    /// thumbnail ImagePart) and the underlying binary streams, so the
+    /// emitter can issue an `add-part ole` + a `raw-set` append on
+    /// /p:sld/p:cSld/p:spTree that round-trips byte-equal.
+    /// </summary>
+    internal readonly record struct OleInfo(
+        string GraphicFrameXml,
+        string OleRelId,
+        string ThumbnailRelId,
+        byte[] OleBytes,
+        string OleContentType,
+        string OleExtension,
+        byte[] ThumbnailBytes,
+        string ThumbnailContentType);
+
+    internal IReadOnlyList<OleInfo> GetOlesOnSlide(int slideIdx)
+    {
+        var result = new List<OleInfo>();
+        var parts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > parts.Count) return result;
+        var slidePart = parts[slideIdx - 1];
+
+        // Read raw slide XML — the OleObject child of GraphicData is
+        // typed in the SDK (DocumentFormat.OpenXml.Presentation.OleObject)
+        // but the whole graphicFrame slice is what we want to raw-set, so
+        // a textual XLinq walk is cleaner. Matches the model3d Phase 3c-3d
+        // approach: read raw, parse, slice by element identity (no regex)
+        // to dodge SDK namespace-prefix drift on round 2.
+        string slideXml;
+        using (var s = slidePart.GetStream())
+        using (var sr = new StreamReader(s))
+            slideXml = sr.ReadToEnd();
+
+        System.Xml.Linq.XDocument slideDoc;
+        try { slideDoc = System.Xml.Linq.XDocument.Parse(slideXml); }
+        catch { return result; }
+        System.Xml.Linq.XNamespace pNs = "http://schemas.openxmlformats.org/presentationml/2006/main";
+        System.Xml.Linq.XNamespace rNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        System.Xml.Linq.XNamespace aNs = "http://schemas.openxmlformats.org/drawingml/2006/main";
+        const string oleUri = "http://schemas.openxmlformats.org/presentationml/2006/ole";
+
+        foreach (var gf in slideDoc.Descendants(pNs + "graphicFrame").ToList())
+        {
+            var gd = gf.Descendants(aNs + "graphicData").FirstOrDefault();
+            var uri = gd?.Attribute("uri")?.Value;
+            if (uri == null || !uri.Equals(oleUri, StringComparison.Ordinal)) continue;
+
+            var oleObj = gd!.Element(pNs + "oleObj");
+            if (oleObj == null) continue;
+            var oleRidAttr = oleObj.Attribute(rNs + "id");
+            if (oleRidAttr == null) continue;
+            var oleRid = oleRidAttr.Value;
+
+            // Thumbnail icon: <p:pic>/<p:blipFill>/<a:blip r:embed="…"/>
+            // inside the <p:oleObj>. PowerPoint always emits one (even when
+            // showAsIcon="0", the fallback render still needs an icon).
+            var thumbRid = oleObj.Descendants(aNs + "blip")
+                .Select(b => b.Attribute(rNs + "embed")?.Value)
+                .FirstOrDefault(v => !string.IsNullOrEmpty(v));
+            if (string.IsNullOrEmpty(thumbRid)) continue;
+
+            // Re-serialise the graphicFrame subtree as the slice. Funnels
+            // both rounds through XLinq for prefix-drift reconciliation.
+            var slice = gf.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+
+            // Resolve the OLE payload. Could be EmbeddedPackagePart (modern
+            // OOXML container) or EmbeddedObjectPart (generic binary / .bin
+            // OLE10 stream / legacy .doc/.xls). GetPartById resolves either.
+            byte[]? oleBytes = null;
+            string? oleCT = null;
+            string oleExt = ".bin";
+            try
+            {
+                var part = slidePart.GetPartById(oleRid);
+                if (part != null)
+                {
+                    using var s = part.GetStream();
+                    using var ms = new MemoryStream();
+                    s.CopyTo(ms);
+                    oleBytes = ms.ToArray();
+                    oleCT = part.ContentType;
+                    var u = part.Uri.OriginalString;
+                    var dot = u.LastIndexOf('.');
+                    if (dot > 0) oleExt = u[dot..];
+                }
+            }
+            catch { }
+            if (oleBytes == null || string.IsNullOrEmpty(oleCT)) continue;
+
+            // Resolve the thumbnail icon ImagePart bytes.
+            byte[]? thumbBytes = null;
+            string? thumbCT = null;
+            try
+            {
+                var tp = slidePart.GetPartById(thumbRid);
+                if (tp is ImagePart ip)
+                {
+                    using var s = ip.GetStream();
+                    using var ms = new MemoryStream();
+                    s.CopyTo(ms);
+                    thumbBytes = ms.ToArray();
+                    thumbCT = ip.ContentType;
+                }
+            }
+            catch { }
+            if (thumbBytes == null || string.IsNullOrEmpty(thumbCT)) continue;
+
+            result.Add(new OleInfo(
+                GraphicFrameXml: slice,
+                OleRelId: oleRid,
+                ThumbnailRelId: thumbRid,
+                OleBytes: oleBytes,
+                OleContentType: oleCT!,
+                OleExtension: oleExt,
                 ThumbnailBytes: thumbBytes,
                 ThumbnailContentType: thumbCT!));
         }
