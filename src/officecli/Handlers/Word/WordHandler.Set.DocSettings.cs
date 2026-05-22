@@ -50,12 +50,15 @@ public partial class WordHandler
             {
                 var grid = EnsureDocGridInSection();
                 var cs = ParseHelpers.SafeParseInt(value, "docGrid.charSpace");
-                // OOXML ST_DecimalNumber range for w:charSpace is [0, 32767]
-                // (Word's internal short-int storage). Out-of-range values are
-                // silently clamped by Word on open, so reject up front.
-                if (cs < 0 || cs > 32767)
-                    throw new ArgumentException(
-                        $"Invalid docGrid.charSpace '{value}': OOXML range is [0, 32767].");
+                // ECMA-376 declares charSpace as ST_DecimalNumber (xsd:integer)
+                // — any signed integer. Real Word documents using CJK grid
+                // commonly write negative values (e.g. -2049 for tight
+                // east-asian spacing). An earlier revision of this code
+                // rejected anything outside [0, 32767], which broke
+                // round-trip on every CJK docx and is documented in
+                // CONSISTENCY(docgrid-charspace-signed). The OOXML SDK
+                // (Int32Value) accepts any int, so we delegate range
+                // checking to Word itself.
                 grid.CharacterSpace = cs;
                 return true;
             }

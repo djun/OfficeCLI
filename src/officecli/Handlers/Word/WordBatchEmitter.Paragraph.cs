@@ -35,6 +35,7 @@ public static partial class WordBatchEmitter
 
         if (TryEmitInlineSectionBreak(pNode, parentPath, items, ctx)) return;
         if (TryEmitTocParagraph(pNode, parentPath, items)) return;
+        if (TryEmitTextboxOnlyParagraph(word, pNode, parentPath, autoPresent, items, ctx)) return;
 
         var props = FilterEmittableProps(pNode.Format);
         // BUG-DUMP26-01: numId/numLevel that came from style inheritance
@@ -362,6 +363,49 @@ public static partial class WordBatchEmitter
             }
             return true;
         }
+    }
+
+    /// <summary>
+    /// BUG-DUMP-TXBX-WRAPPER: a body paragraph whose only meaningful child is
+    /// a textbox-bearing Drawing run (textboxes ship inside
+    /// <c>&lt;mc:AlternateContent&gt;</c>, so Get reports the run as
+    /// type=&quot;run&quot; with no Format hints) used to emit BOTH an empty
+    /// <c>add p</c> wrapper AND a typed <c>add textbox</c> row. On replay
+    /// AddTextbox creates its own host paragraph, leaving the target with
+    /// one extra empty paragraph per textbox. Detect the
+    /// textbox-only-paragraph shape here and emit only the textbox row.
+    /// </summary>
+    private static bool TryEmitTextboxOnlyParagraph(
+        WordHandler word, DocumentNode pNode, string parentPath, bool autoPresent,
+        List<BatchItem> items, BodyEmitContext? ctx)
+    {
+        // Wrapper coalescing only makes sense at /body — header/footer/cell
+        // hosts of a textbox have their own pattern and we don't want to
+        // skip wrapping paragraphs that carry visible run formatting.
+        if (parentPath != "/body" || autoPresent) return false;
+        if (!string.IsNullOrEmpty(pNode.Text)) return false;
+        var children = pNode.Children ?? new List<DocumentNode>();
+        // Need exactly one drawing-bearing child (run / picture) and nothing
+        // else. Bookmarks / sdts / breaks need the paragraph wrapper to
+        // anchor against and must not coalesce.
+        if (children.Count != 1) return false;
+        var run = children[0];
+        // Source-side: AlternateContent wraps the drawing so Get reports the
+        // run as plain "run"/"r" with no Format hints.
+        // Target-side (after AddTextbox replay): Drawing sits directly under
+        // Run with no AlternateContent, so Get reports it as "picture".
+        // Both shapes must collapse here — otherwise source and target dumps
+        // disagree on whether to emit the `add p` wrapper and the round-trip
+        // drift grows on every textbox.
+        if (run.Type != "run" && run.Type != "r" && run.Type != "picture") return false;
+        // Don't gate on run.Text here: picture/textbox runs surface their
+        // docPr name in DocumentNode.Text (e.g. "文本框 1") which is not
+        // visible body text — it doesn't disqualify the wrapper-coalesce.
+        var rawXml = word.GetElementXml(run.Path);
+        if (string.IsNullOrEmpty(rawXml) || !IsTextboxDrawing(rawXml)) return false;
+        // Delegate to the same emit path TryEmitPictureRun uses so geometry
+        // props + inner-paragraph recursion stay identical.
+        return TryEmitTextbox(word, run, rawXml, parentPath, items, ctx);
     }
 
     private static bool TryEmitTocParagraph(DocumentNode pNode, string parentPath, List<BatchItem> items)
