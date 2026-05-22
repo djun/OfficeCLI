@@ -654,7 +654,10 @@ internal static partial class ChartHelper
             if (dlDefRp != null)
             {
                 if (dlDefRp.FontSize?.HasValue == true)
-                    node.Format["labelFont.size"] = (dlDefRp.FontSize.Value / 100).ToString();
+                    // CONSISTENCY(canonical-units / project CLAUDE.md): font
+                    // sizes emit pt-qualified ("12pt"). Round-trip via labelFont.size
+                    // accepts both "12" and "12pt" on input.
+                    node.Format["labelFont.size"] = $"{dlDefRp.FontSize.Value / 100}pt";
                 if (dlDefRp.Bold?.HasValue == true && dlDefRp.Bold.Value)
                     node.Format["labelFont.bold"] = "true";
                 var dlLabelFill = dlDefRp.GetFirstChild<Drawing.SolidFill>();

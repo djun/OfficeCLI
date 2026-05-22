@@ -589,7 +589,8 @@ internal static partial class ChartHelper
     private static readonly string[] DeferredPrefixes =
     [
         "title.", "plotarea.", "legend.", "datalabel",
-        "datatable.", "displayunitslabel.", "trendlinelabel."
+        "datatable.", "displayunitslabel.", "trendlinelabel.",
+        "labelfont.",
     ];
 
     /// <summary>

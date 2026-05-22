@@ -423,11 +423,33 @@ internal static partial class ChartHelper
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea2 == null) { unsupported.Add(key); break; }
-                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    var dls = EnsureDataLabelsOnAllChartGroups(plotArea2);
+                    foreach (var dl in dls)
                     {
                         dl.RemoveAllChildren<C.TextProperties>();
                         var tp = BuildLabelTextProperties(value);
                         dl.PrependChild(tp);
+                    }
+                    break;
+                }
+
+                // CONSISTENCY(labelfont-dotted-fanout): Reader emits labelFont
+                // as dotted subkeys (labelFont.color/size/bold/name). Mirror
+                // the title.* fan-out pattern so each subkey mutates the
+                // existing TextProperties without clobbering the others.
+                case "labelfont.color":
+                case "labelfont.size":
+                case "labelfont.bold":
+                case "labelfont.name":
+                case "labelfont.font":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var subkey = key.Substring("labelfont.".Length).ToLowerInvariant();
+                    var dls = EnsureDataLabelsOnAllChartGroups(plotArea2);
+                    foreach (var dl in dls)
+                    {
+                        ApplyLabelFontSubkey(dl, subkey, value);
                     }
                     break;
                 }
@@ -2741,6 +2763,94 @@ internal static partial class ChartHelper
     /// <summary>
     /// Build text properties for data labels: "size:color:bold" e.g. "10:FF0000:true" or just "10"
     /// </summary>
+    /// <summary>
+    /// Return every existing c:dLbls under the plot area, bootstrapping one
+    /// per chart-group when none exist. labelPos uses the same bootstrap so
+    /// labelFont / labelFont.* land on charts created without an explicit
+    /// dataLabels=… spec. Mirrors the inline scaffold in case "labelpos".
+    /// </summary>
+    private static List<C.DataLabels> EnsureDataLabelsOnAllChartGroups(C.PlotArea plotArea)
+    {
+        var existing = plotArea.Descendants<C.DataLabels>().ToList();
+        if (existing.Count > 0) return existing;
+        foreach (var chartGroup in plotArea.ChildElements.OfType<OpenXmlCompositeElement>()
+            .Where(e => e is C.BarChart or C.Bar3DChart
+                or C.LineChart or C.Line3DChart or C.PieChart or C.Pie3DChart
+                or C.ScatterChart or C.BubbleChart or C.AreaChart or C.Area3DChart
+                or C.RadarChart or C.DoughnutChart or C.StockChart or C.OfPieChart))
+        {
+            var dLbls = new C.DataLabels();
+            dLbls.AppendChild(new C.ShowLegendKey { Val = false });
+            dLbls.AppendChild(new C.ShowValue { Val = false });
+            dLbls.AppendChild(new C.ShowCategoryName { Val = false });
+            dLbls.AppendChild(new C.ShowSeriesName { Val = false });
+            dLbls.AppendChild(new C.ShowPercent { Val = false });
+            dLbls.AppendChild(new C.ShowBubbleSize { Val = false });
+            InsertChartGroupDLbls(chartGroup, dLbls);
+            existing.Add(dLbls);
+        }
+        return existing;
+    }
+
+    /// <summary>
+    /// Apply a single labelFont.* dotted subkey (color/size/bold/name) to a
+    /// DataLabels' DefaultRunProperties, creating the TextProperties scaffold
+    /// on first touch so subsequent subkeys merge rather than clobber.
+    /// Mirrors the title.* fan-out in SetChartProperties.
+    /// </summary>
+    private static void ApplyLabelFontSubkey(C.DataLabels dl, string subkey, string value)
+    {
+        var tp = dl.GetFirstChild<C.TextProperties>();
+        if (tp == null)
+        {
+            tp = new C.TextProperties(
+                new Drawing.BodyProperties(),
+                new Drawing.ListStyle(),
+                new Drawing.Paragraph(new Drawing.ParagraphProperties(new Drawing.DefaultRunProperties()))
+            );
+            dl.PrependChild(tp);
+        }
+        var para = tp.GetFirstChild<Drawing.Paragraph>()
+            ?? (Drawing.Paragraph)tp.AppendChild(new Drawing.Paragraph());
+        var pPr = para.GetFirstChild<Drawing.ParagraphProperties>()
+            ?? (Drawing.ParagraphProperties)para.PrependChild(new Drawing.ParagraphProperties());
+        var defRp = pPr.GetFirstChild<Drawing.DefaultRunProperties>()
+            ?? (Drawing.DefaultRunProperties)pPr.AppendChild(new Drawing.DefaultRunProperties());
+
+        switch (subkey)
+        {
+            case "size":
+            {
+                var sizeStr = value.EndsWith("pt", StringComparison.OrdinalIgnoreCase)
+                    ? value[..^2] : value;
+                defRp.FontSize = (int)Math.Round(
+                    ParseHelpers.SafeParseDouble(sizeStr, "labelFont.size") * 100);
+                break;
+            }
+            case "color":
+            {
+                defRp.RemoveAllChildren<Drawing.SolidFill>();
+                var sf = new Drawing.SolidFill();
+                sf.AppendChild(BuildChartColorElement(value));
+                // SolidFill precedes LatinFont in CT_TextCharacterProperties.
+                var latin = defRp.GetFirstChild<Drawing.LatinFont>();
+                if (latin != null) defRp.InsertBefore(sf, latin);
+                else defRp.PrependChild(sf);
+                break;
+            }
+            case "bold":
+                defRp.Bold = ParseHelpers.IsTruthy(value);
+                break;
+            case "name":
+            case "font":
+                defRp.RemoveAllChildren<Drawing.LatinFont>();
+                defRp.RemoveAllChildren<Drawing.EastAsianFont>();
+                defRp.AppendChild(new Drawing.LatinFont { Typeface = value });
+                defRp.AppendChild(new Drawing.EastAsianFont { Typeface = value });
+                break;
+        }
+    }
+
     private static C.TextProperties BuildLabelTextProperties(string spec)
     {
         var parts = spec.Split(':');
