@@ -855,6 +855,18 @@ public partial class WordHandler
     {
         var secNode = new DocumentNode { Path = path, Type = "section" };
 
+        // sectPrChange: `set section + trackChange.author` snapshots prior
+        // sectPr. Surfaced under sectPrChange.* for round-trip; the section
+        // emit path emits a follow-up `set` with trackChange.author/date.
+        var sectPrChange = sectPr.GetFirstChild<SectionPropertiesChange>();
+        if (sectPrChange != null)
+        {
+            if (!string.IsNullOrEmpty(sectPrChange.Author?.Value))
+                secNode.Format["sectPrChange.author"] = sectPrChange.Author!.Value!;
+            if (sectPrChange.Date?.Value is DateTime sDate)
+                secNode.Format["sectPrChange.date"] = sDate.ToString("o");
+        }
+
         var sectType = sectPr.GetFirstChild<SectionType>();
         if (sectType?.Val?.Value != null)
             secNode.Format["type"] = sectType.Val.InnerText;

@@ -38,6 +38,31 @@ public static partial class WordBatchEmitter
         if (TryEmitTextboxOnlyParagraph(word, pNode, parentPath, autoPresent, items, ctx)) return;
 
         var props = FilterEmittableProps(pNode.Format);
+        // paraMarkIns.* → AddParagraph's bare trackChange.author/date form.
+        // A bare trackChange.author (no `trackChange=<kind>` literal) on
+        // `add p` produces both <w:pPr><w:rPr><w:ins/></w:rPr></w:pPr> and
+        // wraps each auto-created content run in <w:ins>. We pass NO `text=`
+        // here so step 1 only stamps the paragraph mark; subsequent `add r`
+        // steps (which already carry their own trackChange=ins) wrap the
+        // content. Guarded against clashing with a sibling pPrChange — if
+        // both surface, paraMarkIns wins (its absence on round-trip is more
+        // visually obvious in Word's revision UI).
+        if (props.Remove("paraMarkIns.author", out var pmiAuthor))
+        {
+            props["trackChange.author"] = pmiAuthor;
+            // Strip trackChange=format / trackChange.date from a sibling
+            // pPrChange so the bare-trackChange path on AddParagraph fires
+            // instead of the pPrChange path. pPrChange round-trip on
+            // paragraphs that are ALSO newly inserted is a corner case we
+            // accept losing for now (rare in practice; pPrChange semantics
+            // overlap with paraMarkIns on a fresh paragraph anyway).
+            props.Remove("trackChange");
+        }
+        if (props.Remove("paraMarkIns.date", out var pmiDate))
+        {
+            if (!props.ContainsKey("trackChange.date"))
+                props["trackChange.date"] = pmiDate;
+        }
         // BUG-DUMP26-01: numId/numLevel that came from style inheritance
         // (ResolveNumPrFromStyle, no direct w:numPr on the paragraph) must
         // not ride on `add p` — the style already supplies them, and emitting

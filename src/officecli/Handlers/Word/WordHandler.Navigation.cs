@@ -1405,6 +1405,27 @@ public partial class WordHandler
                 if (pPrChange.Date?.Value is DateTime pDate)
                     node.Format["trackChange.date"] = pDate.ToString("o");
             }
+            // paraMarkIns: `<w:pPr><w:rPr><w:ins .../></w:rPr></w:pPr>` records
+            // that the paragraph mark itself was inserted as a tracked change —
+            // distinct from pPrChange (format-change snapshot) and from any
+            // content-run wrappers. Surfaced under a paraMarkIns.* namespace so
+            // dump can translate it back into AddParagraph's bare-trackChange.*
+            // form on replay (which re-creates both the ¶ mark and any
+            // accompanying content wrapping in one step). Kept distinct from
+            // `trackChange=format` to avoid clobbering pPrChange attribution
+            // when both are present on the same paragraph.
+            var pmrpRev = pProps?.ParagraphMarkRunProperties;
+            if (pmrpRev != null)
+            {
+                var pMarkIns = pmrpRev.GetFirstChild<Inserted>();
+                if (pMarkIns != null)
+                {
+                    if (!string.IsNullOrEmpty(pMarkIns.Author?.Value))
+                        node.Format["paraMarkIns.author"] = pMarkIns.Author!.Value!;
+                    if (pMarkIns.Date?.Value is DateTime piDate)
+                        node.Format["paraMarkIns.date"] = piDate.ToString("o");
+                }
+            }
             if (pProps != null)
             {
                 if (pProps.ParagraphStyleId?.Val?.Value != null)
@@ -2725,6 +2746,20 @@ public partial class WordHandler
             var tp = table.GetFirstChild<TableProperties>();
             if (tp != null)
             {
+                // tblPrChange: `set table + trackChange.author` snapshots the
+                // prior tblPr and stamps author/date. Surfaced under
+                // tblPrChange.* so EmitTable can emit a follow-up
+                // `set /body/tbl[N]` step carrying trackChange.author/date
+                // (re-runs the snapshot+stamp on replay). Distinct namespace
+                // from any future bare `trackChange=` on tables.
+                var tblPrChange = tp.GetFirstChild<TablePropertiesChange>();
+                if (tblPrChange != null)
+                {
+                    if (!string.IsNullOrEmpty(tblPrChange.Author?.Value))
+                        node.Format["tblPrChange.author"] = tblPrChange.Author!.Value!;
+                    if (tblPrChange.Date?.Value is DateTime tDate)
+                        node.Format["tblPrChange.date"] = tDate.ToString("o");
+                }
                 // Table style
                 // BUG-R3-05: empty Val (set via legacy code that wrote tblStyle
                 // with empty string) must NOT surface as a "style" key.
@@ -3332,6 +3367,17 @@ public partial class WordHandler
     {
         var trPr = row.TableRowProperties;
         if (trPr == null) return;
+        // trPrChange: `set row + trackChange.author` snapshots prior trPr.
+        // Surfaced under trPrChange.* for round-trip; EmitTable emits a
+        // follow-up `set tr[N]` with trackChange.author/date to reproduce.
+        var trPrChange = trPr.GetFirstChild<TableRowPropertiesChange>();
+        if (trPrChange != null)
+        {
+            if (!string.IsNullOrEmpty(trPrChange.Author?.Value))
+                node.Format["trPrChange.author"] = trPrChange.Author!.Value!;
+            if (trPrChange.Date?.Value is DateTime trDate)
+                node.Format["trPrChange.date"] = trDate.ToString("o");
+        }
         var rh = trPr.GetFirstChild<TableRowHeight>();
         if (rh?.Val?.Value != null)
         {
@@ -3354,6 +3400,17 @@ public partial class WordHandler
         var tcPr = cell.TableCellProperties;
         if (tcPr != null)
         {
+            // tcPrChange: `set cell + trackChange.author` snapshots prior tcPr.
+            // Surfaced under tcPrChange.* for round-trip; EmitTable emits a
+            // follow-up `set tr[N]/tc[M]` with trackChange.author/date.
+            var tcPrChange = tcPr.GetFirstChild<TableCellPropertiesChange>();
+            if (tcPrChange != null)
+            {
+                if (!string.IsNullOrEmpty(tcPrChange.Author?.Value))
+                    node.Format["tcPrChange.author"] = tcPrChange.Author!.Value!;
+                if (tcPrChange.Date?.Value is DateTime tcDate)
+                    node.Format["tcPrChange.date"] = tcDate.ToString("o");
+            }
             // Borders (including diagonal — like POI CTTcBorders)
             var cb = tcPr.TableCellBorders;
             if (cb != null)

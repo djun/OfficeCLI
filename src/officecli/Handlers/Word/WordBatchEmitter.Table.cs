@@ -70,6 +70,14 @@ public static partial class WordBatchEmitter
         if (cols == 0) return;
 
         var tableProps = FilterEmittableProps(tableNode.Format);
+        // Strip the revision-marker surface keys so they don't ride on
+        // `add table` — they're consumed by a follow-up EmitTrackChangeMarker
+        // call below. Without this, AddTable's schema fallback would create
+        // a phantom <w:tblPrChange> on the new table, and the follow-up
+        // `set trackChange.author=...` would then trip the
+        // "element already has a pending tblPrChange" guard.
+        tableProps.Remove("tblPrChange.author");
+        tableProps.Remove("tblPrChange.date");
         tableProps["rows"] = rows.Count.ToString();
         tableProps["cols"] = cols.ToString();
         // Source had no <w:tblGrid> or an empty one — cells (if any) carry
@@ -160,6 +168,14 @@ public static partial class WordBatchEmitter
         var tablePath = parentTablePath != null
             ? $"{parentTablePath}/tbl[1]"
             : $"{containerPath}/tbl[last()]";
+
+        // tblPrChange round-trip: source carried <w:tblPrChange> with
+        // author/date. Emit a no-op `set` carrying only trackChange.* so
+        // Set.TrackChange re-runs the snapshot+stamp on the now-populated
+        // tblPr. The snapshot equals the just-created state — semantically
+        // "this author marked the tblPr changed at this time" (the original
+        // pre-change values are not recoverable from the source dump).
+        EmitTrackChangeMarker(tableNode.Format, "tblPrChange", tablePath, items);
         for (int r = 0; r < rows.Count; r++)
         {
             // Emit row-level properties (header / height / height.rule) as a
@@ -177,6 +193,9 @@ public static partial class WordBatchEmitter
                     Props = rowProps
                 });
             }
+            // trPrChange round-trip — see EmitTrackChangeMarker.
+            EmitTrackChangeMarker(rowNode.Format, "trPrChange",
+                $"{tablePath}/tr[{r + 1}]", items);
             var cells = rowCellNodes[r];
             for (int c = 0; c < cells.Count; c++)
             {
@@ -192,6 +211,9 @@ public static partial class WordBatchEmitter
                 // to the first paragraph (align/direction/run leak-throughs)
                 // to avoid double-application.
                 var cellProps = ExtractCellOnlyProps(cellNode.Format);
+                // tcPrChange round-trip — see EmitTrackChangeMarker.
+                EmitTrackChangeMarker(cellNode.Format, "tcPrChange",
+                    cellTargetPath, items);
                 if (cellProps.Count > 0)
                 {
                     // CONSISTENCY(tblgrid-preserve): tcW values in the source
@@ -327,6 +349,45 @@ public static partial class WordBatchEmitter
     {
         "header", "height", "cantSplit",
     };
+
+    /// <summary>
+    /// Emit a `set <path> --prop trackChange.author=... [--prop trackChange.date=...]`
+    /// step when <paramref name="format"/> carries `<paramref name="prefix"/>.author`
+    /// (and optionally `<paramref name="prefix"/>.date`) — i.e. the source had a
+    /// pending *PrChange revision marker. On replay, Set.TrackChange.cs
+    /// re-runs the snapshot+stamp on the now-populated *Pr, recreating the
+    /// marker. Used for tblPrChange / trPrChange / tcPrChange / sectPrChange.
+    /// (pPrChange already round-trips via `add p --prop trackChange=format`
+    /// — its trackChange.* keys ride the create step; this helper handles
+    /// the structural elements whose Add path doesn't accept trackChange.)
+    /// </summary>
+    private static void EmitTrackChangeMarker(
+        Dictionary<string, object?> format,
+        string prefix,
+        string path,
+        List<BatchItem> items)
+    {
+        if (!format.TryGetValue($"{prefix}.author", out var authorObj) || authorObj == null)
+            return;
+        var author = authorObj.ToString();
+        if (string.IsNullOrEmpty(author)) return;
+        var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["trackChange.author"] = author!,
+        };
+        if (format.TryGetValue($"{prefix}.date", out var dateObj) && dateObj != null)
+        {
+            var date = dateObj.ToString();
+            if (!string.IsNullOrEmpty(date))
+                props["trackChange.date"] = date!;
+        }
+        items.Add(new BatchItem
+        {
+            Command = "set",
+            Path = path,
+            Props = props,
+        });
+    }
 
     private static Dictionary<string, string> ExtractRowOnlyProps(Dictionary<string, object?> raw)
     {
