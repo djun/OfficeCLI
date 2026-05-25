@@ -18,7 +18,7 @@ static partial class CommandBuilder
         "find", "color", "note", "tofix", "regex",
     };
 
-    private static Command BuildMarkCommand(Option<bool> jsonOption)
+    private static Command BuildMarkCommand(Option<bool> jsonOption, string name = "mark")
     {
         var fileArg = new Argument<FileInfo>("file") { Description = "Office document path (.pptx, .xlsx, .docx)" };
         var pathArg = new Argument<string>("path") { Description = "DOM path to the element to mark. The 'selected' pseudo-path still works but is discouraged: prefer `get selected` first, then `mark <path>` per path, so the target lives in the command line." };
@@ -28,7 +28,7 @@ static partial class CommandBuilder
             AllowMultipleArgumentsPerToken = true,
         };
 
-        var cmd = new Command("mark",
+        var cmd = new Command(name,
             "Attach an in-memory advisory mark to a document element via the watch process. Path must be in data-path format (e.g. /body/p[1]); 'selected' marks all selected elements.");
         cmd.Add(fileArg);
         cmd.Add(pathArg);
@@ -237,13 +237,13 @@ static partial class CommandBuilder
 
     // ==================== unmark ====================
 
-    private static Command BuildUnmarkMarkCommand(Option<bool> jsonOption)
+    private static Command BuildUnmarkMarkCommand(Option<bool> jsonOption, string name = "unmark")
     {
         var fileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
         var pathOpt = new Option<string?>("--path") { Description = "Element path to unmark" };
         var allOpt = new Option<bool>("--all") { Description = "Remove all marks for this file" };
 
-        var cmd = new Command("unmark",
+        var cmd = new Command(name,
             "Remove marks from the watch process. Specify --path <data-path> or --all.");
         cmd.Add(fileArg);
         cmd.Add(pathOpt);
@@ -293,11 +293,11 @@ static partial class CommandBuilder
 
     // ==================== get-marks ====================
 
-    private static Command BuildGetMarksCommand(Option<bool> jsonOption)
+    private static Command BuildGetMarksCommand(Option<bool> jsonOption, string name = "get-marks")
     {
         var fileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
 
-        var cmd = new Command("get-marks",
+        var cmd = new Command(name,
             "List all marks currently held by the watch process.");
         cmd.Add(fileArg);
         cmd.Add(jsonOption);

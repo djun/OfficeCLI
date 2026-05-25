@@ -120,12 +120,16 @@ static partial class CommandBuilder
         rootCommand.Add(serveCommand);
 
         // Register commands from partial files
-        rootCommand.Add(BuildWatchCommand());
+        rootCommand.Add(BuildWatchCommand(jsonOption));
         rootCommand.Add(BuildUnwatchCommand());
-        rootCommand.Add(BuildMarkCommand(jsonOption));
-        rootCommand.Add(BuildUnmarkMarkCommand(jsonOption));
-        rootCommand.Add(BuildGetMarksCommand(jsonOption));
-        rootCommand.Add(BuildGotoCommand(jsonOption));
+        // BC aliases — mark/unmark/get-marks/goto were promoted to `watch <sub>`
+        // subcommands; the top-level forms are kept registered but hidden so
+        // existing scripts and tests keep working. Remove after a deprecation
+        // window once external usage has migrated.
+        var markBc = BuildMarkCommand(jsonOption);          markBc.Hidden = true; rootCommand.Add(markBc);
+        var unmarkBc = BuildUnmarkMarkCommand(jsonOption);  unmarkBc.Hidden = true; rootCommand.Add(unmarkBc);
+        var getMarksBc = BuildGetMarksCommand(jsonOption);  getMarksBc.Hidden = true; rootCommand.Add(getMarksBc);
+        var gotoBc = BuildGotoCommand(jsonOption);          gotoBc.Hidden = true; rootCommand.Add(gotoBc);
         rootCommand.Add(BuildViewCommand(jsonOption));
         rootCommand.Add(BuildGetCommand(jsonOption));
         rootCommand.Add(BuildQueryCommand(jsonOption));

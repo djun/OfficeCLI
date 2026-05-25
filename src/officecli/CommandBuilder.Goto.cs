@@ -20,12 +20,12 @@ static partial class CommandBuilder
     // WatchMessage.ExtractWordScrollTarget. PPT/Excel: not yet wired in
     // (anchor coverage is the gap, not the command itself).
 
-    private static Command BuildGotoCommand(Option<bool> jsonOption)
+    private static Command BuildGotoCommand(Option<bool> jsonOption, string name = "goto")
     {
         var fileArg = new Argument<FileInfo>("file") { Description = "Office document path (.docx)" };
         var pathArg = new Argument<string>("path") { Description = "Element path to scroll to (e.g. /body/p[5], /body/table[1], /body/table[1]/tr[2]/tc[3])" };
 
-        var cmd = new Command("goto",
+        var cmd = new Command(name,
             "Scroll the running watch viewer(s) to the given element. Path resolves to an HTML anchor; broadcast to all SSE clients of the file. Word: paragraph, table, table row, table cell.");
         cmd.Add(fileArg);
         cmd.Add(pathArg);

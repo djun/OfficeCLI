@@ -9,15 +9,25 @@ namespace OfficeCli;
 
 static partial class CommandBuilder
 {
-    private static Command BuildWatchCommand()
+    private static Command BuildWatchCommand(Option<bool> jsonOption)
     {
         var watchFileArg = new Argument<FileInfo>("file") { Description = "Office document path (.pptx, .xlsx, .docx)" };
         var watchPortOpt = new Option<int>("--port") { Description = "HTTP port for preview server" };
         watchPortOpt.DefaultValueFactory = _ => 26315;
 
-        var watchCommand = new Command("watch", "Start a live preview server that refreshes when officecli modifies the document (external edits are not detected)");
+        var watchCommand = new Command("watch", "Start a live preview server that refreshes when officecli modifies the document (external edits are not detected). Subcommands (mark/unmark/marks/goto) operate on the running preview.");
         watchCommand.Add(watchFileArg);
         watchCommand.Add(watchPortOpt);
+
+        // Subcommands — operate against the running watch process via named-pipe IPC.
+        // These were previously top-level (`mark`, `unmark`, `get-marks`, `goto`);
+        // grouped under `watch` to reflect that they only function while a watch
+        // session is alive. The top-level forms remain registered as hidden BC
+        // aliases (see CommandBuilder.cs).
+        watchCommand.Add(BuildMarkCommand(jsonOption, "mark"));
+        watchCommand.Add(BuildUnmarkMarkCommand(jsonOption, "unmark"));
+        watchCommand.Add(BuildGetMarksCommand(jsonOption, "marks"));
+        watchCommand.Add(BuildGotoCommand(jsonOption, "goto"));
 
         watchCommand.SetAction(result => SafeRun(() =>
         {
