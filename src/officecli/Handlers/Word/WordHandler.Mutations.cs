@@ -1001,27 +1001,47 @@ public partial class WordHandler
         wrapper.AppendChild(run);
     }
 
-    /// <summary>Wrap a single Run in a w:moveFrom marker, converting
-    /// w:t → w:delText (moveFrom carries the original deleted-from
-    /// location's text as delText, same as w:del). Caller must supply an
-    /// explicit id so the moveTo half can be paired.</summary>
+    /// <summary>Wrap a single Run in a w:moveFrom marker. Per
+    /// ECMA-376 §17.3.3.34, w:delText is only valid inside &lt;w:del&gt;,
+    /// never inside &lt;w:moveFrom&gt; — Word renders strikethrough for
+    /// moveFrom content via the moveFrom wrapper itself, not via delText.
+    /// Caller must supply an explicit id so the moveTo half can be paired.
+    ///
+    /// Also brackets the wrapper with MoveFromRangeStart / MoveFromRangeEnd
+    /// siblings carrying `Name="Move_{id}"`. Without the range markers
+    /// Word (especially Word for Mac) refuses to open the document with
+    /// "Word found unreadable content"; even where it opens, the
+    /// reviewing pane fails to pair the moveFrom with its moveTo. The
+    /// shared `w:name` between the two halves is what Word's UI keys off
+    /// (ECMA-376 §17.13.5.20-23). MoveWithTrackChange (the high-level
+    /// auto-pair Move command) already does this; mirror it here so the
+    /// low-level `set --prop revision.type=moveFrom` path produces the
+    /// same valid shape.</summary>
     private void WrapRunAsMoveFrom(Run run, string author, DateTime date, string id)
     {
         var parentEl = run.Parent;
         if (parentEl == null) return;
         var wrapper = new MoveFromRun { Author = author, Date = date, Id = id };
-        foreach (var t in run.Elements<Text>().ToList())
-        {
-            var dt = new DeletedText(t.Text ?? "") { Space = t.Space };
-            t.Parent?.ReplaceChild(dt, t);
-        }
         parentEl.ReplaceChild(wrapper, run);
         wrapper.AppendChild(run);
+
+        var moveName = $"Move_{id}";
+        wrapper.InsertBeforeSelf(new MoveFromRangeStart
+        {
+            Id = id,
+            Author = author,
+            Date = date,
+            Name = moveName,
+        });
+        wrapper.InsertAfterSelf(new MoveFromRangeEnd { Id = id });
     }
 
     /// <summary>Wrap a single Run in a w:moveTo marker (no text
     /// conversion — moveTo keeps w:t, mirrors w:ins). Caller must supply
-    /// an explicit id matching the paired moveFrom.</summary>
+    /// an explicit id matching the paired moveFrom. Brackets the
+    /// wrapper with MoveToRangeStart / MoveToRangeEnd carrying
+    /// `Name="Move_{id}"` — see <see cref="WrapRunAsMoveFrom"/> for the
+    /// rationale.</summary>
     private void WrapRunAsMoveTo(Run run, string author, DateTime date, string id)
     {
         var parentEl = run.Parent;
@@ -1029,6 +1049,16 @@ public partial class WordHandler
         var wrapper = new MoveToRun { Author = author, Date = date, Id = id };
         parentEl.ReplaceChild(wrapper, run);
         wrapper.AppendChild(run);
+
+        var moveName = $"Move_{id}";
+        wrapper.InsertBeforeSelf(new MoveToRangeStart
+        {
+            Id = id,
+            Author = author,
+            Date = date,
+            Name = moveName,
+        });
+        wrapper.InsertAfterSelf(new MoveToRangeEnd { Id = id });
     }
 
     public string Move(string sourcePath, string? targetParentPath, InsertPosition? position, Dictionary<string, string>? properties = null)
@@ -1285,9 +1315,12 @@ public partial class WordHandler
         }
         else targetParent.AppendChild(moveTo);
 
-        // Now wrap the source in moveFrom + convert w:t → w:delText.
-        // CONSISTENCY(word-track-change): same w:t→w:delText rule used by
-        // WordHandler.Add.Text.cs for trackChange=moveFrom on `add run`.
+        // Wrap the source in moveFrom. Per ECMA-376 §17.3.3.34 w:delText
+        // is only valid inside <w:del>, never inside <w:moveFrom> — Word
+        // renders strikethrough for moveFrom content from the moveFrom
+        // wrapper itself. The earlier t→delText conversion here tripped
+        // Word's "found unreadable content" recovery (Word re-wrapped
+        // the orphan delText in a synthetic <w:del w:author="Unknown">).
         var srcParent = element.Parent
             ?? throw new InvalidOperationException("Source run has no parent");
         var moveFrom = new MoveFromRun
@@ -1296,11 +1329,6 @@ public partial class WordHandler
             Author = tcAuthor,
             Date = tcDt,
         };
-        foreach (var t in element.Elements<Text>().ToList())
-        {
-            var dt = new DeletedText(t.Text ?? "") { Space = t.Space };
-            t.Parent?.ReplaceChild(dt, t);
-        }
         srcParent.ReplaceChild(moveFrom, element);
         moveFrom.AppendChild(element);
 
