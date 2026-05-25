@@ -1476,7 +1476,10 @@ internal static partial class ChartHelper
 
         var fill = defRp.GetFirstChild<Drawing.SolidFill>();
         var color = ReadColorFromFill(fill);
-        parts.Add(color?.TrimStart('#') ?? "");
+        // Canonical: hex colors are emitted with the "#" prefix (project
+        // CLAUDE.md). Earlier this stripped "#" via TrimStart, breaking the
+        // canonical form for axisFont / legendFont compound readback.
+        parts.Add(color ?? "");
 
         var font = defRp.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value;
         if (font != null)
