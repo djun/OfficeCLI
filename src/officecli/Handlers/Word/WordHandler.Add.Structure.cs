@@ -630,6 +630,17 @@ public partial class WordHandler
             newStyle.AppendChild(new BasedOn { Val = basedOn });
         if (properties.TryGetValue("next", out var nextStyle))
             newStyle.AppendChild(new NextParagraphStyle { Val = nextStyle });
+        // <w:link w:val="…"/> — pair a paragraph style with its companion
+        // character style (Word's "Linked Styles" feature). Schema order:
+        // after `next`, before autoRedefine/hidden/uiPriority. The referenced
+        // id must exist in styles.xml; we do not validate here — the dump→batch
+        // emit order guarantees both styles land before any consumer.
+        if ((properties.TryGetValue("linked", out var sLinked)
+                || properties.TryGetValue("link", out sLinked))
+            && !string.IsNullOrEmpty(sLinked))
+        {
+            newStyle.AppendChild(new LinkedStyle { Val = sLinked });
+        }
         // BUG-DUMP11-05: top-level Style flags — autoRedefine + hidden.
         // Schema order: after `next`, before pPr/rPr. Toggle elements; only
         // emit when truthy. ParseHelpers.IsTruthy throws on unrecognized
@@ -877,6 +888,11 @@ public partial class WordHandler
             "id", "styleId", "styleid",
             "name", "styleName", "stylename",
             "type", "basedon", "basedOn", "next",
+            // <w:link/> paired-style — consumed in the explicit dispatch above.
+            // Without listing here, the per-key fallback loop would attempt
+            // GenericXmlQuery on `link`, hit the schema's <w:link> element,
+            // and either double-stamp or surface a misleading UNSUPPORTED.
+            "linked", "link",
             // BUG-DUMP11-05: top-level Style flags consumed in the explicit
             // dispatch above; without listing them here, the per-key fallback
             // loop would route `hidden` to ApplyRunFormatting (vanish alias)

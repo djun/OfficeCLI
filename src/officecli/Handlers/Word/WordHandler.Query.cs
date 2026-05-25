@@ -628,6 +628,11 @@ public partial class WordHandler
                 styleNode.Format["basedOn.path"] = $"/styles/{style.BasedOn.Val.Value}";
             }
             if (style.NextParagraphStyle?.Val?.Value != null) styleNode.Format["next"] = style.NextParagraphStyle.Val.Value;
+            // <w:link w:val="…"/> — paragraph-style ↔ character-style pair
+            // (Word's "Linked Styles" feature). Without readback, dump emits
+            // `add style id=X type=paragraph` and replay loses the pairing;
+            // the corresponding character style lingers orphaned.
+            if (style.LinkedStyle?.Val?.Value != null) styleNode.Format["linked"] = style.LinkedStyle.Val.Value;
             // BUG-DUMP11-05: top-level Style children — autoRedefine (Word
             // updates the style definition when the user reformats a
             // paragraph using it) and StyleHidden (style hidden from UI

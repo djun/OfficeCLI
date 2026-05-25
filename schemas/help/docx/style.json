@@ -114,6 +114,21 @@
       "readback": "NextParagraphStyle.Val",
       "enforcement": "report"
     },
+    "linked": {
+      "type": "string",
+      "aliases": [
+        "link"
+      ],
+      "description": "linked-style pair: a paragraph style references its companion character style (or vice versa). Word UI: 'Linked (paragraph and character)'. Value is the partner styleId; must exist in styles.xml.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop linked=MyCharStyle"
+      ],
+      "readback": "LinkedStyle.Val",
+      "enforcement": "report"
+    },
     "align": {
       "type": "enum",
       "values": [

@@ -1538,6 +1538,10 @@ public partial class WordHandler
                     var ns = style.NextParagraphStyle ?? style.AppendChild(new NextParagraphStyle());
                     ns.Val = value;
                     break;
+                case "linked" or "link":
+                    var lk = style.LinkedStyle ?? style.AppendChild(new LinkedStyle());
+                    lk.Val = value;
+                    break;
                 case "align" or "alignment":
                     var pPr = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
                     pPr.Justification = new Justification { Val = ParseJustification(value) };
