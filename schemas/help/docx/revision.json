@@ -14,7 +14,7 @@
     "positional": ["/revision[N]", "/body/p[N]/ins[M]", "/body/p[N]/del[M]"],
     "selector": ["/revision", "/revision[@author=NAME]", "/revision[@type=ins|del|format|moveFrom|moveTo]", "/revision[@author=NAME][@type=TYPE]"]
   },
-  "note": "Tracked-change marker. `query revision` enumerates every w:ins / w:del / w:moveFrom / w:moveTo / w:*PrChange in the document. Two disjoint property namespaces: `revision.type=ins|del|format|moveFrom|moveTo` creates a tracked change (used with add/set on the host run/paragraph/table/row/cell/section), while `revision.action=accept|reject` acts on existing markers via /revision selectors or native paths (/body/p[N], /body/p[N]/r[M], etc.). The two namespaces are mutually exclusive — mixing revision.action with any revision.type/.author/.date/.id key is rejected as ambiguous. Bare `revision=…` is no longer accepted.",
+  "note": "Tracked-change marker. `query revision` enumerates every w:ins / w:del / w:moveFrom / w:moveTo / w:*PrChange in the document. Two disjoint property namespaces: `revision.type=ins|del|format|moveFrom|moveTo` creates a tracked change (used with add/set on the host run/paragraph/table/row/cell/section), while `revision.action=accept|reject` acts on existing markers via /revision selectors or native paths (/body/p[N], /body/p[N]/r[M], etc.). The two namespaces are mutually exclusive — mixing revision.action with any revision.type/.author/.date/.id key is rejected as ambiguous. Bare `revision=…` is no longer accepted. Separate from `revisionNumber` on / (document save counter) and `trackChanges` on /settings (track-mode toggle).",
   "properties": {
     "type": {
       "type": "enum",
@@ -34,14 +34,15 @@
     },
     "author": {
       "type": "string",
+      "description": "Author of the revision. Surfaced on `query revision` nodes and on host elements (run/paragraph/…) that carry an ins/del/*PrChange ancestor. Supply via --prop revision.author=… on the host element to create.",
       "add": false, "set": false, "get": true,
       "examples": ["query /revision[@author=Alice]"],
-      "readback": "revision author (read-only on the revision node; supply with --prop revision.author=… when creating)",
+      "readback": "revision author (read-only on the revision node)",
       "enforcement": "report"
     },
     "date": {
       "type": "string",
-      "description": "ISO-8601 timestamp (read-only on the revision node).",
+      "description": "ISO-8601 timestamp (read-only on the revision node). Supply via --prop revision.date=… on the host element to create.",
       "add": false, "set": false, "get": true,
       "examples": [],
       "readback": "Date attribute (read-only)",
@@ -49,15 +50,24 @@
     },
     "id": {
       "type": "integer",
-      "description": "w:id attribute. Stable across save; pair moveFrom/moveTo by reusing the same id.",
+      "description": "w:id attribute. Stable across save; pair moveFrom/moveTo by reusing the same id. Supply via --prop revision.id=… on the host element.",
       "add": false, "set": false, "get": true,
       "examples": [],
-      "readback": "revision id (read-only)",
+      "readback": "revision id (read-only on the revision node)",
+      "enforcement": "report"
+    },
+    "nativePath": {
+      "type": "string",
+      "description": "Path to the underlying w:ins/w:del/w:moveFrom/w:moveTo/w:*PrChange element in document DOM terms (e.g. /body/p[2]/ins[1]). Use it to address the revision via the action native-path form: `set <nativePath> --prop revision.action=accept|reject`. Emitted on `query revision` synthetic nodes only.",
+      "add": false, "set": false, "get": true,
+      "examples": ["set /body/p[2]/ins[1] --prop revision.action=accept"],
+      "readback": "DOM path to the revision element (read-only)",
       "enforcement": "report"
     },
     "action": {
       "type": "enum",
       "values": ["accept", "reject"],
+      "description": "Accept / reject verb. Lives in a disjoint namespace from the creation keys above; mixing with revision.type/.author/.date/.id throws. Walks matching elements in reverse document order so /revision[N] paths don't shift mid-batch.",
       "add": false, "set": true, "get": false,
       "examples": [
         "set /revision --prop revision.action=accept",
@@ -68,6 +78,86 @@
       ],
       "readback": "(action is a verb — not surfaced on get)",
       "enforcement": "strict"
+    },
+    "paraMarkIns.author": {
+      "type": "string",
+      "description": "Author of a paragraph-mark-only insertion (w:rPr/w:ins inside the paragraph's pPr/rPr — the ¶ mark itself is part of the inserted change, distinct from a run-level w:ins wrapping content). Surfaced on paragraph nodes via get/query; on dump→batch the emitter rewrites it to bare revision.author on the synthetic paragraph + strips revision.type so the bare-attribution path defaults the type to ins.",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "paragraph-mark insertion author (read-only)",
+      "enforcement": "report"
+    },
+    "paraMarkIns.date": {
+      "type": "string",
+      "description": "ISO-8601 timestamp companion to paraMarkIns.author.",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "paragraph-mark insertion date (read-only)",
+      "enforcement": "report"
+    },
+    "sectPrChange.author": {
+      "type": "string",
+      "description": "Author of a w:sectPrChange on a section (revision.type=format equivalent at section scope; surfaced as a distinct key because the snapshot lives in a different OOXML wrapper than rPrChange/pPrChange).",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "section property-change author (read-only)",
+      "enforcement": "report"
+    },
+    "sectPrChange.date": {
+      "type": "string",
+      "description": "ISO-8601 timestamp companion to sectPrChange.author.",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "section property-change date (read-only)",
+      "enforcement": "report"
+    },
+    "tblPrChange.author": {
+      "type": "string",
+      "description": "Author of a w:tblPrChange on a table (table-properties revision — borders/style/layout snapshot).",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "table property-change author (read-only)",
+      "enforcement": "report"
+    },
+    "tblPrChange.date": {
+      "type": "string",
+      "description": "ISO-8601 timestamp companion to tblPrChange.author.",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "table property-change date (read-only)",
+      "enforcement": "report"
+    },
+    "trPrChange.author": {
+      "type": "string",
+      "description": "Author of a w:trPrChange on a table row (row-properties revision — row height/header/cantSplit snapshot). Separate from w:trPr/w:ins (= row insertion as tracked change).",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "row property-change author (read-only)",
+      "enforcement": "report"
+    },
+    "trPrChange.date": {
+      "type": "string",
+      "description": "ISO-8601 timestamp companion to trPrChange.author.",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "row property-change date (read-only)",
+      "enforcement": "report"
+    },
+    "tcPrChange.author": {
+      "type": "string",
+      "description": "Author of a w:tcPrChange on a table cell (cell-properties revision — borders/shading/width snapshot). Separate from w:tcPr/w:cellIns/w:cellDel (= cell insertion/deletion).",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "cell property-change author (read-only)",
+      "enforcement": "report"
+    },
+    "tcPrChange.date": {
+      "type": "string",
+      "description": "ISO-8601 timestamp companion to tcPrChange.author.",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "cell property-change date (read-only)",
+      "enforcement": "report"
     }
   }
 }
