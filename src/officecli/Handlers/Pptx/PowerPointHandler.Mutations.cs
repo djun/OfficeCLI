@@ -13,8 +13,10 @@ namespace OfficeCli.Handlers;
 
 public partial class PowerPointHandler
 {
-    public string? Remove(string path)
+    public string? Remove(string path, Dictionary<string, string>? properties = null)
     {
+        // Phase 4: trackChange.* is Word-only. Silently ignored here for now;
+        // PowerPoint has no revision-tracking schema equivalent.
         Modified = true;
         // CONSISTENCY(null-path-guard): callers that pass null get an
         // ArgumentNullException instead of a confusing downstream NRE.

@@ -106,9 +106,11 @@ internal sealed class FormatHandlerProxy : IDocumentHandler
         return ParseAddPath(result);
     }
 
-    public string? Remove(string path)
+    public string? Remove(string path, Dictionary<string, string>? properties = null)
     {
-        var result = _session.Send("command", "remove", new JsonObject { ["path"] = path });
+        var args = new JsonObject { ["path"] = path };
+        var props = properties != null ? PropsToJson(properties) : null;
+        var result = _session.Send("command", "remove", args, props);
         return result?.GetValue<string>();
     }
 

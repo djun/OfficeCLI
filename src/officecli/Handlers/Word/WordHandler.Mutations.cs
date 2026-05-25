@@ -16,9 +16,19 @@ namespace OfficeCli.Handlers;
 
 public partial class WordHandler
 {
-    public string? Remove(string path)
+    public string? Remove(string path, Dictionary<string, string>? properties = null)
     {
         Modified = true;
+
+        // Phase 4: remove + trackChange.* → produce w:del wrapper(s) instead
+        // of physically deleting. Run and Paragraph are supported; other
+        // element kinds (TableCell/Row/Section/...) throw out-of-scope.
+        // Intercepted *before* any container guard / shorthand resolution so
+        // the parsed element drives the kind dispatch directly.
+        if (properties != null && HasTrackChangeProps(properties))
+        {
+            return RemoveWithTrackChange(path, properties);
+        }
         // CONSISTENCY(container-remove-guard): reject removal of required
         // structural container elements up front. Without this guard,
         // `remove /body` / `remove /styles` etc. fall through to
@@ -771,6 +781,122 @@ public partial class WordHandler
                 try { mainPart.DeletePart(embedId); } catch { }
             }
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase 4: remove + trackChange.* (Run / Paragraph)
+    // ---------------------------------------------------------------------
+
+    private static bool HasTrackChangeProps(Dictionary<string, string> properties)
+    {
+        foreach (var k in properties.Keys)
+        {
+            if (k.StartsWith("trackChange.", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private string? RemoveWithTrackChange(string path, Dictionary<string, string> properties)
+    {
+        // Reuse the standard path parser + navigator. Container/shorthand
+        // intercepts in the plain Remove path don't apply: trackChange-mode
+        // remove only supports element-level Run/Paragraph.
+        var parts = ParsePath(path);
+        var element = NavigateToElement(parts, out var ctx)
+            ?? throw new ArgumentException($"Path not found: {path}" + (ctx != null ? $". {ctx}" : ""));
+
+        // Pull trackChange.* sub-props. Author defaults to "OfficeCLI",
+        // date defaults to UtcNow, id auto-allocated when omitted.
+        properties.TryGetValue("trackChange.author", out var tcAuthor);
+        properties.TryGetValue("trackChange.date", out var tcDateRaw);
+        properties.TryGetValue("trackChange.id", out var tcExplicitId);
+        if (string.IsNullOrEmpty(tcAuthor)) tcAuthor = "OfficeCLI";
+        DateTime tcDate = DateTime.UtcNow;
+        if (!string.IsNullOrEmpty(tcDateRaw) && DateTime.TryParse(tcDateRaw, out var parsedDate))
+            tcDate = parsedDate;
+
+        if (element is Run runEl)
+        {
+            // Already wrapped — reject so the agent fixes the call site
+            // rather than producing nested ins/del which Word silently drops.
+            if (runEl.Parent is InsertedRun || runEl.Parent is DeletedRun
+                || runEl.Parent is MoveFromRun || runEl.Parent is MoveToRun)
+                throw new InvalidOperationException(
+                    $"Cannot remove + trackChange a run already wrapped in an ins/del/moveFrom/moveTo at {path}.");
+
+            WrapRunAsDeleted(runEl, tcAuthor!, tcDate, tcExplicitId);
+        }
+        else if (element is Paragraph paraEl)
+        {
+            // Already inside a w:del or w:ins → out of scope.
+            if (paraEl.Ancestors().Any(a => a is InsertedRun || a is DeletedRun))
+                throw new InvalidOperationException(
+                    $"Cannot remove + trackChange a paragraph already inside an ins/del at {path}.");
+
+            // ¶ mark del — pPr/rPr/<w:del/>
+            var pPr = paraEl.ParagraphProperties ?? paraEl.PrependChild(new ParagraphProperties());
+            var pPrRpr = pPr.ParagraphMarkRunProperties
+                       ?? pPr.AppendChild(new ParagraphMarkRunProperties());
+            // Schema: paragraph-mark deletion marker is a bare <w:del>
+            // (no inner properties), child of w:rPr inside w:pPr.
+            var paraDel = new Deleted
+            {
+                Author = tcAuthor!,
+                Date = tcDate,
+                Id = !string.IsNullOrEmpty(tcExplicitId) ? tcExplicitId : GenerateRevisionId(),
+            };
+            pPrRpr.AppendChild(paraDel);
+
+            // Wrap every existing Run child in its own w:del with w:t → w:delText.
+            // Each run wrapper gets its own unique id (still distinct from the
+            // pPr/rPr/del marker id above). Explicit trackChange.id is *not*
+            // shared across paragraph-mark and content wrappers — the
+            // paragraph mark uses it, the per-run wrappers auto-allocate.
+            foreach (var r in paraEl.Elements<Run>().ToList())
+            {
+                WrapRunAsDeleted(r, tcAuthor!, tcDate, explicitId: null);
+            }
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                "remove + trackChange only supports Run and Paragraph in Phase 4.");
+        }
+
+        // Refresh paragraph textId for the affected paragraph(s) so the
+        // dump/replay layer notices content changed.
+        var refreshPara = (element as Paragraph)
+                        ?? element.Ancestors<Paragraph>().FirstOrDefault();
+        if (refreshPara != null) refreshPara.TextId = GenerateParaId();
+
+        _doc.MainDocumentPart?.Document?.Save();
+        return null;
+    }
+
+    /// <summary>
+    /// Wrap a single Run in a w:del marker, converting any inner w:t to w:delText.
+    /// Mirrors the ins/del wrapping done in WordHandler.Add.Text.cs.
+    /// </summary>
+    private void WrapRunAsDeleted(Run run, string author, DateTime date, string? explicitId)
+    {
+        var parentEl = run.Parent;
+        if (parentEl == null) return;
+
+        var wrapper = new DeletedRun
+        {
+            Author = author,
+            Date = date,
+            Id = !string.IsNullOrEmpty(explicitId) ? explicitId : GenerateRevisionId(),
+        };
+        // w:t → w:delText so Word renders strikethrough content.
+        foreach (var t in run.Elements<Text>().ToList())
+        {
+            var dt = new DeletedText(t.Text ?? "") { Space = t.Space };
+            t.Parent?.ReplaceChild(dt, t);
+        }
+        parentEl.ReplaceChild(wrapper, run);
+        wrapper.AppendChild(run);
     }
 
     public string Move(string sourcePath, string? targetParentPath, InsertPosition? position, Dictionary<string, string>? properties = null)

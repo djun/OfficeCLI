@@ -291,11 +291,16 @@ static partial class CommandBuilder
             Description = "(Excel cell only) Shift surrounding cells to fill the gap: left | up. " +
                           "For full row/col delete with metadata adjustments, target the row/col path directly."
         };
+        var removePropsOpt = new Option<string[]>("--prop") {
+            Description = "Modifier property (key=value). Phase 4: --prop trackChange.author=<name> on a Word Run or Paragraph path records a w:del revision instead of physically deleting.",
+            AllowMultipleArgumentsPerToken = true,
+        };
 
         var removeCommand = new Command("remove", "Remove an element from the document");
         removeCommand.Add(removeFileArg);
         removeCommand.Add(removePathArg);
         removeCommand.Add(shiftOption);
+        removeCommand.Add(removePropsOpt);
         removeCommand.Add(jsonOption);
 
         removeCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
@@ -303,12 +308,15 @@ static partial class CommandBuilder
             var file = result.GetValue(removeFileArg)!;
             var path = result.GetValue(removePathArg)!;
             var shift = result.GetValue(shiftOption);
+            var props = result.GetValue(removePropsOpt);
+            var parsedProps = (props != null && props.Length > 0) ? ParsePropsArray(props) : null;
 
             if (TryResident(file.FullName, req =>
             {
                 req.Command = "remove";
                 req.Args["path"] = path;
                 if (!string.IsNullOrEmpty(shift)) req.Args["shift"] = shift;
+                if (parsedProps != null) req.Props = parsedProps;
             }, json) is {} rc) return rc;
 
             using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
@@ -324,7 +332,7 @@ static partial class CommandBuilder
             }
             else
             {
-                warning = handler.Remove(path);
+                warning = handler.Remove(path, parsedProps);
             }
             var message = $"Removed {path}";
             if (warning != null) message += $"\n{warning}";

@@ -1679,7 +1679,8 @@ public class ResidentServer : IDisposable
         }
         else
         {
-            _handler.Remove(path);
+            var props = req.GetProps();
+            _handler.Remove(path, props.Count > 0 ? props : null);
         }
         Console.WriteLine($"Removed {path}");
     }

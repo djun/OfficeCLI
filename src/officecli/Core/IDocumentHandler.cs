@@ -70,8 +70,10 @@ public interface IDocumentHandler : IDisposable
     string Add(string parentPath, string type, InsertPosition? position, Dictionary<string, string> properties);
     /// <summary>
     /// Remove element at path. Returns an optional warning message (e.g. formula cells affected by shift).
+    /// When <paramref name="properties"/> carries trackChange.* keys (Word only, Run/Paragraph in Phase 4),
+    /// the removal is recorded as a w:del revision instead of physically deleted.
     /// </summary>
-    string? Remove(string path);
+    string? Remove(string path, Dictionary<string, string>? properties = null);
     string Move(string sourcePath, string? targetParentPath, InsertPosition? position, Dictionary<string, string>? properties = null);
     string CopyFrom(string sourcePath, string targetParentPath, InsertPosition? position);
 
