@@ -345,24 +345,8 @@ public partial class PowerPointHandler
                     break;
                 }
                 case "tooltip":
-                    // CONSISTENCY(shape-picture-parity): handled in tandem with "link"
-                    // when both keys are present; standalone tooltip needs an existing
-                    // hyperlink target. Mirror Set.Shape.cs's user-visible error so
-                    // callers don't silently lose their tooltip update.
-                {
-                    if (properties.ContainsKey("link")) break;
-                    var hasExistingLink = pic.NonVisualPictureProperties?.NonVisualDrawingProperties?
-                        .GetFirstChild<Drawing.HyperlinkOnClick>() != null;
-                    if (!hasExistingLink)
-                        throw new ArgumentException(
-                            "tooltip requires an existing hyperlink — set 'link' in the same call " +
-                            "(e.g. --prop link=https://example.com --prop tooltip=…) or apply 'link' first, " +
-                            "then update 'tooltip' on its own.");
-                    var existingHl = pic.NonVisualPictureProperties!.NonVisualDrawingProperties!
-                        .GetFirstChild<Drawing.HyperlinkOnClick>()!;
-                    existingHl.Tooltip = value;
+                    // handled in tandem with "link"; standalone tooltip change is not supported here
                     break;
-                }
                 default:
                     // Reflection fallback against pic.spPr (drawing shape props)
                     // catches attributes the manual cases don't enumerate

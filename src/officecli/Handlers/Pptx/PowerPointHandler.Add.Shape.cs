@@ -695,17 +695,6 @@ public partial class PowerPointHandler
                     var tooltipVal = properties.GetValueOrDefault("tooltip");
                     ApplyShapeHyperlink(slidePart, newShape, linkVal, tooltipVal);
                 }
-                else if (properties.ContainsKey("tooltip"))
-                {
-                    // CONSISTENCY(shape-tooltip-requires-link): mirror Set's guard.
-                    // tooltip is the screen-tip on a hyperlink, so it has no anchor
-                    // without 'link' — silently dropping the value would mask the
-                    // caller's intent.
-                    throw new ArgumentException(
-                        "tooltip requires 'link' in the same Add call — bundle them " +
-                        "(e.g. --prop link=https://example.com --prop tooltip=…) or " +
-                        "Add the shape first, then Set link+tooltip together.");
-                }
 
                 // lineDash, effects, 3D, flip — delegate to SetRunOrShapeProperties
                 var effectKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)

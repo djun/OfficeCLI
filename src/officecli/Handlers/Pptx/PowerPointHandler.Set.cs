@@ -72,24 +72,6 @@ public partial class PowerPointHandler
             var unsupported = new List<string>();
             foreach (var (key, value) in properties)
             {
-                // Read-only metadata: schema declares set:false for these. Refuse
-                // explicit writes so callers don't silently lose the value.
-                // 'modified' is auto-bumped on save; 'created' is stamped at file
-                // birth; 'extended.application' is owned by the editing app.
-                switch (key.ToLowerInvariant())
-                {
-                    case "created":
-                    case "modified":
-                    case "extended.application":
-                        throw new ArgumentException(
-                            $"'{key}' is read-only (schema set:false). " +
-                            (key.Equals("modified", StringComparison.OrdinalIgnoreCase)
-                                ? "It auto-bumps on save."
-                                : key.Equals("created", StringComparison.OrdinalIgnoreCase)
-                                    ? "It is stamped at file creation."
-                                    : "It is owned by the editing application."));
-                }
-
                 switch (key.ToLowerInvariant())
                 {
                     case "slidewidth" or "width":
