@@ -17,12 +17,15 @@ static partial class CommandBuilder
         var propsOpt = new Option<string[]>("--prop") { Description = "Property to set (key=value)", AllowMultipleArgumentsPerToken = true };
         // Selector: top-level alternative to --prop find=VALUE. r"..." prefix triggers regex (project-wide CONSISTENCY(find-regex)).
         var findOpt = new Option<string?>("--find") { Description = "Find this text/pattern (literal substring; `r\"...\"` prefix enables regex). Equivalent to --prop find=VALUE." };
+        // Action paired with --find: replacement text. Top-level alternative to --prop replace=VALUE.
+        var replaceOpt = new Option<string?>("--replace") { Description = "Replacement text for --find matches. Equivalent to --prop replace=VALUE." };
 
         var setCommand = new Command("set", "Modify a document node's properties") { TreatUnmatchedTokensAsErrors = false };
         setCommand.Add(setFileArg);
         setCommand.Add(setPathArg);
         setCommand.Add(propsOpt);
         setCommand.Add(findOpt);
+        setCommand.Add(replaceOpt);
         setCommand.Add(jsonOption);
         setCommand.Add(forceOption);
 
@@ -32,30 +35,45 @@ static partial class CommandBuilder
             var path = result.GetValue(setPathArg)!;
             var props = result.GetValue(propsOpt);
             var findFlag = result.GetValue(findOpt);
+            var replaceFlag = result.GetValue(replaceOpt);
             var force = result.GetValue(forceOption);
 
-            // Selector-flag migration: --find is the canonical top-level form;
-            // --prop find=VALUE remains accepted but emits a deprecation hint.
-            // Merging --find into the props array (as "find=<value>") keeps
-            // every downstream consumer (handlers, resident server, batch)
-            // working with zero changes — the flag is pure syntactic sugar.
+            // Selector-flag migration: --find / --replace are the canonical
+            // top-level forms; --prop find=VALUE / --prop replace=VALUE remain
+            // accepted but emit a deprecation hint. Merging the flags into the
+            // props array (as "find=<value>" / "replace=<value>") keeps every
+            // downstream consumer (handlers, resident server, batch) working
+            // with zero changes — the flags are pure syntactic sugar.
             var hasPropFind = props?.Any(p => p.StartsWith("find=", StringComparison.OrdinalIgnoreCase)) == true;
-            if (!string.IsNullOrEmpty(findFlag))
+            var hasPropReplace = props?.Any(p => p.StartsWith("replace=", StringComparison.OrdinalIgnoreCase)) == true;
+            if (findFlag != null && hasPropFind)
             {
-                if (hasPropFind)
-                {
-                    var err = "Cannot combine --find and --prop find=. Use --find only.";
-                    if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeError(err));
-                    else Console.Error.WriteLine($"Error: {err}");
-                    return 1;
-                }
+                var err = "Cannot combine --find and --prop find=. Use --find only.";
+                if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeError(err));
+                else Console.Error.WriteLine($"Error: {err}");
+                return 1;
+            }
+            if (replaceFlag != null && hasPropReplace)
+            {
+                var err = "Cannot combine --replace and --prop replace=. Use --replace only.";
+                if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeError(err));
+                else Console.Error.WriteLine($"Error: {err}");
+                return 1;
+            }
+            if (findFlag != null || replaceFlag != null)
+            {
                 var merged = props?.ToList() ?? new List<string>();
-                merged.Add($"find={findFlag}");
+                if (findFlag != null) merged.Add($"find={findFlag}");
+                if (replaceFlag != null) merged.Add($"replace={replaceFlag}");
                 props = merged.ToArray();
             }
-            else if (hasPropFind)
+            else if (hasPropFind || hasPropReplace)
             {
-                Console.Error.WriteLine("Hint: prefer `--find VALUE` over `--prop find=VALUE` (selector keys are migrating out of --prop).");
+                var legacy = hasPropFind && hasPropReplace ? "find / replace"
+                           : hasPropFind ? "find" : "replace";
+                var flag   = hasPropFind && hasPropReplace ? "--find / --replace"
+                           : hasPropFind ? "--find" : "--replace";
+                Console.Error.WriteLine($"Hint: prefer `{flag} VALUE` over `--prop {legacy}=VALUE` (selector/action keys are migrating out of --prop).");
             }
 
             // BUG-BT-R5-01: support the `selected` pseudo-path (mark and get
