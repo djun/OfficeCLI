@@ -27,6 +27,11 @@ internal record FormulaResult
     public bool IsError => ErrorValue != null;
     public bool IsArray => ArrayValue != null;
     public bool IsRange => RangeValue != null;
+    // Blank carries no value of any kind: arithmetic coerces to 0, string
+    // concat coerces to "". Used for empty/missing cells reached through
+    // OFFSET / INDIRECT / direct ref so `=OFFSET(A1,5,0)&"x"` matches Excel's
+    // "x" rather than emitting "0x".
+    public bool IsBlank => !IsNumeric && !IsString && !IsBool && !IsError && !IsArray && !IsRange;
 
     public static FormulaResult Number(double v) => new() { NumericValue = v };
     public static FormulaResult Str(string v) => new() { StringValue = v };
@@ -34,6 +39,7 @@ internal record FormulaResult
     public static FormulaResult Error(string v) => new() { ErrorValue = v };
     public static FormulaResult Array(double[] v) => new() { ArrayValue = v };
     public static FormulaResult Area(RangeData v) => new() { RangeValue = v };
+    public static FormulaResult Blank() => new();
 
     // Excel coerces numeric-looking text in arithmetic / scalar contexts:
     // ="1"*"4186"*0.03 → 125.58. Cells flagged t="str" (e.g. set under
@@ -64,6 +70,11 @@ internal record FormulaResult
         // branch is the safety net for any caller (HtmlPreview, view) that
         // formats the value text directly.
         if (IsError) return ErrorValue!;
+        // A blank (empty-cell ref) is 0 when it lands directly in a cell — Excel
+        // displays `=A6` (A6 empty) as 0. The "" coercion is only the right
+        // answer when blank is the right operand of a string concat (handled in
+        // ParseConcat).
+        if (IsBlank) return "0";
         // An Area placed into a single cell collapses to its top-left.
         // Excel does implicit-intersect; top-left is the simplest deterministic
         // choice (and matches FirstCell()).
@@ -831,7 +842,7 @@ internal partial class FormulaEvaluator
         try
         {
             var cell = FindCell(cellRef);
-            if (cell == null) return FormulaResult.Number(0);
+            if (cell == null) return FormulaResult.Blank();
 
             // If cell has a formula, always evaluate it (cached values may be stale)
             if (cell.CellFormula?.Text != null)
@@ -870,7 +881,7 @@ internal partial class FormulaEvaluator
                 return double.TryParse(cached, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? FormulaResult.Number(v) : FormulaResult.Str(cached);
             }
 
-            return FormulaResult.Number(0);
+            return FormulaResult.Blank();
         }
         finally { _visiting.Remove(qualifiedRef); }
     }
