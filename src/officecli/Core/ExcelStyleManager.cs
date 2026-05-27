@@ -559,6 +559,31 @@ internal class ExcelStyleManager
 
     private static uint GetOrCreateNumFmt(Stylesheet stylesheet, string formatCode)
     {
+        // R29-1 [BLOCKER]: a formatCode must never be written with an unbalanced
+        // number of double-quotes — Excel text-literal delimiters come in matched
+        // pairs, and an unclosed literal makes Excel refuse the whole file
+        // (0x800A03EC). The shell passes 'numberformat="("000") "000-0000"' through
+        // with its wrapping double-quotes intact, so the prop value arrives as
+        // "("000") "000-0000" — five quote chars, an odd count. The spurious quote is
+        // the trailing wrapper the shell left behind, so when the count is odd and the
+        // string ends with a quote, drop that one trailing quote to restore even
+        // pairing (-> "("000") "000-0000, four quotes; inner literals untouched).
+        if (formatCode.Length >= 1
+            && formatCode.Count(c => c == '"') % 2 != 0
+            && formatCode[^1] == '"')
+            formatCode = formatCode[..^1];
+
+        // If the count is STILL odd after that repair, the input is genuinely
+        // malformed (e.g. a stray leading quote). Refusing here is the only way to
+        // honor the blocker invariant — better a clear error than a file Excel
+        // silently can't open.
+        if (formatCode.Count(c => c == '"') % 2 != 0)
+            throw new ArgumentException(
+                $"number format has unbalanced quotes: '{formatCode}'. Excel text " +
+                "literals must be wrapped in matched double-quote pairs (e.g. " +
+                "\"(\"000\") \"000-0000); writing an unclosed literal makes Excel " +
+                "refuse to open the file.");
+
         // Check built-in formats
         var builtinMap = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase)
         {
