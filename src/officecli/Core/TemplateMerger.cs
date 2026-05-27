@@ -152,14 +152,24 @@ internal static class TemplateMerger
 
     /// <summary>
     /// Merge a template document with data. Copies template to output, then replaces placeholders.
+    /// Refuses to overwrite an existing output unless <paramref name="force"/> is set.
     /// </summary>
-    public static MergeResult Merge(string templatePath, string outputPath, Dictionary<string, string> data)
+    public static MergeResult Merge(string templatePath, string outputPath, Dictionary<string, string> data, bool force = false)
     {
         if (!File.Exists(templatePath))
             throw new CliException($"Template file not found: {templatePath}")
             {
                 Code = "file_not_found",
                 Suggestion = "Check the template file path."
+            };
+
+        // Refuse to silently overwrite an existing output unless force is set,
+        // mirroring the `create` command's guard (CommandBuilder.Import.cs:185).
+        if (File.Exists(outputPath) && !force)
+            throw new CliException($"Output file already exists: {outputPath}. Use --force to overwrite.")
+            {
+                Code = "file_exists",
+                Suggestion = "Add --force flag or remove the file first."
             };
 
         File.Copy(templatePath, outputPath, overwrite: true);

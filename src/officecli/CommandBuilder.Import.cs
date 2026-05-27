@@ -252,10 +252,12 @@ static partial class CommandBuilder
         var mergeTemplateArg = new Argument<string>("template") { Description = "Template file path (.docx, .xlsx, .pptx) with {{key}} placeholders" };
         var mergeOutputArg = new Argument<string>("output") { Description = "Output file path" };
         var mergeDataOpt = new Option<string>("--data") { Description = "JSON data or path to .json file", Required = true };
+        var mergeForceOpt = new Option<bool>("--force") { Description = "Overwrite an existing output file." };
         var mergeCommand = new Command("merge", "Merge template with JSON data, replacing {{key}} placeholders");
         mergeCommand.Add(mergeTemplateArg);
         mergeCommand.Add(mergeOutputArg);
         mergeCommand.Add(mergeDataOpt);
+        mergeCommand.Add(mergeForceOpt);
         mergeCommand.Add(jsonOption);
 
         mergeCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
@@ -263,9 +265,16 @@ static partial class CommandBuilder
             var template = result.GetValue(mergeTemplateArg)!;
             var output = result.GetValue(mergeOutputArg)!;
             var dataArg = result.GetValue(mergeDataOpt)!;
+            var force = result.GetValue(mergeForceOpt);
+
+            // If a resident holds the template with unsaved in-memory edits,
+            // ask it to flush to disk first — otherwise File.Copy reads the
+            // stale pre-edit bytes (resident saves itself; we never open the
+            // file here). Mirrors import's pre-direct-open resident handshake.
+            ResidentClient.SendSave(Path.GetFullPath(template));
 
             var data = Core.TemplateMerger.ParseMergeData(dataArg);
-            var mergeResult = Core.TemplateMerger.Merge(template, output, data);
+            var mergeResult = Core.TemplateMerger.Merge(template, output, data, force);
 
             if (json)
             {

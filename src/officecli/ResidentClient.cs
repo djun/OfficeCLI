@@ -117,6 +117,21 @@ public static class ResidentClient
     }
 
     /// <summary>
+    /// Ask a running resident to flush its in-memory document to disk
+    /// (handler.Save). Used by `merge` so a template held open by a resident
+    /// with unsaved part-level edits is current on disk before File.Copy reads
+    /// it — the resident saves itself; the caller never touches the handler.
+    /// Returns false when no resident is running or the RPC failed (the caller
+    /// then just reads whatever is already on disk, same as before).
+    /// </summary>
+    public static bool SendSave(string filePath)
+    {
+        if (!TryConnect(filePath, out _)) return false;
+        var response = TrySend(filePath, new ResidentRequest { Command = "save" });
+        return response != null && response.ExitCode == 0;
+    }
+
+    /// <summary>
     /// Send a close command to the resident server.
     /// </summary>
     public static bool SendClose(string filePath)
