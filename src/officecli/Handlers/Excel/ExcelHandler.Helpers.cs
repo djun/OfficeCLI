@@ -3915,12 +3915,49 @@ public partial class ExcelHandler
                     // Direct string value (DataType is null or String)
                     if (cell.DataType?.Value == CellValues.String)
                     {
-                        var cv = cell.CellValue;
-                        if (cv?.Text != null && cv.Text.Contains(find, StringComparison.Ordinal))
+                        // R20-1: a t="str" cell from `set formula=...` carries BOTH
+                        // <f> (formula) and <v> (cached value); the evaluator reads
+                        // <f>, so touching only <v> silently reverts on next eval.
+                        if (cell.CellFormula?.Text is { } fText)
                         {
-                            int count = CountOccurrences(cv.Text, find);
-                            cv.Text = cv.Text.Replace(find, replace, StringComparison.Ordinal);
-                            totalCount += count;
+                            // Only rewrite <f> when the formula is a PURE string
+                            // literal ("...") — a single quoted string with no
+                            // interior quote and nothing else. Blindly replacing
+                            // inside a real formula corrupts cell refs / function
+                            // tokens (find "2026" → B2026&"..." becomes B2027&...;
+                            // find "A1" → SUM(A1:A10) becomes SUM(X:A10)). Anything
+                            // that isn't a bare literal is skipped untouched + warned,
+                            // so <f>/<v> stay consistent and no formula is mangled.
+                            var trimmedF = fText.Trim();
+                            bool isPureLiteral = trimmedF.Length >= 2
+                                && trimmedF[0] == '"' && trimmedF[^1] == '"'
+                                && trimmedF.IndexOf('"', 1) == trimmedF.Length - 1;
+                            if (isPureLiteral)
+                            {
+                                cell.CellFormula.Text = ApplyFindReplace(fText, find, replace, out int fCount);
+                                totalCount += fCount;
+                                if (cell.CellValue?.Text != null)
+                                    cell.CellValue.Text = ApplyFindReplace(cell.CellValue.Text, find, replace, out _);
+                            }
+                            else if (CountOccurrences(fText, find) > 0
+                                     || (cell.CellValue?.Text != null && CountOccurrences(cell.CellValue.Text, find) > 0))
+                            {
+                                // Pattern would have matched, but this is a real
+                                // formula — skip it (no <f>/<v> change) and warn, so
+                                // the user knows find/replace did not touch formulas.
+                                Console.Error.WriteLine(
+                                    $"warning: find/replace skipped formula cell {cell.CellReference?.Value ?? "?"} "
+                                    + "(formula text not modified to avoid corrupting references/functions)");
+                            }
+                        }
+                        else
+                        {
+                            var cv = cell.CellValue;
+                            if (cv?.Text != null)
+                            {
+                                cv.Text = ApplyFindReplace(cv.Text, find, replace, out int count);
+                                totalCount += count;
+                            }
                         }
                     }
 
