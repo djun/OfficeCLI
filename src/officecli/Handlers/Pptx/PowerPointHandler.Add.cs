@@ -63,6 +63,7 @@ public partial class PowerPointHandler
             "picture" or "image" or "img" => AddPicture(parentPath, index, properties),
             "ole" or "oleobject" or "object" or "embed" => AddOle(parentPath, index, properties ?? new()),
             "chart" => AddChart(parentPath, index, properties),
+            "series" => AddChartSeries(parentPath, properties ?? new()),
             "table" => AddTable(parentPath, index, properties),
             "equation" or "formula" or "math" => AddEquation(parentPath, index, properties),
             "notes" or "note" => AddNotes(parentPath, index, properties),

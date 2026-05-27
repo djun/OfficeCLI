@@ -10,6 +10,108 @@ namespace OfficeCli.Core;
 
 internal static partial class ChartHelper
 {
+    /// <summary>
+    /// R22-1: append a new data series to an existing chart. Clones the last
+    /// existing &lt;c:ser&gt; (so the new series is structurally valid for
+    /// whatever chart type the plot uses — bar/line/pie/area/… all share the
+    /// c:ser shape), then renumbers idx/order and overwrites the series name
+    /// (c:tx) and numeric values (c:val) from the supplied props. Returns the
+    /// new 1-based series index, or 0 if the chart has no existing series to
+    /// clone from. name=… sets the series label; values=… is a comma list.
+    /// </summary>
+    internal static int AddSeries(ChartPart chartPart, Dictionary<string, string> properties)
+    {
+        var chart = chartPart.ChartSpace?.GetFirstChild<C.Chart>();
+        var plotArea = chart?.GetFirstChild<C.PlotArea>();
+        if (plotArea == null) return 0;
+
+        // The chart-type element (BarChart/LineChart/…) holds the c:ser list.
+        var chartTypeEl = plotArea.Elements<OpenXmlCompositeElement>()
+            .FirstOrDefault(e => e.Elements().Any(c => c.LocalName == "ser"));
+        if (chartTypeEl == null) return 0;
+
+        var existing = chartTypeEl.Elements<OpenXmlCompositeElement>()
+            .Where(e => e.LocalName == "ser").ToList();
+        if (existing.Count == 0) return 0;
+
+        var newSer = (OpenXmlCompositeElement)existing[^1].CloneNode(true);
+        var newIdx = (uint)existing.Count;
+
+        // R22-4: the deep clone copies the source series' <c:spPr> (explicit
+        // fill), so the new series would render in the SOURCE's color instead of
+        // its own. Drop the cloned spPr, then assign the index-appropriate
+        // palette color the same way `add chart` colors each series
+        // (DefaultSeriesColors[idx]). This gives the new series a distinct color
+        // matching what a freshly-built N-series chart would use for slot N —
+        // not the cloned neighbor's color.
+        newSer.GetFirstChild<C.ShapeProperties>()?.Remove();
+        ApplySeriesColor(newSer, DefaultSeriesColors[(int)(newIdx % (uint)DefaultSeriesColors.Length)]);
+
+        // Renumber c:idx / c:order on the clone.
+        if (newSer.GetFirstChild<C.Index>() is { } ix) ix.Val = newIdx;
+        if (newSer.GetFirstChild<C.Order>() is { } ord) ord.Val = newIdx;
+
+        // Series name (c:tx) — write as a literal string value.
+        var name = properties.GetValueOrDefault("name");
+        if (!string.IsNullOrEmpty(name))
+        {
+            newSer.GetFirstChild<C.SeriesText>()?.Remove();
+            newSer.InsertAfter(
+                new C.SeriesText(new C.NumericValue(name)),
+                newSer.GetFirstChild<C.Order>() ?? (OpenXmlElement?)newSer.GetFirstChild<C.Index>());
+        }
+
+        // Series values (c:val) — replace with a NumberLiteral built from the
+        // comma-separated values, so the new series has its own data, not the
+        // cloned source's. cache refs (c:numRef) on the clone are dropped.
+        var valuesRaw = properties.GetValueOrDefault("values") ?? properties.GetValueOrDefault("data");
+        if (!string.IsNullOrEmpty(valuesRaw))
+        {
+            var nums = valuesRaw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            var numLit = new C.NumberLiteral(new C.FormatCode("General"), new C.PointCount { Val = (uint)nums.Length });
+            for (uint i = 0; i < nums.Length; i++)
+                numLit.AppendChild(new C.NumericPoint(new C.NumericValue(nums[i])) { Index = i });
+            var valEl = newSer.GetFirstChild<C.Values>();
+            if (valEl != null) { valEl.RemoveAllChildren(); valEl.AppendChild(numLit); }
+            else newSer.AppendChild(new C.Values(numLit));
+        }
+
+        chartTypeEl.AppendChild(newSer);
+        chartPart.ChartSpace!.Save();
+        return (int)newIdx + 1;
+    }
+
+    /// <summary>
+    /// R22-1: remove the 1-based series[seriesIdx] from a chart. Returns true
+    /// when a series was removed. Renumbers the surviving series' idx/order so
+    /// they stay contiguous (0-based) — matching how a fresh chart numbers them.
+    /// </summary>
+    internal static bool RemoveSeries(ChartPart chartPart, int seriesIdx)
+    {
+        var plotArea = chartPart.ChartSpace?.GetFirstChild<C.Chart>()?.GetFirstChild<C.PlotArea>();
+        if (plotArea == null) return false;
+        var chartTypeEl = plotArea.Elements<OpenXmlCompositeElement>()
+            .FirstOrDefault(e => e.Elements().Any(c => c.LocalName == "ser"));
+        if (chartTypeEl == null) return false;
+
+        var sers = chartTypeEl.Elements<OpenXmlCompositeElement>()
+            .Where(e => e.LocalName == "ser").ToList();
+        if (seriesIdx < 1 || seriesIdx > sers.Count) return false;
+
+        sers[seriesIdx - 1].Remove();
+
+        // Renumber survivors contiguously from 0.
+        var remaining = chartTypeEl.Elements<OpenXmlCompositeElement>()
+            .Where(e => e.LocalName == "ser").ToList();
+        for (int i = 0; i < remaining.Count; i++)
+        {
+            if (remaining[i].GetFirstChild<C.Index>() is { } ix) ix.Val = (uint)i;
+            if (remaining[i].GetFirstChild<C.Order>() is { } ord) ord.Val = (uint)i;
+        }
+        chartPart.ChartSpace!.Save();
+        return true;
+    }
+
     internal static List<string> SetChartProperties(ChartPart chartPart, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();

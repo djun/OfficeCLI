@@ -239,6 +239,23 @@ public partial class PowerPointHandler
             return null;
         }
 
+        // R22-1: remove a data series from a chart — /slide[N]/chart[M]/series[K].
+        // Delegates the c:ser removal + survivor renumber to ChartHelper.RemoveSeries.
+        var seriesRemoveMatch = Regex.Match(path, @"^/slide\[(\d+)\]/chart\[(\d+)\]/series\[(\d+)\]$");
+        if (seriesRemoveMatch.Success)
+        {
+            var srSlideIdx = int.Parse(seriesRemoveMatch.Groups[1].Value);
+            var srChartIdx = int.Parse(seriesRemoveMatch.Groups[2].Value);
+            var srSeriesIdx = int.Parse(seriesRemoveMatch.Groups[3].Value);
+            var (_, _, srChartPart, _) = ResolveChart(srSlideIdx, srChartIdx);
+            if (srChartPart == null)
+                throw new ArgumentException(
+                    $"Chart at /slide[{srSlideIdx}]/chart[{srChartIdx}] is not a standard chart (extended charts do not support remove series).");
+            if (!ChartHelper.RemoveSeries(srChartPart, srSeriesIdx))
+                throw new ArgumentException($"Series {srSeriesIdx} not found on /slide[{srSlideIdx}]/chart[{srChartIdx}].");
+            return null;
+        }
+
         // CONSISTENCY(master-layout-shape-edit): typed Remove on master/layout
         // shape paths. Mirrors the Add/Set branches added in 237b7fb4; the
         // parent path (everything before /shape[K]) is resolved via the shared

@@ -370,6 +370,28 @@ public partial class PowerPointHandler
     }
 
 
+    // R22-1: `add /slide[N]/chart[M] --type series` — append a data series to an
+    // existing chart. Parent path is the chart, not the slide. Resolves the chart
+    // part and delegates the series clone+renumber to ChartHelper.AddSeries.
+    private string AddChartSeries(string parentPath, Dictionary<string, string> properties)
+    {
+        var m = Regex.Match(parentPath, @"^/slide\[(\d+)\]/chart\[(\d+)\]$");
+        if (!m.Success)
+            throw new ArgumentException(
+                "series must be added to a chart parent: /slide[N]/chart[M]");
+        var slideIdx = int.Parse(m.Groups[1].Value);
+        var chartIdx = int.Parse(m.Groups[2].Value);
+        var (_, _, chartPart, _) = ResolveChart(slideIdx, chartIdx);
+        if (chartPart == null)
+            throw new ArgumentException(
+                $"Chart at /slide[{slideIdx}]/chart[{chartIdx}] is not a standard chart (extended c14/cx charts do not support add series).");
+        var newIdx = ChartHelper.AddSeries(chartPart, properties);
+        if (newIdx == 0)
+            throw new ArgumentException(
+                "Cannot add a series: the chart has no existing series to derive structure from. Recreate the chart with the desired series instead.");
+        return $"/slide[{slideIdx}]/chart[{chartIdx}]/series[{newIdx}]";
+    }
+
     private string AddChart(string parentPath, int? index, Dictionary<string, string> properties)
     {
                 var chartSlideMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]$");
