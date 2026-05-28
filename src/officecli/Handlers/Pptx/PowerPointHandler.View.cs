@@ -128,7 +128,7 @@ public partial class PowerPointHandler
                             ?? firstRun?.RunProperties?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface
                             ?? "(default)";
                         var fontSize = firstRun?.RunProperties?.FontSize?.Value;
-                        var sizeStr = fontSize.HasValue ? $"{fontSize.Value / 100}pt" : "";
+                        var sizeStr = fontSize.HasValue ? $"{fontSize.Value / 100.0:0.##}pt" : ""; // hundredths-pt; keep .5 (e.g. 1850 -> 18.5pt)
 
                         sb.AppendLine($"{pad}[{type}] \"{text}\" \u2190 {font} {sizeStr}");
                     }

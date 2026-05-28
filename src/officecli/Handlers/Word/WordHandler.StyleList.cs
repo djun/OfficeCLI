@@ -358,7 +358,7 @@ public partial class WordHandler
         if (rProps == null) return null;
         var size = rProps.FontSize?.Val?.Value;
         if (size == null) return null;
-        return $"{int.Parse(size) / 2}pt";
+        return $"{int.Parse(size) / 2.0:0.##}pt"; // half-points; keep .5 (e.g. sz=21 -> 10.5pt)
     }
 
     // ==================== Effective Properties Resolution ====================
