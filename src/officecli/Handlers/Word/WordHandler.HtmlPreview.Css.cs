@@ -218,9 +218,7 @@ public partial class WordHandler
     private static string ApplyTintShade(string hex, string? tintHex, string? shadeHex)
     {
         if (hex.Length < 6) return $"#{hex}";
-        var r = Convert.ToInt32(hex[..2], 16);
-        var g = Convert.ToInt32(hex[2..4], 16);
-        var b = Convert.ToInt32(hex[4..6], 16);
+        var (r, g, b) = ColorMath.HexToRgb(hex);
 
         // themeTint: blend toward white (tint value is hex 00-FF)
         if (tintHex != null && int.TryParse(tintHex, System.Globalization.NumberStyles.HexNumber, null, out var tint))

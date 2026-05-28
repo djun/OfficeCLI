@@ -1742,18 +1742,14 @@ public partial class PowerPointHandler
         int r = 0, g = 0, b = 0;
         if (rgb != null && rgb.Length >= 6)
         {
-            r = Convert.ToInt32(rgb[..2], 16);
-            g = Convert.ToInt32(rgb[2..4], 16);
-            b = Convert.ToInt32(rgb[4..6], 16);
+            (r, g, b) = ColorMath.HexToRgb(rgb);
         }
         else
         {
             var schemeColor = shadow.GetFirstChild<Drawing.SchemeColor>()?.Val?.InnerText;
             if (schemeColor != null && themeColors.TryGetValue(schemeColor, out var sc) && sc.Length >= 6)
             {
-                r = Convert.ToInt32(sc[..2], 16);
-                g = Convert.ToInt32(sc[2..4], 16);
-                b = Convert.ToInt32(sc[4..6], 16);
+                (r, g, b) = ColorMath.HexToRgb(sc);
             }
         }
 
@@ -1786,18 +1782,14 @@ public partial class PowerPointHandler
         var rgb = glow.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
         if (rgb != null && rgb.Length >= 6)
         {
-            r = Convert.ToInt32(rgb[..2], 16);
-            g = Convert.ToInt32(rgb[2..4], 16);
-            b = Convert.ToInt32(rgb[4..6], 16);
+            (r, g, b) = ColorMath.HexToRgb(rgb);
         }
         else
         {
             var scheme = glow.GetFirstChild<Drawing.SchemeColor>()?.Val?.InnerText;
             if (scheme != null && themeColors.TryGetValue(scheme, out var sc) && sc.Length >= 6)
             {
-                r = Convert.ToInt32(sc[..2], 16);
-                g = Convert.ToInt32(sc[2..4], 16);
-                b = Convert.ToInt32(sc[4..6], 16);
+                (r, g, b) = ColorMath.HexToRgb(sc);
             }
         }
 

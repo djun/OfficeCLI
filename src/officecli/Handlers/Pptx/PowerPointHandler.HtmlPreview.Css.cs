@@ -328,9 +328,7 @@ public partial class PowerPointHandler
         string color;
         if (rgb != null)
         {
-            var r = Convert.ToInt32(rgb[..2], 16);
-            var g = Convert.ToInt32(rgb[2..4], 16);
-            var b = Convert.ToInt32(rgb[4..6], 16);
+            var (r, g, b) = ColorMath.HexToRgb(rgb);
             color = $"rgba({r},{g},{b},{opacity:0.##})";
         }
         else
@@ -340,9 +338,7 @@ public partial class PowerPointHandler
             var resolved = schemeColor != null && themeColors.TryGetValue(schemeColor, out var sc) ? sc : null;
             if (resolved != null)
             {
-                var r = Convert.ToInt32(resolved[..2], 16);
-                var g = Convert.ToInt32(resolved[2..4], 16);
-                var b = Convert.ToInt32(resolved[4..6], 16);
+                var (r, g, b) = ColorMath.HexToRgb(resolved);
                 color = $"rgba({r},{g},{b},{opacity:0.##})";
             }
             else
@@ -378,9 +374,7 @@ public partial class PowerPointHandler
         string color;
         if (rgb != null)
         {
-            var r = Convert.ToInt32(rgb[..2], 16);
-            var g = Convert.ToInt32(rgb[2..4], 16);
-            var b = Convert.ToInt32(rgb[4..6], 16);
+            var (r, g, b) = ColorMath.HexToRgb(rgb);
             color = $"rgba({r},{g},{b},{opacity:0.##})";
         }
         else
@@ -389,9 +383,7 @@ public partial class PowerPointHandler
             var resolved = schemeColor != null && themeColors.TryGetValue(schemeColor, out var sc) ? sc : null;
             if (resolved != null)
             {
-                var r = Convert.ToInt32(resolved[..2], 16);
-                var g = Convert.ToInt32(resolved[2..4], 16);
-                var b = Convert.ToInt32(resolved[4..6], 16);
+                var (r, g, b) = ColorMath.HexToRgb(resolved);
                 color = $"rgba({r},{g},{b},{opacity:0.##})";
             }
             else
@@ -400,9 +392,7 @@ public partial class PowerPointHandler
                 var acc1 = themeColors.TryGetValue("accent1", out var a1) ? a1 : null;
                 if (acc1 != null)
                 {
-                    var r = Convert.ToInt32(acc1[..2], 16);
-                    var g = Convert.ToInt32(acc1[2..4], 16);
-                    var b = Convert.ToInt32(acc1[4..6], 16);
+                    var (r, g, b) = ColorMath.HexToRgb(acc1);
                     color = $"rgba({r},{g},{b},{opacity:0.##})";
                 }
                 else
@@ -739,9 +729,7 @@ public partial class PowerPointHandler
             var alpha = solidFill.GetFirstChild<Drawing.RgbColorModelHex>()?.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
             if (alpha.HasValue && alpha.Value < 100000)
             {
-                var r = Convert.ToInt32(hexPart[..2], 16);
-                var g = Convert.ToInt32(hexPart[2..4], 16);
-                var b = Convert.ToInt32(hexPart[4..6], 16);
+                var (r, g, b) = ColorMath.HexToRgb(hexPart);
                 return $"rgba({r},{g},{b},{alpha.Value / 100000.0:0.##})";
             }
             return $"#{hexPart}";
@@ -796,15 +784,8 @@ public partial class PowerPointHandler
 
     // Unit conversions moved to shared Units class (Core/Units.cs).
 
-    private static string HtmlEncode(string text)
-    {
-        return text
-            .Replace("&", "&amp;")
-            .Replace("<", "&lt;")
-            .Replace(">", "&gt;")
-            .Replace("\"", "&quot;")
-            .Replace("'", "&#39;");
-    }
+    // CONSISTENCY(html-encode): shared plain entity-encoder lives in Core/HtmlPreviewHelper.
+    private static string HtmlEncode(string text) => HtmlPreviewHelper.HtmlEncode(text);
 
     /// <summary>
     /// Sanitize a value for use inside a CSS style attribute.
@@ -828,9 +809,7 @@ public partial class PowerPointHandler
     {
         hex = hex.TrimStart('#');
         if (hex.Length < 6) return false;
-        var r = Convert.ToInt32(hex[..2], 16);
-        var g = Convert.ToInt32(hex[2..4], 16);
-        var b = Convert.ToInt32(hex[4..6], 16);
+        var (r, g, b) = ColorMath.HexToRgb(hex);
         // Relative luminance approximation
         return (r * 0.299 + g * 0.587 + b * 0.114) < 128;
     }

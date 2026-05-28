@@ -68,15 +68,21 @@ internal static class ColorMath
     }
 
     /// <summary>
+    /// Parse the first 6 hex digits of an RGB string into (R, G, B) byte components (0–255).
+    /// Caller must ensure the input has at least 6 hex digits and no leading '#'.
+    /// Any trailing data (e.g. an 8-digit AARRGGBB alpha tail) is ignored.
+    /// </summary>
+    public static (int R, int G, int B) HexToRgb(string hex) =>
+        (Convert.ToInt32(hex[..2], 16), Convert.ToInt32(hex[2..4], 16), Convert.ToInt32(hex[4..6], 16));
+
+    /// <summary>
     /// Apply OOXML lumMod/lumOff color transform in HSL space.
     /// lumMod and lumOff are in 0–100000 units (percentage × 1000).
     /// Formula: newL = clamp(L × lumMod/100000 + lumOff/100000, 0, 1)
     /// </summary>
     public static string ApplyLumModOff(string hex, int lumMod, int lumOff)
     {
-        var r = Convert.ToInt32(hex[..2], 16);
-        var g = Convert.ToInt32(hex[2..4], 16);
-        var b = Convert.ToInt32(hex[4..6], 16);
+        var (r, g, b) = ColorMath.HexToRgb(hex);
 
         RgbToHsl(r, g, b, out var h, out var s, out var l);
         l = Math.Clamp(l * (lumMod / 100000.0) + (lumOff / 100000.0), 0, 1);
@@ -96,9 +102,7 @@ internal static class ColorMath
     public static string ApplyTransforms(string hex, int? tint = null, int? shade = null,
         int? lumMod = null, int? lumOff = null, int? alpha = null)
     {
-        var r = Convert.ToInt32(hex[..2], 16);
-        var g = Convert.ToInt32(hex[2..4], 16);
-        var b = Convert.ToInt32(hex[4..6], 16);
+        var (r, g, b) = ColorMath.HexToRgb(hex);
 
         // OOXML spec: tint blends toward white, shade blends toward black
         if (tint.HasValue)

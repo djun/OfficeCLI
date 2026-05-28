@@ -1289,6 +1289,803 @@ public partial class WordHandler
         return node;
     }
 
+    private DocumentNode FootnoteToNode(Footnote fnEl, DocumentNode node, string path, int depth)
+    {
+        node.Type = "footnote";
+        // Strip the reference-mark leading space (CONSISTENCY with Query
+        // get-by-id and `query footnote`). Without this branch the
+        // generic InnerText fallback below would return " fn-text".
+        node.Text = GetFootnoteText(fnEl);
+        if (fnEl.Id?.Value != null) node.Format["id"] = fnEl.Id.Value;
+        if (fnEl.Type?.Value != null) node.Format["type"] = fnEl.Type.InnerText;
+        // R44 minor-5: surface first-run formatting on footnote node so
+        // bold/italic/size/color set via Add/Set round-trip through Get.
+        // Mirrors the hyperlink firstRun pattern at line ~2746 above.
+        var fnFirstRun = fnEl.Descendants<Run>().FirstOrDefault(r => r.GetFirstChild<Text>() != null);
+        if (fnFirstRun?.RunProperties != null)
+        {
+            var rp = fnFirstRun.RunProperties;
+            if (rp.RunFonts?.Ascii?.Value != null) node.Format["font"] = rp.RunFonts.Ascii.Value;
+            if (rp.FontSize?.Val?.Value != null)
+                node.Format["size"] = $"{int.Parse(rp.FontSize.Val.Value) / 2.0:0.##}pt";
+            if (rp.Bold != null) node.Format["bold"] = IsToggleOn(rp.Bold);
+            if (rp.Italic != null) node.Format["italic"] = IsToggleOn(rp.Italic);
+            if (rp.Color?.ThemeColor?.HasValue == true) node.Format["color"] = rp.Color.ThemeColor.InnerText;
+            else if (rp.Color?.Val?.Value != null) node.Format["color"] = ParseHelpers.FormatHexColor(rp.Color.Val.Value);
+            if (rp.Underline?.Val != null) node.Format["underline"] = rp.Underline.Val.InnerText;
+            if (rp.Strike != null) node.Format["strike"] = IsToggleOn(rp.Strike);
+            if (rp.Highlight?.Val != null) node.Format["highlight"] = rp.Highlight.Val.InnerText;
+        }
+        // R20-wbt-1: surface direction from the first content paragraph's
+        // pPr.BiDi so the cascade (already applied by ApplyFootnoteEndnoteFormatKeys)
+        // round-trips through Get. Mirrors the paragraph readback below.
+        var fnBidi = fnEl.Descendants<Paragraph>().FirstOrDefault()?.ParagraphProperties?.GetFirstChild<BiDi>();
+        if (fnBidi != null)
+            node.Format["direction"] = TryReadOnOff(fnBidi.Val) == true ? "rtl" : "ltr";
+        // BUG-DUMP8-05/06: Paragraph branch surfaces inline w:sym (as
+        // sym= run children) and m:oMath (as equation children) but the
+        // Footnote branch returned early after flat text/format, so
+        // sym and oMath inside footnote bodies were silently dropped.
+        // Walk descendant runs/equations and surface them as children
+        // on the footnote node, mirroring the paragraph walker's keys.
+        if (depth > 0)
+        {
+            int fnSymIdx = 0;
+            foreach (var symRun in fnEl.Descendants<Run>())
+            {
+                var symEl = symRun.GetFirstChild<SymbolChar>();
+                if (symEl?.Char?.Value == null) continue;
+                var symFontVal = symEl.Font?.Value ?? "";
+                var symNode = new DocumentNode
+                {
+                    Type = "run",
+                    Path = $"{path}/r[{fnSymIdx + 1}]",
+                };
+                symNode.Format["sym"] = $"{symFontVal}:{symEl.Char.Value}";
+                node.Children.Add(symNode);
+                fnSymIdx++;
+            }
+            int fnEqIdx = 0;
+            foreach (var fnEq in fnEl.Descendants<M.OfficeMath>())
+            {
+                node.Children.Add(ElementToNode(fnEq, $"{path}/equation[{fnEqIdx + 1}]", depth - 1));
+                fnEqIdx++;
+            }
+        }
+        return node;
+    }
+
+    private DocumentNode EndnoteToNode(Endnote enEl, DocumentNode node, string path, int depth)
+    {
+        node.Type = "endnote";
+        node.Text = GetFootnoteText(enEl);
+        if (enEl.Id?.Value != null) node.Format["id"] = enEl.Id.Value;
+        if (enEl.Type?.Value != null) node.Format["type"] = enEl.Type.InnerText;
+        // R44 minor-5: mirror footnote firstRun readback for endnote.
+        var enFirstRun = enEl.Descendants<Run>().FirstOrDefault(r => r.GetFirstChild<Text>() != null);
+        if (enFirstRun?.RunProperties != null)
+        {
+            var rp = enFirstRun.RunProperties;
+            if (rp.RunFonts?.Ascii?.Value != null) node.Format["font"] = rp.RunFonts.Ascii.Value;
+            if (rp.FontSize?.Val?.Value != null)
+                node.Format["size"] = $"{int.Parse(rp.FontSize.Val.Value) / 2.0:0.##}pt";
+            if (rp.Bold != null) node.Format["bold"] = IsToggleOn(rp.Bold);
+            if (rp.Italic != null) node.Format["italic"] = IsToggleOn(rp.Italic);
+            if (rp.Color?.ThemeColor?.HasValue == true) node.Format["color"] = rp.Color.ThemeColor.InnerText;
+            else if (rp.Color?.Val?.Value != null) node.Format["color"] = ParseHelpers.FormatHexColor(rp.Color.Val.Value);
+            if (rp.Underline?.Val != null) node.Format["underline"] = rp.Underline.Val.InnerText;
+            if (rp.Strike != null) node.Format["strike"] = IsToggleOn(rp.Strike);
+            if (rp.Highlight?.Val != null) node.Format["highlight"] = rp.Highlight.Val.InnerText;
+        }
+        var enBidi = enEl.Descendants<Paragraph>().FirstOrDefault()?.ParagraphProperties?.GetFirstChild<BiDi>();
+        if (enBidi != null)
+            node.Format["direction"] = TryReadOnOff(enBidi.Val) == true ? "rtl" : "ltr";
+        // CONSISTENCY with Footnote: surface inline w:sym / m:oMath
+        // descendants so dump round-trips them through batch.
+        if (depth > 0)
+        {
+            int enSymIdx = 0;
+            foreach (var symRun in enEl.Descendants<Run>())
+            {
+                var symEl = symRun.GetFirstChild<SymbolChar>();
+                if (symEl?.Char?.Value == null) continue;
+                var symFontVal = symEl.Font?.Value ?? "";
+                var symNode = new DocumentNode
+                {
+                    Type = "run",
+                    Path = $"{path}/r[{enSymIdx + 1}]",
+                };
+                symNode.Format["sym"] = $"{symFontVal}:{symEl.Char.Value}";
+                node.Children.Add(symNode);
+                enSymIdx++;
+            }
+            int enEqIdx = 0;
+            foreach (var enEq in enEl.Descendants<M.OfficeMath>())
+            {
+                node.Children.Add(ElementToNode(enEq, $"{path}/equation[{enEqIdx + 1}]", depth - 1));
+                enEqIdx++;
+            }
+        }
+        return node;
+    }
+
+    private DocumentNode CommentToNode(Comment comment, DocumentNode node)
+    {
+        node.Type = "comment";
+        node.Text = string.Join("", comment.Descendants<Text>().Select(t => t.Text));
+        if (comment.Author?.Value != null) node.Format["author"] = comment.Author.Value;
+        if (comment.Initials?.Value != null) node.Format["initials"] = comment.Initials.Value;
+        if (comment.Id?.Value != null) node.Format["id"] = comment.Id.Value;
+        if (comment.Date?.Value != null) node.Format["date"] = comment.Date.Value.ToString("o");
+        if (comment.Id?.Value != null)
+        {
+            var anchorPath = FindCommentAnchorPath(comment.Id.Value);
+            if (anchorPath != null) node.Format["anchoredTo"] = anchorPath;
+        }
+        // R21-WB-1: surface direction from the first content paragraph's
+        // pPr.BiDi so the cascade (already applied by ApplyCommentFormatKeys)
+        // round-trips through Get. Mirrors footnote/endnote readback above.
+        var cmtBidi = comment.Descendants<Paragraph>().FirstOrDefault()?.ParagraphProperties?.GetFirstChild<BiDi>();
+        if (cmtBidi != null)
+            node.Format["direction"] = TryReadOnOff(cmtBidi.Val) == true ? "rtl" : "ltr";
+        return node;
+    }
+
+    private DocumentNode SectionPropertiesToNode(SectionProperties sectPrEl, string path)
+    {
+        // CONSISTENCY(section-readback): /body/sectPr[N] should surface
+        // the same Format keys as /section[N] so direction, page size,
+        // margins, etc. are visible regardless of which path the caller
+        // used. Delegate to BuildSectionNode but preserve the original
+        // path the caller asked for.
+        return BuildSectionNode(sectPrEl, path);
+    }
+
+    private DocumentNode HyperlinkToNode(Hyperlink hyperlink, DocumentNode node)
+    {
+        node.Type = "hyperlink";
+        node.Text = string.Concat(hyperlink.Descendants<Text>().Select(t => t.Text));
+        var relId = hyperlink.Id?.Value;
+        if (relId != null)
+        {
+            try
+            {
+                var rel = ResolveHyperlinkRelationship(hyperlink, relId);
+                // CONSISTENCY(docx-hyperlink-canonical-url): see note above.
+                if (rel != null) node.Format["url"] = rel.Uri.ToString();
+            }
+            catch { }
+        }
+        // Internal-anchor hyperlink (`add --type hyperlink --prop anchor=Foo`)
+        // sets w:hyperlink/@w:anchor instead of @r:id. Surface it so set/get
+        // round-trips and users can debug why a link points where it does.
+        if (hyperlink.Anchor?.Value != null)
+            node.Format["anchor"] = hyperlink.Anchor.Value;
+        // BUG-DUMP24-02: w:docLocation is a separate "location in target
+        // document" attribute, distinct from w:anchor. Surface it so
+        // dump→batch round-trips it.
+        if (hyperlink.DocLocation?.Value != null)
+            node.Format["docLocation"] = hyperlink.DocLocation.Value;
+        // BUG-DUMP10-02: tooltip / tgtFrame / history attributes are
+        // independent of url/anchor — surface them so dump→batch
+        // preserves the hover popup, target window, and history flag.
+        if (hyperlink.Tooltip?.Value != null)
+            node.Format["tooltip"] = hyperlink.Tooltip.Value;
+        if (hyperlink.TargetFrame?.Value != null)
+            node.Format["tgtFrame"] = hyperlink.TargetFrame.Value;
+        if (hyperlink.History?.Value == true)
+            node.Format["history"] = true;
+        // Read run formatting from the first run inside the hyperlink
+        var hlRun = hyperlink.Elements<Run>().FirstOrDefault(r => r.GetFirstChild<Text>() != null);
+        if (hlRun?.RunProperties != null)
+        {
+            var rp = hlRun.RunProperties;
+            if (rp.RunFonts?.Ascii?.Value != null) node.Format["font"] = rp.RunFonts.Ascii.Value;
+            // BUG-DUMP17-07: surface per-script font slot so dump→batch
+            // round-trip preserves font.cs on hyperlink runs.
+            if (rp.RunFonts?.ComplexScript?.Value != null) node.Format["font.cs"] = rp.RunFonts.ComplexScript.Value;
+            if (rp.FontSize?.Val?.Value != null)
+                node.Format["size"] = $"{int.Parse(rp.FontSize.Val.Value) / 2.0:0.##}pt";
+            if (rp.Bold != null) node.Format["bold"] = IsToggleOn(rp.Bold);
+            if (rp.Italic != null) node.Format["italic"] = IsToggleOn(rp.Italic);
+            if (rp.Color?.ThemeColor?.HasValue == true) node.Format["color"] = rp.Color.ThemeColor.InnerText;
+            else if (rp.Color?.Val?.Value != null) node.Format["color"] = ParseHelpers.FormatHexColor(rp.Color.Val.Value);
+            if (rp.Underline?.Val != null) node.Format["underline"] = rp.Underline.Val.InnerText;
+            // CONSISTENCY(underline-color): backfilled from style Get edc8f884.
+            if (rp.Underline?.Color?.Value != null)
+                node.Format["underline.color"] = ParseHelpers.FormatHexColor(rp.Underline.Color.Value);
+            if (rp.Strike != null) node.Format["strike"] = IsToggleOn(rp.Strike);
+            if (rp.Highlight?.Val != null) node.Format["highlight"] = rp.Highlight.Val.InnerText;
+        }
+        return node;
+    }
+
+    private DocumentNode TableToNode(Table table, DocumentNode node, string path, int depth)
+    {
+        node.Type = "table";
+        node.ChildCount = table.Elements<TableRow>().Count();
+        var firstRow = table.Elements<TableRow>().FirstOrDefault();
+        // Use grid column count (from TableGrid) instead of cell count for accurate column reporting
+        var gridColCount = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Count();
+        // CONSISTENCY(format-stringy): user-facing numeric counts are
+        // stored as strings to match other Word format keys (size "14pt",
+        // spacing "12pt"). Avoids object-vs-int comparison surprises.
+        node.Format["cols"] = (gridColCount ?? firstRow?.Elements<TableCell>().Count() ?? 0).ToString();
+        node.Format["rows"] = node.ChildCount.ToString();
+        // _gridCols: actual <w:gridCol> count (0 when TableGrid is missing
+        // or empty), unbiased by the row-cell fallback that `cols` uses for
+        // backward-compat. EmitTable reads this to decide whether to emit
+        // `gridCols=0` on the dumped `add table` so AddTable leaves the
+        // <w:tblGrid/> empty — preserving sources whose cells encode width
+        // via tcW (or auto-fit). Underscore-prefixed to mark it as
+        // internal-only (not a user-facing Set/Add key).
+        node.Format["_gridCols"] = (gridColCount ?? 0).ToString();
+
+        var tp = table.GetFirstChild<TableProperties>();
+        if (tp != null)
+        {
+            // tblPrChange: `set table + trackChange.author` snapshots the
+            // prior tblPr and stamps author/date. Surfaced under
+            // tblPrChange.* so EmitTable can emit a follow-up
+            // `set /body/tbl[N]` step carrying trackChange.author/date
+            // (re-runs the snapshot+stamp on replay). Distinct namespace
+            // from any future bare `trackChange=` on tables.
+            var tblPrChange = tp.GetFirstChild<TablePropertiesChange>();
+            if (tblPrChange != null)
+            {
+                if (!string.IsNullOrEmpty(tblPrChange.Author?.Value))
+                    node.Format["tblPrChange.author"] = tblPrChange.Author!.Value!;
+                if (tblPrChange.Date?.Value is DateTime tDate)
+                    node.Format["tblPrChange.date"] = tDate.ToString("o");
+            }
+            // Table style
+            // BUG-R3-05: empty Val (set via legacy code that wrote tblStyle
+            // with empty string) must NOT surface as a "style" key.
+            if (!string.IsNullOrEmpty(tp.TableStyle?.Val?.Value))
+                node.Format["style"] = tp.TableStyle.Val.Value!;
+            // Table borders. `LeftBorder`/`RightBorder` only catch
+            // <w:left>/<w:right>; bidi-aware sources use <w:start>/<w:end>
+            // which the SDK does NOT alias onto Left/Right (the typed
+            // properties stay null). Walk all border children by local
+            // name and map both forms onto the same canonical key — the
+            // alternative is dropping borders for any doc whose tblBorders
+            // uses the start/end naming (three-line-table2.docx).
+            var tblBorders = tp.TableBorders;
+            if (tblBorders != null)
+            {
+                ReadBorder(tblBorders.TopBorder, "border.top", node);
+                ReadBorder(tblBorders.BottomBorder, "border.bottom", node);
+                ReadBorder(tblBorders.InsideHorizontalBorder, "border.insideH", node);
+                ReadBorder(tblBorders.InsideVerticalBorder, "border.insideV", node);
+                foreach (var bChild in tblBorders.ChildElements)
+                {
+                    if (bChild is BorderType bt)
+                    {
+                        var ln = bChild.LocalName;
+                        if (ln.Equals("left", StringComparison.OrdinalIgnoreCase)
+                            || ln.Equals("start", StringComparison.OrdinalIgnoreCase))
+                            ReadBorder(bt, "border.left", node);
+                        else if (ln.Equals("right", StringComparison.OrdinalIgnoreCase)
+                                 || ln.Equals("end", StringComparison.OrdinalIgnoreCase))
+                            ReadBorder(bt, "border.right", node);
+                    }
+                }
+            }
+            // Table width
+            if (tp.TableWidth?.Width?.Value != null)
+            {
+                var wType = tp.TableWidth.Type?.Value;
+                // BUG-DUMP19-03: type=auto must round-trip as "auto", not
+                // collapse to a bare dxa integer (Width="0").
+                node.Format["width"] = wType == TableWidthUnitValues.Pct
+                    ? (int.Parse(tp.TableWidth.Width.Value) / 50) + "%"
+                    : wType == TableWidthUnitValues.Auto
+                        ? "auto"
+                        : tp.TableWidth.Width.Value;
+            }
+            else if (tp.TableWidth?.Type?.Value == TableWidthUnitValues.Auto)
+            {
+                // Some producers emit <w:tblW w:type="auto"/> without w:w.
+                node.Format["width"] = "auto";
+            }
+            else
+            {
+                // Internal-only marker: source had no <w:tblW> element at
+                // all. EmitTable reads this to tell AddTable to skip the
+                // default-tblW stamp; without it, replay grows
+                // a <w:tblW w:w="<sum-of-gridCol>" w:type="dxa"/> that
+                // the source never had, and the next dump surfaces a
+                // phantom `width=…` key.
+                node.Format["_noTblW"] = true;
+            }
+            // Alignment
+            if (tp.TableJustification?.Val?.Value != null)
+                node.Format["align"] = tp.TableJustification.Val.InnerText;
+            // Indent
+            if (tp.TableIndentation?.Width?.Value != null)
+                node.Format["indent"] = tp.TableIndentation.Width.Value;
+            // Cell spacing
+            if (tp.TableCellSpacing?.Width?.Value != null)
+                node.Format["cellSpacing"] = tp.TableCellSpacing.Width.Value;
+            // Layout — emit "autofit" (not "auto") so the readback token
+            // matches the canonical input vocabulary documented in the
+            // table add/set help. Set accepts both "auto" and "autofit"
+            // (anything not "fixed" maps to Autofit), so this only affects
+            // get and is round-trip safe with the dump/replay pipeline.
+            if (tp.TableLayout?.Type?.Value != null)
+                node.Format["layout"] = tp.TableLayout.Type.Value == TableLayoutValues.Fixed ? "fixed" : "autofit";
+            // Direction (CT_TblPrBase / w:bidiVisual). Mirrors paragraph
+            // direction vocabulary; presence-only readback (no bidiVisual
+            // means no key — LTR is the default).
+            if (tp.GetFirstChild<BiDiVisual>() != null)
+                node.Format["direction"] = "rtl";
+            // Default cell margin (padding)
+            var dcm = tp.TableCellMarginDefault;
+            if (dcm?.TopMargin?.Width?.Value != null)
+                node.Format["padding.top"] = dcm.TopMargin.Width.Value;
+            if (dcm?.BottomMargin?.Width?.Value != null)
+                node.Format["padding.bottom"] = dcm.BottomMargin.Width.Value;
+            if (dcm?.TableCellLeftMargin?.Width?.Value != null)
+                node.Format["padding.left"] = dcm.TableCellLeftMargin.Width.Value;
+            if (dcm?.TableCellRightMargin?.Width?.Value != null)
+                node.Format["padding.right"] = dcm.TableCellRightMargin.Width.Value;
+            // Table-level shading (w:tblPr/w:shd). Mirror paragraph shading
+            // pattern: split into shading.val/.fill/.color sub-keys.
+            // WordBatchEmitter's shading-fold collapses these into a single
+            // semicolon-encoded `shading=VAL;FILL[;COLOR]` value, which
+            // AddTable consumes via the existing "shading" case.
+            // BUG-DUMP22-09: floating-table position (<w:tblpPr/>) and
+            // overlap (<w:tblOverlap/>) — both were silently dropped on
+            // dump, leaving floating tables stuck inline on round-trip.
+            // Surface tblpPr's six attrs as tblp.* dotted keys (using the
+            // OOXML attribute local names verbatim) plus tblOverlap as a
+            // dotted sibling so AddTable's TypedAttributeFallback can
+            // re-create the elements verbatim. CONSISTENCY(canonical-keys):
+            // dotted-segment-as-element-prefix matches ind.firstLine and
+            // pBdr.top patterns.
+            var tblpPr = tp.GetFirstChild<TablePositionProperties>();
+            if (tblpPr != null)
+            {
+                if (tblpPr.HorizontalAnchor?.HasValue == true)
+                    node.Format["tblp.horzAnchor"] = tblpPr.HorizontalAnchor.InnerText;
+                if (tblpPr.VerticalAnchor?.HasValue == true)
+                    node.Format["tblp.vertAnchor"] = tblpPr.VerticalAnchor.InnerText;
+                if (tblpPr.TablePositionX?.HasValue == true)
+                    node.Format["tblp.tblpX"] = tblpPr.TablePositionX.Value!;
+                if (tblpPr.TablePositionY?.HasValue == true)
+                    node.Format["tblp.tblpY"] = tblpPr.TablePositionY.Value!;
+                if (tblpPr.TablePositionXAlignment?.HasValue == true)
+                    node.Format["tblp.tblpXSpec"] = tblpPr.TablePositionXAlignment.InnerText;
+                if (tblpPr.TablePositionYAlignment?.HasValue == true)
+                    node.Format["tblp.tblpYSpec"] = tblpPr.TablePositionYAlignment.InnerText;
+                if (tblpPr.LeftFromText?.HasValue == true)
+                    node.Format["tblp.leftFromText"] = tblpPr.LeftFromText.Value!;
+                if (tblpPr.RightFromText?.HasValue == true)
+                    node.Format["tblp.rightFromText"] = tblpPr.RightFromText.Value!;
+                if (tblpPr.TopFromText?.HasValue == true)
+                    node.Format["tblp.topFromText"] = tblpPr.TopFromText.Value!;
+                if (tblpPr.BottomFromText?.HasValue == true)
+                    node.Format["tblp.bottomFromText"] = tblpPr.BottomFromText.Value!;
+            }
+            var tblOverlap = tp.GetFirstChild<TableOverlap>();
+            if (tblOverlap?.Val?.HasValue == true)
+                node.Format["tblOverlap.val"] = tblOverlap.Val.InnerText;
+            if (tp.Shading != null)
+            {
+                var tShdVal = tp.Shading.Val?.InnerText;
+                var tShdFill = tp.Shading.Fill?.Value;
+                var tShdColor = tp.Shading.Color?.Value;
+                if (!string.IsNullOrEmpty(tShdVal)) node.Format["shading.val"] = tShdVal;
+                if (!string.IsNullOrEmpty(tShdFill)) node.Format["shading.fill"] = ParseHelpers.FormatHexColor(tShdFill);
+                if (!string.IsNullOrEmpty(tShdColor)) node.Format["shading.color"] = ParseHelpers.FormatHexColor(tShdColor);
+            }
+
+            // BUG-R3-01: tblLook readback — Set wrote the XML correctly, but
+            // Get never read it back (Set/Get round-trip gap). Emit both the
+            // short-form lowercase keys (firstrow/lastrow/bandrow — match
+            // Set's case-insensitive vocabulary and project canonical
+            // pattern: vmerge/colspan) AND OOXML-attribute-name camelCase
+            // keys (firstRow/bandedRows — verbatim attribute names) so
+            // batch round-trip works either way. The two forms exist for
+            // historical-vocabulary parity; values are kept consistent
+            // across both keys (lowercase stores "true"/"false" string,
+            // camelCase stores bool).
+            // BUG-R4-01/06: Get emits ONLY canonical camelCase keys
+            // (firstRow/lastRow/firstCol/lastCol/bandedRows/bandedCols).
+            // Set still accepts lowercase aliases (firstrow/bandrow/etc)
+            // as input — see Set.Element.cs. Internal hex `tblLook.val`
+            // is NOT surfaced (was a dump-poisoning impl detail).
+            var tblLookRead = tp.GetFirstChild<TableLook>();
+            if (tblLookRead != null)
+            {
+                if (tblLookRead.FirstRow?.HasValue == true && tblLookRead.FirstRow.Value)
+                    node.Format["firstRow"] = true;
+                if (tblLookRead.LastRow?.HasValue == true && tblLookRead.LastRow.Value)
+                    node.Format["lastRow"] = true;
+                if (tblLookRead.FirstColumn?.HasValue == true && tblLookRead.FirstColumn.Value)
+                    node.Format["firstCol"] = true;
+                if (tblLookRead.LastColumn?.HasValue == true && tblLookRead.LastColumn.Value)
+                    node.Format["lastCol"] = true;
+                // banding semantics are inverted: noHBand=true means NO banding.
+                // Emit only when banding IS active (noHBand=false explicitly set).
+                if (tblLookRead.NoHorizontalBand?.HasValue == true && !tblLookRead.NoHorizontalBand.Value)
+                    node.Format["bandedRows"] = true;
+                if (tblLookRead.NoVerticalBand?.HasValue == true && !tblLookRead.NoVerticalBand.Value)
+                    node.Format["bandedCols"] = true;
+            }
+
+            // Accessibility: table caption / description. Set writes
+            // <w:tblCaption w:val="…"/> and <w:tblDescription w:val="…"/>
+            // (see Set.Element.cs table branch). Without the readback,
+            // get/dump silently drops these on round-trip.
+            var tblCaption = tp.GetFirstChild<TableCaption>();
+            if (!string.IsNullOrEmpty(tblCaption?.Val?.Value))
+                node.Format["caption"] = tblCaption.Val.Value!;
+            var tblDescription = tp.GetFirstChild<TableDescription>();
+            if (!string.IsNullOrEmpty(tblDescription?.Val?.Value))
+                node.Format["description"] = tblDescription.Val.Value!;
+        }
+
+        // Column widths from grid
+        var gridCols = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().ToList();
+        if (gridCols != null && gridCols.Count > 0)
+            node.Format["colWidths"] = string.Join(",", gridCols.Select(g => g.Width?.Value ?? "0"));
+
+        if (depth > 0)
+        {
+            int rowIdx = 0;
+            foreach (var row in table.Elements<TableRow>())
+            {
+                var rowNode = new DocumentNode
+                {
+                    Path = $"{path}/tr[{rowIdx + 1}]",
+                    Type = "row",
+                    ChildCount = row.Elements<TableCell>().Count()
+                };
+                ReadRowProps(row, rowNode);
+                if (depth > 1)
+                {
+                    int cellIdx = 0;
+                    foreach (var cell in row.Elements<TableCell>())
+                    {
+                        var cellNode = new DocumentNode
+                        {
+                            Path = $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]",
+                            Type = "cell",
+                            Text = string.Join("", cell.Descendants<Text>().Select(t => t.Text)),
+                            // CONSISTENCY(cell-children): include nested Table children alongside Paragraphs.
+                            ChildCount = cell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table)
+                        };
+                        ReadCellProps(cell, cellNode);
+                        if (depth > 2)
+                        {
+                            int cellPIdx = 0, cellTblIdx = 0;
+                            foreach (var cellChild in cell.Elements<OpenXmlElement>())
+                            {
+                                if (cellChild is Paragraph cellPara)
+                                {
+                                    cellPIdx++;
+                                    var cParaSegment = BuildParaPathSegment(cellPara, cellPIdx);
+                                    cellNode.Children.Add(ElementToNode(cellPara, $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]/{cParaSegment}", depth - 3));
+                                }
+                                else if (cellChild is Table cellTbl)
+                                {
+                                    cellTblIdx++;
+                                    cellNode.Children.Add(ElementToNode(cellTbl, $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]/tbl[{cellTblIdx}]", depth - 3));
+                                }
+                            }
+                        }
+                        rowNode.Children.Add(cellNode);
+                        cellIdx++;
+                    }
+                }
+                node.Children.Add(rowNode);
+                rowIdx++;
+            }
+        }
+        return node;
+    }
+
+    private DocumentNode TableCellToNode(TableCell directCell, DocumentNode node, string path, int depth)
+    {
+        node.Type = "cell";
+        node.Text = string.Join("", directCell.Descendants<Text>().Select(t => t.Text));
+        // CONSISTENCY(cell-children): include nested Table children alongside Paragraphs.
+        node.ChildCount = directCell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table);
+        ReadCellProps(directCell, node);
+        if (depth > 0)
+        {
+            int dcPIdx = 0, dcTblIdx = 0;
+            foreach (var dcChild in directCell.Elements<OpenXmlElement>())
+            {
+                if (dcChild is Paragraph cellPara)
+                {
+                    dcPIdx++;
+                    var dcParaSegment = BuildParaPathSegment(cellPara, dcPIdx);
+                    node.Children.Add(ElementToNode(cellPara, $"{path}/{dcParaSegment}", depth - 1));
+                }
+                else if (dcChild is Table dcTbl)
+                {
+                    dcTblIdx++;
+                    node.Children.Add(ElementToNode(dcTbl, $"{path}/tbl[{dcTblIdx}]", depth - 1));
+                }
+            }
+        }
+        return node;
+    }
+
+    private DocumentNode TableRowToNode(TableRow directRow, DocumentNode node, string path, int depth)
+    {
+        node.Type = "row";
+        node.ChildCount = directRow.Elements<TableCell>().Count();
+        ReadRowProps(directRow, node);
+        if (depth > 0)
+        {
+            int cellIdx = 0;
+            foreach (var cell in directRow.Elements<TableCell>())
+            {
+                var cellNode = new DocumentNode
+                {
+                    Path = $"{path}/tc[{cellIdx + 1}]",
+                    Type = "cell",
+                    Text = string.Join("", cell.Descendants<Text>().Select(t => t.Text)),
+                    // CONSISTENCY(cell-children): include nested Table children alongside Paragraphs.
+                    ChildCount = cell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table)
+                };
+                ReadCellProps(cell, cellNode);
+                if (depth > 1)
+                {
+                    int drPIdx = 0, drTblIdx = 0;
+                    foreach (var drChild in cell.Elements<OpenXmlElement>())
+                    {
+                        if (drChild is Paragraph cellPara)
+                        {
+                            drPIdx++;
+                            var drParaSegment = BuildParaPathSegment(cellPara, drPIdx);
+                            cellNode.Children.Add(ElementToNode(cellPara, $"{path}/tc[{cellIdx + 1}]/{drParaSegment}", depth - 2));
+                        }
+                        else if (drChild is Table drTbl)
+                        {
+                            drTblIdx++;
+                            cellNode.Children.Add(ElementToNode(drTbl, $"{path}/tc[{cellIdx + 1}]/tbl[{drTblIdx}]", depth - 2));
+                        }
+                    }
+                }
+                node.Children.Add(cellNode);
+                cellIdx++;
+            }
+        }
+        return node;
+    }
+
+    private DocumentNode SdtBlockToNode(SdtBlock sdtBlockNode, DocumentNode node)
+    {
+        node.Type = "sdt";
+        var sdtProps = sdtBlockNode.SdtProperties;
+        if (sdtProps != null)
+        {
+            var alias = sdtProps.GetFirstChild<SdtAlias>();
+            if (alias?.Val?.Value != null) node.Format["alias"] = alias.Val.Value;
+            var tagEl = sdtProps.GetFirstChild<Tag>();
+            if (tagEl?.Val?.Value != null) node.Format["tag"] = tagEl.Val.Value;
+            var lockEl = sdtProps.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.Lock>();
+            if (lockEl?.Val?.Value != null) node.Format["lock"] = lockEl.Val.InnerText;
+            var sdtId = sdtProps.GetFirstChild<SdtId>();
+            if (sdtId?.Val?.Value != null) node.Format["id"] = sdtId.Val.Value;
+
+            // Determine SDT type (check specific types first, text last as fallback)
+            if (sdtProps.GetFirstChild<SdtContentDropDownList>() != null) node.Format["type"] = "dropdown";
+            else if (sdtProps.GetFirstChild<SdtContentComboBox>() != null) node.Format["type"] = "combobox";
+            else if (sdtProps.GetFirstChild<SdtContentDate>() != null) node.Format["type"] = "date";
+            else if (sdtProps.GetFirstChild<SdtContentText>() != null) node.Format["type"] = "text";
+            else node.Format["type"] = "richtext";
+
+            // Read date format for date controls
+            var dateContent = sdtProps.GetFirstChild<SdtContentDate>();
+            if (dateContent?.DateFormat?.Val?.Value != null)
+                node.Format["format"] = dateContent.DateFormat.Val.Value;
+
+            // Editable status
+            node.Format["editable"] = IsSdtEditable(sdtProps);
+
+            // Placeholder detection
+            var showingPlcHdr = sdtProps.GetFirstChild<ShowingPlaceholder>();
+            if (showingPlcHdr != null)
+            {
+                node.Format["placeholder"] = true;
+                var plcHdrText = sdtProps.GetFirstChild<SdtPlaceholder>()?.DocPartReference?.Val?.Value;
+                if (plcHdrText != null) node.Format["placeholderText"] = plcHdrText;
+            }
+
+            // Read dropdown/combobox items
+            var ddl = sdtProps.GetFirstChild<SdtContentDropDownList>();
+            var combo = sdtProps.GetFirstChild<SdtContentComboBox>();
+            var listItems = ddl?.Elements<ListItem>() ?? combo?.Elements<ListItem>();
+            if (listItems != null)
+            {
+                // BUG-R5-07: SDT ListItems carry distinct DisplayText and
+                // Value attrs. Real Word docs commonly differ (e.g.
+                // "Draft|DRAFT"). Emit the pipe form when value !=
+                // displayText so dump→add round-trips. ParseSdtItems on
+                // the Add side accepts both bare and piped forms.
+                var items = listItems.Select(li =>
+                {
+                    var disp = li.DisplayText?.Value ?? li.Value?.Value ?? "";
+                    var val = li.Value?.Value ?? li.DisplayText?.Value ?? "";
+                    return disp == val ? disp : $"{disp}|{val}";
+                }).ToList();
+                if (items.Count > 0) node.Format["items"] = string.Join(",", items);
+            }
+        }
+        node.Text = string.Concat(sdtBlockNode.Descendants<Text>().Select(t => t.Text));
+        var sdtContent = sdtBlockNode.SdtContentBlock;
+        node.ChildCount = sdtContent?.ChildElements.Count ?? 0;
+        return node;
+    }
+
+    private DocumentNode SdtRunToNode(SdtRun sdtRunNode, DocumentNode node)
+    {
+        node.Type = "sdt";
+        var sdtProps = sdtRunNode.SdtProperties;
+        if (sdtProps != null)
+        {
+            var alias = sdtProps.GetFirstChild<SdtAlias>();
+            if (alias?.Val?.Value != null) node.Format["alias"] = alias.Val.Value;
+            var tagEl = sdtProps.GetFirstChild<Tag>();
+            if (tagEl?.Val?.Value != null) node.Format["tag"] = tagEl.Val.Value;
+            var lockEl = sdtProps.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.Lock>();
+            if (lockEl?.Val?.Value != null) node.Format["lock"] = lockEl.Val.InnerText;
+            var sdtId = sdtProps.GetFirstChild<SdtId>();
+            if (sdtId?.Val?.Value != null) node.Format["id"] = sdtId.Val.Value;
+
+            if (sdtProps.GetFirstChild<SdtContentDropDownList>() != null) node.Format["type"] = "dropdown";
+            else if (sdtProps.GetFirstChild<SdtContentComboBox>() != null) node.Format["type"] = "combobox";
+            else if (sdtProps.GetFirstChild<SdtContentDate>() != null) node.Format["type"] = "date";
+            else if (sdtProps.GetFirstChild<SdtContentText>() != null) node.Format["type"] = "text";
+            else node.Format["type"] = "richtext";
+
+            // Editable status
+            node.Format["editable"] = IsSdtEditable(sdtProps);
+
+            // Placeholder detection
+            var showingPlcHdrRun = sdtProps.GetFirstChild<ShowingPlaceholder>();
+            if (showingPlcHdrRun != null)
+            {
+                node.Format["placeholder"] = true;
+                var plcHdrTextRun = sdtProps.GetFirstChild<SdtPlaceholder>()?.DocPartReference?.Val?.Value;
+                if (plcHdrTextRun != null) node.Format["placeholderText"] = plcHdrTextRun;
+            }
+
+            var ddl = sdtProps.GetFirstChild<SdtContentDropDownList>();
+            var combo = sdtProps.GetFirstChild<SdtContentComboBox>();
+            var listItems = ddl?.Elements<ListItem>() ?? combo?.Elements<ListItem>();
+            if (listItems != null)
+            {
+                // BUG-R5-07: SDT ListItems carry distinct DisplayText and
+                // Value attrs. Real Word docs commonly differ (e.g.
+                // "Draft|DRAFT"). Emit the pipe form when value !=
+                // displayText so dump→add round-trips. ParseSdtItems on
+                // the Add side accepts both bare and piped forms.
+                var items = listItems.Select(li =>
+                {
+                    var disp = li.DisplayText?.Value ?? li.Value?.Value ?? "";
+                    var val = li.Value?.Value ?? li.DisplayText?.Value ?? "";
+                    return disp == val ? disp : $"{disp}|{val}";
+                }).ToList();
+                if (items.Count > 0) node.Format["items"] = string.Join(",", items);
+            }
+        }
+        node.Text = string.Concat(sdtRunNode.Descendants<Text>().Select(t => t.Text));
+        return node;
+    }
+
+    private DocumentNode OfficeMathToNode(M.OfficeMath inlineMath, DocumentNode node)
+    {
+        node.Type = "equation";
+        node.Format["mode"] = "inline";
+        try { node.Text = Core.FormulaParser.ToLatex(inlineMath); }
+        catch { node.Text = inlineMath.InnerText; }
+        if (string.IsNullOrEmpty(node.Text))
+            node.Text = inlineMath.InnerText;
+        return node;
+    }
+
+    private DocumentNode HeaderFooterToNode(OpenXmlElement element, DocumentNode node, string path, int depth)
+    {
+        // Header/Footer: enumerate block-level children. Tables are valid
+        // block-level OOXML inside hdr/ftr (same schema as body), so list
+        // them alongside paragraphs. Mirrors body-listing logic above.
+        node.Type = element is Header ? "header" : "footer";
+        node.Text = string.Concat(element.Descendants<Text>().Select(t => t.Text));
+        node.ChildCount = element.Elements<Paragraph>().Count() + element.Elements<Table>().Count();
+        if (depth > 0)
+        {
+            int pIdx = 0, tblIdx = 0;
+            foreach (var child in element.ChildElements)
+            {
+                if (child is Paragraph hfPara)
+                {
+                    pIdx++;
+                    var paraSegment = BuildParaPathSegment(hfPara, pIdx);
+                    node.Children.Add(ElementToNode(hfPara, $"{path}/{paraSegment}", depth - 1));
+                }
+                else if (child is Table)
+                {
+                    tblIdx++;
+                    node.Children.Add(ElementToNode(child, $"{path}/tbl[{tblIdx}]", depth - 1));
+                }
+            }
+        }
+        return node;
+    }
+
+    private DocumentNode BodyToNode(Body bodyNode, DocumentNode node, string path, int depth)
+    {
+        // CONSISTENCY(body-listing): enumerate body children using the
+        // same p[N]/oMathPara[M] counting rules as NavigateToElement so
+        // `get /body` emits paths that `get <path>` can resolve. The
+        // generic fallback would count every LocalName, listing wrapper
+        // <w:p> (pure oMathPara) as p[2] even though the resolver skips
+        // them. Mirrors the logic in WordHandler.View.ViewAsText.
+        node.ChildCount = bodyNode.ChildElements.Count;
+        if (depth > 0)
+        {
+            int pIdx = 0, tblIdx = 0, mathParaIdx = 0, sdtIdx = 0;
+            // BUG-DUMP7-04: w:customXml body wrappers are non-structural —
+            // their inner paragraphs and tables should appear as direct
+            // body children (with shared p/tbl/sdt counters) so the
+            // wrapper itself is invisible to dump but its content
+            // round-trips. Recursively flatten any depth of customXml
+            // nesting. Without this, the wrapper fell to the generic
+            // else and its children were never enumerated.
+            void WalkBodyChild(OpenXmlElement child)
+            {
+                if (child.LocalName == "oMathPara" || child is M.Paragraph)
+                {
+                    mathParaIdx++;
+                    node.Children.Add(ElementToNode(child, $"{path}/oMathPara[{mathParaIdx}]", depth - 1));
+                }
+                else if (child is Paragraph bPara)
+                {
+                    if (IsOMathParaWrapperParagraph(bPara))
+                    {
+                        mathParaIdx++;
+                        node.Children.Add(ElementToNode(bPara, $"{path}/oMathPara[{mathParaIdx}]", depth - 1));
+                    }
+                    else
+                    {
+                        pIdx++;
+                        var bSeg = BuildParaPathSegment(bPara, pIdx);
+                        node.Children.Add(ElementToNode(bPara, $"{path}/{bSeg}", depth - 1));
+                    }
+                }
+                else if (child is Table)
+                {
+                    tblIdx++;
+                    node.Children.Add(ElementToNode(child, $"{path}/tbl[{tblIdx}]", depth - 1));
+                }
+                else if (child is SdtBlock)
+                {
+                    sdtIdx++;
+                    node.Children.Add(ElementToNode(child, $"{path}/sdt[{sdtIdx}]", depth - 1));
+                }
+                else if (child is CustomXmlBlock cxBlock)
+                {
+                    foreach (var inner in cxBlock.ChildElements)
+                        WalkBodyChild(inner);
+                }
+                else
+                {
+                    // Non-structural (sectPr etc.) — keep localName naming
+                    node.Children.Add(ElementToNode(child, $"{path}/{child.LocalName}[1]", depth - 1));
+                }
+            }
+            foreach (var child in bodyNode.ChildElements)
+                WalkBodyChild(child);
+        }
+        return node;
+    }
+
     private DocumentNode ElementToNode(OpenXmlElement element, string path, int depth)
     {
         var node = new DocumentNode { Path = path, Type = element.LocalName };
@@ -1297,156 +2094,16 @@ public partial class WordHandler
             return BookmarkStartToNode(bkStart, node);
 
         if (element is Footnote fnEl)
-        {
-            node.Type = "footnote";
-            // Strip the reference-mark leading space (CONSISTENCY with Query
-            // get-by-id and `query footnote`). Without this branch the
-            // generic InnerText fallback below would return " fn-text".
-            node.Text = GetFootnoteText(fnEl);
-            if (fnEl.Id?.Value != null) node.Format["id"] = fnEl.Id.Value;
-            if (fnEl.Type?.Value != null) node.Format["type"] = fnEl.Type.InnerText;
-            // R44 minor-5: surface first-run formatting on footnote node so
-            // bold/italic/size/color set via Add/Set round-trip through Get.
-            // Mirrors the hyperlink firstRun pattern at line ~2746 above.
-            var fnFirstRun = fnEl.Descendants<Run>().FirstOrDefault(r => r.GetFirstChild<Text>() != null);
-            if (fnFirstRun?.RunProperties != null)
-            {
-                var rp = fnFirstRun.RunProperties;
-                if (rp.RunFonts?.Ascii?.Value != null) node.Format["font"] = rp.RunFonts.Ascii.Value;
-                if (rp.FontSize?.Val?.Value != null)
-                    node.Format["size"] = $"{int.Parse(rp.FontSize.Val.Value) / 2.0:0.##}pt";
-                if (rp.Bold != null) node.Format["bold"] = IsToggleOn(rp.Bold);
-                if (rp.Italic != null) node.Format["italic"] = IsToggleOn(rp.Italic);
-                if (rp.Color?.ThemeColor?.HasValue == true) node.Format["color"] = rp.Color.ThemeColor.InnerText;
-                else if (rp.Color?.Val?.Value != null) node.Format["color"] = ParseHelpers.FormatHexColor(rp.Color.Val.Value);
-                if (rp.Underline?.Val != null) node.Format["underline"] = rp.Underline.Val.InnerText;
-                if (rp.Strike != null) node.Format["strike"] = IsToggleOn(rp.Strike);
-                if (rp.Highlight?.Val != null) node.Format["highlight"] = rp.Highlight.Val.InnerText;
-            }
-            // R20-wbt-1: surface direction from the first content paragraph's
-            // pPr.BiDi so the cascade (already applied by ApplyFootnoteEndnoteFormatKeys)
-            // round-trips through Get. Mirrors the paragraph readback below.
-            var fnBidi = fnEl.Descendants<Paragraph>().FirstOrDefault()?.ParagraphProperties?.GetFirstChild<BiDi>();
-            if (fnBidi != null)
-                node.Format["direction"] = TryReadOnOff(fnBidi.Val) == true ? "rtl" : "ltr";
-            // BUG-DUMP8-05/06: Paragraph branch surfaces inline w:sym (as
-            // sym= run children) and m:oMath (as equation children) but the
-            // Footnote branch returned early after flat text/format, so
-            // sym and oMath inside footnote bodies were silently dropped.
-            // Walk descendant runs/equations and surface them as children
-            // on the footnote node, mirroring the paragraph walker's keys.
-            if (depth > 0)
-            {
-                int fnSymIdx = 0;
-                foreach (var symRun in fnEl.Descendants<Run>())
-                {
-                    var symEl = symRun.GetFirstChild<SymbolChar>();
-                    if (symEl?.Char?.Value == null) continue;
-                    var symFontVal = symEl.Font?.Value ?? "";
-                    var symNode = new DocumentNode
-                    {
-                        Type = "run",
-                        Path = $"{path}/r[{fnSymIdx + 1}]",
-                    };
-                    symNode.Format["sym"] = $"{symFontVal}:{symEl.Char.Value}";
-                    node.Children.Add(symNode);
-                    fnSymIdx++;
-                }
-                int fnEqIdx = 0;
-                foreach (var fnEq in fnEl.Descendants<M.OfficeMath>())
-                {
-                    node.Children.Add(ElementToNode(fnEq, $"{path}/equation[{fnEqIdx + 1}]", depth - 1));
-                    fnEqIdx++;
-                }
-            }
-            return node;
-        }
+            return FootnoteToNode(fnEl, node, path, depth);
 
         if (element is Endnote enEl)
-        {
-            node.Type = "endnote";
-            node.Text = GetFootnoteText(enEl);
-            if (enEl.Id?.Value != null) node.Format["id"] = enEl.Id.Value;
-            if (enEl.Type?.Value != null) node.Format["type"] = enEl.Type.InnerText;
-            // R44 minor-5: mirror footnote firstRun readback for endnote.
-            var enFirstRun = enEl.Descendants<Run>().FirstOrDefault(r => r.GetFirstChild<Text>() != null);
-            if (enFirstRun?.RunProperties != null)
-            {
-                var rp = enFirstRun.RunProperties;
-                if (rp.RunFonts?.Ascii?.Value != null) node.Format["font"] = rp.RunFonts.Ascii.Value;
-                if (rp.FontSize?.Val?.Value != null)
-                    node.Format["size"] = $"{int.Parse(rp.FontSize.Val.Value) / 2.0:0.##}pt";
-                if (rp.Bold != null) node.Format["bold"] = IsToggleOn(rp.Bold);
-                if (rp.Italic != null) node.Format["italic"] = IsToggleOn(rp.Italic);
-                if (rp.Color?.ThemeColor?.HasValue == true) node.Format["color"] = rp.Color.ThemeColor.InnerText;
-                else if (rp.Color?.Val?.Value != null) node.Format["color"] = ParseHelpers.FormatHexColor(rp.Color.Val.Value);
-                if (rp.Underline?.Val != null) node.Format["underline"] = rp.Underline.Val.InnerText;
-                if (rp.Strike != null) node.Format["strike"] = IsToggleOn(rp.Strike);
-                if (rp.Highlight?.Val != null) node.Format["highlight"] = rp.Highlight.Val.InnerText;
-            }
-            var enBidi = enEl.Descendants<Paragraph>().FirstOrDefault()?.ParagraphProperties?.GetFirstChild<BiDi>();
-            if (enBidi != null)
-                node.Format["direction"] = TryReadOnOff(enBidi.Val) == true ? "rtl" : "ltr";
-            // CONSISTENCY with Footnote: surface inline w:sym / m:oMath
-            // descendants so dump round-trips them through batch.
-            if (depth > 0)
-            {
-                int enSymIdx = 0;
-                foreach (var symRun in enEl.Descendants<Run>())
-                {
-                    var symEl = symRun.GetFirstChild<SymbolChar>();
-                    if (symEl?.Char?.Value == null) continue;
-                    var symFontVal = symEl.Font?.Value ?? "";
-                    var symNode = new DocumentNode
-                    {
-                        Type = "run",
-                        Path = $"{path}/r[{enSymIdx + 1}]",
-                    };
-                    symNode.Format["sym"] = $"{symFontVal}:{symEl.Char.Value}";
-                    node.Children.Add(symNode);
-                    enSymIdx++;
-                }
-                int enEqIdx = 0;
-                foreach (var enEq in enEl.Descendants<M.OfficeMath>())
-                {
-                    node.Children.Add(ElementToNode(enEq, $"{path}/equation[{enEqIdx + 1}]", depth - 1));
-                    enEqIdx++;
-                }
-            }
-            return node;
-        }
+            return EndnoteToNode(enEl, node, path, depth);
 
         if (element is Comment comment)
-        {
-            node.Type = "comment";
-            node.Text = string.Join("", comment.Descendants<Text>().Select(t => t.Text));
-            if (comment.Author?.Value != null) node.Format["author"] = comment.Author.Value;
-            if (comment.Initials?.Value != null) node.Format["initials"] = comment.Initials.Value;
-            if (comment.Id?.Value != null) node.Format["id"] = comment.Id.Value;
-            if (comment.Date?.Value != null) node.Format["date"] = comment.Date.Value.ToString("o");
-            if (comment.Id?.Value != null)
-            {
-                var anchorPath = FindCommentAnchorPath(comment.Id.Value);
-                if (anchorPath != null) node.Format["anchoredTo"] = anchorPath;
-            }
-            // R21-WB-1: surface direction from the first content paragraph's
-            // pPr.BiDi so the cascade (already applied by ApplyCommentFormatKeys)
-            // round-trips through Get. Mirrors footnote/endnote readback above.
-            var cmtBidi = comment.Descendants<Paragraph>().FirstOrDefault()?.ParagraphProperties?.GetFirstChild<BiDi>();
-            if (cmtBidi != null)
-                node.Format["direction"] = TryReadOnOff(cmtBidi.Val) == true ? "rtl" : "ltr";
-            return node;
-        }
+            return CommentToNode(comment, node);
 
         if (element is SectionProperties sectPrEl)
-        {
-            // CONSISTENCY(section-readback): /body/sectPr[N] should surface
-            // the same Format keys as /section[N] so direction, page size,
-            // margins, etc. are visible regardless of which path the caller
-            // used. Delegate to BuildSectionNode but preserve the original
-            // path the caller asked for.
-            return BuildSectionNode(sectPrEl, path);
-        }
+            return SectionPropertiesToNode(sectPrEl, path);
 
         if (element is Paragraph para)
         {
@@ -2746,531 +3403,17 @@ public partial class WordHandler
             }
         }
         else if (element is Hyperlink hyperlink)
-        {
-            node.Type = "hyperlink";
-            node.Text = string.Concat(hyperlink.Descendants<Text>().Select(t => t.Text));
-            var relId = hyperlink.Id?.Value;
-            if (relId != null)
-            {
-                try
-                {
-                    var rel = ResolveHyperlinkRelationship(hyperlink, relId);
-                    // CONSISTENCY(docx-hyperlink-canonical-url): see note above.
-                    if (rel != null) node.Format["url"] = rel.Uri.ToString();
-                }
-                catch { }
-            }
-            // Internal-anchor hyperlink (`add --type hyperlink --prop anchor=Foo`)
-            // sets w:hyperlink/@w:anchor instead of @r:id. Surface it so set/get
-            // round-trips and users can debug why a link points where it does.
-            if (hyperlink.Anchor?.Value != null)
-                node.Format["anchor"] = hyperlink.Anchor.Value;
-            // BUG-DUMP24-02: w:docLocation is a separate "location in target
-            // document" attribute, distinct from w:anchor. Surface it so
-            // dump→batch round-trips it.
-            if (hyperlink.DocLocation?.Value != null)
-                node.Format["docLocation"] = hyperlink.DocLocation.Value;
-            // BUG-DUMP10-02: tooltip / tgtFrame / history attributes are
-            // independent of url/anchor — surface them so dump→batch
-            // preserves the hover popup, target window, and history flag.
-            if (hyperlink.Tooltip?.Value != null)
-                node.Format["tooltip"] = hyperlink.Tooltip.Value;
-            if (hyperlink.TargetFrame?.Value != null)
-                node.Format["tgtFrame"] = hyperlink.TargetFrame.Value;
-            if (hyperlink.History?.Value == true)
-                node.Format["history"] = true;
-            // Read run formatting from the first run inside the hyperlink
-            var hlRun = hyperlink.Elements<Run>().FirstOrDefault(r => r.GetFirstChild<Text>() != null);
-            if (hlRun?.RunProperties != null)
-            {
-                var rp = hlRun.RunProperties;
-                if (rp.RunFonts?.Ascii?.Value != null) node.Format["font"] = rp.RunFonts.Ascii.Value;
-                // BUG-DUMP17-07: surface per-script font slot so dump→batch
-                // round-trip preserves font.cs on hyperlink runs.
-                if (rp.RunFonts?.ComplexScript?.Value != null) node.Format["font.cs"] = rp.RunFonts.ComplexScript.Value;
-                if (rp.FontSize?.Val?.Value != null)
-                    node.Format["size"] = $"{int.Parse(rp.FontSize.Val.Value) / 2.0:0.##}pt";
-                if (rp.Bold != null) node.Format["bold"] = IsToggleOn(rp.Bold);
-                if (rp.Italic != null) node.Format["italic"] = IsToggleOn(rp.Italic);
-                if (rp.Color?.ThemeColor?.HasValue == true) node.Format["color"] = rp.Color.ThemeColor.InnerText;
-                else if (rp.Color?.Val?.Value != null) node.Format["color"] = ParseHelpers.FormatHexColor(rp.Color.Val.Value);
-                if (rp.Underline?.Val != null) node.Format["underline"] = rp.Underline.Val.InnerText;
-                // CONSISTENCY(underline-color): backfilled from style Get edc8f884.
-                if (rp.Underline?.Color?.Value != null)
-                    node.Format["underline.color"] = ParseHelpers.FormatHexColor(rp.Underline.Color.Value);
-                if (rp.Strike != null) node.Format["strike"] = IsToggleOn(rp.Strike);
-                if (rp.Highlight?.Val != null) node.Format["highlight"] = rp.Highlight.Val.InnerText;
-            }
-        }
+            return HyperlinkToNode(hyperlink, node);
         else if (element is Table table)
-        {
-            node.Type = "table";
-            node.ChildCount = table.Elements<TableRow>().Count();
-            var firstRow = table.Elements<TableRow>().FirstOrDefault();
-            // Use grid column count (from TableGrid) instead of cell count for accurate column reporting
-            var gridColCount = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Count();
-            // CONSISTENCY(format-stringy): user-facing numeric counts are
-            // stored as strings to match other Word format keys (size "14pt",
-            // spacing "12pt"). Avoids object-vs-int comparison surprises.
-            node.Format["cols"] = (gridColCount ?? firstRow?.Elements<TableCell>().Count() ?? 0).ToString();
-            node.Format["rows"] = node.ChildCount.ToString();
-            // _gridCols: actual <w:gridCol> count (0 when TableGrid is missing
-            // or empty), unbiased by the row-cell fallback that `cols` uses for
-            // backward-compat. EmitTable reads this to decide whether to emit
-            // `gridCols=0` on the dumped `add table` so AddTable leaves the
-            // <w:tblGrid/> empty — preserving sources whose cells encode width
-            // via tcW (or auto-fit). Underscore-prefixed to mark it as
-            // internal-only (not a user-facing Set/Add key).
-            node.Format["_gridCols"] = (gridColCount ?? 0).ToString();
-
-            var tp = table.GetFirstChild<TableProperties>();
-            if (tp != null)
-            {
-                // tblPrChange: `set table + trackChange.author` snapshots the
-                // prior tblPr and stamps author/date. Surfaced under
-                // tblPrChange.* so EmitTable can emit a follow-up
-                // `set /body/tbl[N]` step carrying trackChange.author/date
-                // (re-runs the snapshot+stamp on replay). Distinct namespace
-                // from any future bare `trackChange=` on tables.
-                var tblPrChange = tp.GetFirstChild<TablePropertiesChange>();
-                if (tblPrChange != null)
-                {
-                    if (!string.IsNullOrEmpty(tblPrChange.Author?.Value))
-                        node.Format["tblPrChange.author"] = tblPrChange.Author!.Value!;
-                    if (tblPrChange.Date?.Value is DateTime tDate)
-                        node.Format["tblPrChange.date"] = tDate.ToString("o");
-                }
-                // Table style
-                // BUG-R3-05: empty Val (set via legacy code that wrote tblStyle
-                // with empty string) must NOT surface as a "style" key.
-                if (!string.IsNullOrEmpty(tp.TableStyle?.Val?.Value))
-                    node.Format["style"] = tp.TableStyle.Val.Value!;
-                // Table borders. `LeftBorder`/`RightBorder` only catch
-                // <w:left>/<w:right>; bidi-aware sources use <w:start>/<w:end>
-                // which the SDK does NOT alias onto Left/Right (the typed
-                // properties stay null). Walk all border children by local
-                // name and map both forms onto the same canonical key — the
-                // alternative is dropping borders for any doc whose tblBorders
-                // uses the start/end naming (three-line-table2.docx).
-                var tblBorders = tp.TableBorders;
-                if (tblBorders != null)
-                {
-                    ReadBorder(tblBorders.TopBorder, "border.top", node);
-                    ReadBorder(tblBorders.BottomBorder, "border.bottom", node);
-                    ReadBorder(tblBorders.InsideHorizontalBorder, "border.insideH", node);
-                    ReadBorder(tblBorders.InsideVerticalBorder, "border.insideV", node);
-                    foreach (var bChild in tblBorders.ChildElements)
-                    {
-                        if (bChild is BorderType bt)
-                        {
-                            var ln = bChild.LocalName;
-                            if (ln.Equals("left", StringComparison.OrdinalIgnoreCase)
-                                || ln.Equals("start", StringComparison.OrdinalIgnoreCase))
-                                ReadBorder(bt, "border.left", node);
-                            else if (ln.Equals("right", StringComparison.OrdinalIgnoreCase)
-                                     || ln.Equals("end", StringComparison.OrdinalIgnoreCase))
-                                ReadBorder(bt, "border.right", node);
-                        }
-                    }
-                }
-                // Table width
-                if (tp.TableWidth?.Width?.Value != null)
-                {
-                    var wType = tp.TableWidth.Type?.Value;
-                    // BUG-DUMP19-03: type=auto must round-trip as "auto", not
-                    // collapse to a bare dxa integer (Width="0").
-                    node.Format["width"] = wType == TableWidthUnitValues.Pct
-                        ? (int.Parse(tp.TableWidth.Width.Value) / 50) + "%"
-                        : wType == TableWidthUnitValues.Auto
-                            ? "auto"
-                            : tp.TableWidth.Width.Value;
-                }
-                else if (tp.TableWidth?.Type?.Value == TableWidthUnitValues.Auto)
-                {
-                    // Some producers emit <w:tblW w:type="auto"/> without w:w.
-                    node.Format["width"] = "auto";
-                }
-                else
-                {
-                    // Internal-only marker: source had no <w:tblW> element at
-                    // all. EmitTable reads this to tell AddTable to skip the
-                    // default-tblW stamp; without it, replay grows
-                    // a <w:tblW w:w="<sum-of-gridCol>" w:type="dxa"/> that
-                    // the source never had, and the next dump surfaces a
-                    // phantom `width=…` key.
-                    node.Format["_noTblW"] = true;
-                }
-                // Alignment
-                if (tp.TableJustification?.Val?.Value != null)
-                    node.Format["align"] = tp.TableJustification.Val.InnerText;
-                // Indent
-                if (tp.TableIndentation?.Width?.Value != null)
-                    node.Format["indent"] = tp.TableIndentation.Width.Value;
-                // Cell spacing
-                if (tp.TableCellSpacing?.Width?.Value != null)
-                    node.Format["cellSpacing"] = tp.TableCellSpacing.Width.Value;
-                // Layout — emit "autofit" (not "auto") so the readback token
-                // matches the canonical input vocabulary documented in the
-                // table add/set help. Set accepts both "auto" and "autofit"
-                // (anything not "fixed" maps to Autofit), so this only affects
-                // get and is round-trip safe with the dump/replay pipeline.
-                if (tp.TableLayout?.Type?.Value != null)
-                    node.Format["layout"] = tp.TableLayout.Type.Value == TableLayoutValues.Fixed ? "fixed" : "autofit";
-                // Direction (CT_TblPrBase / w:bidiVisual). Mirrors paragraph
-                // direction vocabulary; presence-only readback (no bidiVisual
-                // means no key — LTR is the default).
-                if (tp.GetFirstChild<BiDiVisual>() != null)
-                    node.Format["direction"] = "rtl";
-                // Default cell margin (padding)
-                var dcm = tp.TableCellMarginDefault;
-                if (dcm?.TopMargin?.Width?.Value != null)
-                    node.Format["padding.top"] = dcm.TopMargin.Width.Value;
-                if (dcm?.BottomMargin?.Width?.Value != null)
-                    node.Format["padding.bottom"] = dcm.BottomMargin.Width.Value;
-                if (dcm?.TableCellLeftMargin?.Width?.Value != null)
-                    node.Format["padding.left"] = dcm.TableCellLeftMargin.Width.Value;
-                if (dcm?.TableCellRightMargin?.Width?.Value != null)
-                    node.Format["padding.right"] = dcm.TableCellRightMargin.Width.Value;
-                // Table-level shading (w:tblPr/w:shd). Mirror paragraph shading
-                // pattern: split into shading.val/.fill/.color sub-keys.
-                // WordBatchEmitter's shading-fold collapses these into a single
-                // semicolon-encoded `shading=VAL;FILL[;COLOR]` value, which
-                // AddTable consumes via the existing "shading" case.
-                // BUG-DUMP22-09: floating-table position (<w:tblpPr/>) and
-                // overlap (<w:tblOverlap/>) — both were silently dropped on
-                // dump, leaving floating tables stuck inline on round-trip.
-                // Surface tblpPr's six attrs as tblp.* dotted keys (using the
-                // OOXML attribute local names verbatim) plus tblOverlap as a
-                // dotted sibling so AddTable's TypedAttributeFallback can
-                // re-create the elements verbatim. CONSISTENCY(canonical-keys):
-                // dotted-segment-as-element-prefix matches ind.firstLine and
-                // pBdr.top patterns.
-                var tblpPr = tp.GetFirstChild<TablePositionProperties>();
-                if (tblpPr != null)
-                {
-                    if (tblpPr.HorizontalAnchor?.HasValue == true)
-                        node.Format["tblp.horzAnchor"] = tblpPr.HorizontalAnchor.InnerText;
-                    if (tblpPr.VerticalAnchor?.HasValue == true)
-                        node.Format["tblp.vertAnchor"] = tblpPr.VerticalAnchor.InnerText;
-                    if (tblpPr.TablePositionX?.HasValue == true)
-                        node.Format["tblp.tblpX"] = tblpPr.TablePositionX.Value!;
-                    if (tblpPr.TablePositionY?.HasValue == true)
-                        node.Format["tblp.tblpY"] = tblpPr.TablePositionY.Value!;
-                    if (tblpPr.TablePositionXAlignment?.HasValue == true)
-                        node.Format["tblp.tblpXSpec"] = tblpPr.TablePositionXAlignment.InnerText;
-                    if (tblpPr.TablePositionYAlignment?.HasValue == true)
-                        node.Format["tblp.tblpYSpec"] = tblpPr.TablePositionYAlignment.InnerText;
-                    if (tblpPr.LeftFromText?.HasValue == true)
-                        node.Format["tblp.leftFromText"] = tblpPr.LeftFromText.Value!;
-                    if (tblpPr.RightFromText?.HasValue == true)
-                        node.Format["tblp.rightFromText"] = tblpPr.RightFromText.Value!;
-                    if (tblpPr.TopFromText?.HasValue == true)
-                        node.Format["tblp.topFromText"] = tblpPr.TopFromText.Value!;
-                    if (tblpPr.BottomFromText?.HasValue == true)
-                        node.Format["tblp.bottomFromText"] = tblpPr.BottomFromText.Value!;
-                }
-                var tblOverlap = tp.GetFirstChild<TableOverlap>();
-                if (tblOverlap?.Val?.HasValue == true)
-                    node.Format["tblOverlap.val"] = tblOverlap.Val.InnerText;
-                if (tp.Shading != null)
-                {
-                    var tShdVal = tp.Shading.Val?.InnerText;
-                    var tShdFill = tp.Shading.Fill?.Value;
-                    var tShdColor = tp.Shading.Color?.Value;
-                    if (!string.IsNullOrEmpty(tShdVal)) node.Format["shading.val"] = tShdVal;
-                    if (!string.IsNullOrEmpty(tShdFill)) node.Format["shading.fill"] = ParseHelpers.FormatHexColor(tShdFill);
-                    if (!string.IsNullOrEmpty(tShdColor)) node.Format["shading.color"] = ParseHelpers.FormatHexColor(tShdColor);
-                }
-
-                // BUG-R3-01: tblLook readback — Set wrote the XML correctly, but
-                // Get never read it back (Set/Get round-trip gap). Emit both the
-                // short-form lowercase keys (firstrow/lastrow/bandrow — match
-                // Set's case-insensitive vocabulary and project canonical
-                // pattern: vmerge/colspan) AND OOXML-attribute-name camelCase
-                // keys (firstRow/bandedRows — verbatim attribute names) so
-                // batch round-trip works either way. The two forms exist for
-                // historical-vocabulary parity; values are kept consistent
-                // across both keys (lowercase stores "true"/"false" string,
-                // camelCase stores bool).
-                // BUG-R4-01/06: Get emits ONLY canonical camelCase keys
-                // (firstRow/lastRow/firstCol/lastCol/bandedRows/bandedCols).
-                // Set still accepts lowercase aliases (firstrow/bandrow/etc)
-                // as input — see Set.Element.cs. Internal hex `tblLook.val`
-                // is NOT surfaced (was a dump-poisoning impl detail).
-                var tblLookRead = tp.GetFirstChild<TableLook>();
-                if (tblLookRead != null)
-                {
-                    if (tblLookRead.FirstRow?.HasValue == true && tblLookRead.FirstRow.Value)
-                        node.Format["firstRow"] = true;
-                    if (tblLookRead.LastRow?.HasValue == true && tblLookRead.LastRow.Value)
-                        node.Format["lastRow"] = true;
-                    if (tblLookRead.FirstColumn?.HasValue == true && tblLookRead.FirstColumn.Value)
-                        node.Format["firstCol"] = true;
-                    if (tblLookRead.LastColumn?.HasValue == true && tblLookRead.LastColumn.Value)
-                        node.Format["lastCol"] = true;
-                    // banding semantics are inverted: noHBand=true means NO banding.
-                    // Emit only when banding IS active (noHBand=false explicitly set).
-                    if (tblLookRead.NoHorizontalBand?.HasValue == true && !tblLookRead.NoHorizontalBand.Value)
-                        node.Format["bandedRows"] = true;
-                    if (tblLookRead.NoVerticalBand?.HasValue == true && !tblLookRead.NoVerticalBand.Value)
-                        node.Format["bandedCols"] = true;
-                }
-
-                // Accessibility: table caption / description. Set writes
-                // <w:tblCaption w:val="…"/> and <w:tblDescription w:val="…"/>
-                // (see Set.Element.cs table branch). Without the readback,
-                // get/dump silently drops these on round-trip.
-                var tblCaption = tp.GetFirstChild<TableCaption>();
-                if (!string.IsNullOrEmpty(tblCaption?.Val?.Value))
-                    node.Format["caption"] = tblCaption.Val.Value!;
-                var tblDescription = tp.GetFirstChild<TableDescription>();
-                if (!string.IsNullOrEmpty(tblDescription?.Val?.Value))
-                    node.Format["description"] = tblDescription.Val.Value!;
-            }
-
-            // Column widths from grid
-            var gridCols = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().ToList();
-            if (gridCols != null && gridCols.Count > 0)
-                node.Format["colWidths"] = string.Join(",", gridCols.Select(g => g.Width?.Value ?? "0"));
-
-            if (depth > 0)
-            {
-                int rowIdx = 0;
-                foreach (var row in table.Elements<TableRow>())
-                {
-                    var rowNode = new DocumentNode
-                    {
-                        Path = $"{path}/tr[{rowIdx + 1}]",
-                        Type = "row",
-                        ChildCount = row.Elements<TableCell>().Count()
-                    };
-                    ReadRowProps(row, rowNode);
-                    if (depth > 1)
-                    {
-                        int cellIdx = 0;
-                        foreach (var cell in row.Elements<TableCell>())
-                        {
-                            var cellNode = new DocumentNode
-                            {
-                                Path = $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]",
-                                Type = "cell",
-                                Text = string.Join("", cell.Descendants<Text>().Select(t => t.Text)),
-                                // CONSISTENCY(cell-children): include nested Table children alongside Paragraphs.
-                                ChildCount = cell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table)
-                            };
-                            ReadCellProps(cell, cellNode);
-                            if (depth > 2)
-                            {
-                                int cellPIdx = 0, cellTblIdx = 0;
-                                foreach (var cellChild in cell.Elements<OpenXmlElement>())
-                                {
-                                    if (cellChild is Paragraph cellPara)
-                                    {
-                                        cellPIdx++;
-                                        var cParaSegment = BuildParaPathSegment(cellPara, cellPIdx);
-                                        cellNode.Children.Add(ElementToNode(cellPara, $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]/{cParaSegment}", depth - 3));
-                                    }
-                                    else if (cellChild is Table cellTbl)
-                                    {
-                                        cellTblIdx++;
-                                        cellNode.Children.Add(ElementToNode(cellTbl, $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]/tbl[{cellTblIdx}]", depth - 3));
-                                    }
-                                }
-                            }
-                            rowNode.Children.Add(cellNode);
-                            cellIdx++;
-                        }
-                    }
-                    node.Children.Add(rowNode);
-                    rowIdx++;
-                }
-            }
-        }
+            return TableToNode(table, node, path, depth);
         else if (element is TableCell directCell)
-        {
-            node.Type = "cell";
-            node.Text = string.Join("", directCell.Descendants<Text>().Select(t => t.Text));
-            // CONSISTENCY(cell-children): include nested Table children alongside Paragraphs.
-            node.ChildCount = directCell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table);
-            ReadCellProps(directCell, node);
-            if (depth > 0)
-            {
-                int dcPIdx = 0, dcTblIdx = 0;
-                foreach (var dcChild in directCell.Elements<OpenXmlElement>())
-                {
-                    if (dcChild is Paragraph cellPara)
-                    {
-                        dcPIdx++;
-                        var dcParaSegment = BuildParaPathSegment(cellPara, dcPIdx);
-                        node.Children.Add(ElementToNode(cellPara, $"{path}/{dcParaSegment}", depth - 1));
-                    }
-                    else if (dcChild is Table dcTbl)
-                    {
-                        dcTblIdx++;
-                        node.Children.Add(ElementToNode(dcTbl, $"{path}/tbl[{dcTblIdx}]", depth - 1));
-                    }
-                }
-            }
-        }
+            return TableCellToNode(directCell, node, path, depth);
         else if (element is TableRow directRow)
-        {
-            node.Type = "row";
-            node.ChildCount = directRow.Elements<TableCell>().Count();
-            ReadRowProps(directRow, node);
-            if (depth > 0)
-            {
-                int cellIdx = 0;
-                foreach (var cell in directRow.Elements<TableCell>())
-                {
-                    var cellNode = new DocumentNode
-                    {
-                        Path = $"{path}/tc[{cellIdx + 1}]",
-                        Type = "cell",
-                        Text = string.Join("", cell.Descendants<Text>().Select(t => t.Text)),
-                        // CONSISTENCY(cell-children): include nested Table children alongside Paragraphs.
-                        ChildCount = cell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table)
-                    };
-                    ReadCellProps(cell, cellNode);
-                    if (depth > 1)
-                    {
-                        int drPIdx = 0, drTblIdx = 0;
-                        foreach (var drChild in cell.Elements<OpenXmlElement>())
-                        {
-                            if (drChild is Paragraph cellPara)
-                            {
-                                drPIdx++;
-                                var drParaSegment = BuildParaPathSegment(cellPara, drPIdx);
-                                cellNode.Children.Add(ElementToNode(cellPara, $"{path}/tc[{cellIdx + 1}]/{drParaSegment}", depth - 2));
-                            }
-                            else if (drChild is Table drTbl)
-                            {
-                                drTblIdx++;
-                                cellNode.Children.Add(ElementToNode(drTbl, $"{path}/tc[{cellIdx + 1}]/tbl[{drTblIdx}]", depth - 2));
-                            }
-                        }
-                    }
-                    node.Children.Add(cellNode);
-                    cellIdx++;
-                }
-            }
-        }
+            return TableRowToNode(directRow, node, path, depth);
         else if (element is SdtBlock sdtBlockNode)
-        {
-            node.Type = "sdt";
-            var sdtProps = sdtBlockNode.SdtProperties;
-            if (sdtProps != null)
-            {
-                var alias = sdtProps.GetFirstChild<SdtAlias>();
-                if (alias?.Val?.Value != null) node.Format["alias"] = alias.Val.Value;
-                var tagEl = sdtProps.GetFirstChild<Tag>();
-                if (tagEl?.Val?.Value != null) node.Format["tag"] = tagEl.Val.Value;
-                var lockEl = sdtProps.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.Lock>();
-                if (lockEl?.Val?.Value != null) node.Format["lock"] = lockEl.Val.InnerText;
-                var sdtId = sdtProps.GetFirstChild<SdtId>();
-                if (sdtId?.Val?.Value != null) node.Format["id"] = sdtId.Val.Value;
-
-                // Determine SDT type (check specific types first, text last as fallback)
-                if (sdtProps.GetFirstChild<SdtContentDropDownList>() != null) node.Format["type"] = "dropdown";
-                else if (sdtProps.GetFirstChild<SdtContentComboBox>() != null) node.Format["type"] = "combobox";
-                else if (sdtProps.GetFirstChild<SdtContentDate>() != null) node.Format["type"] = "date";
-                else if (sdtProps.GetFirstChild<SdtContentText>() != null) node.Format["type"] = "text";
-                else node.Format["type"] = "richtext";
-
-                // Read date format for date controls
-                var dateContent = sdtProps.GetFirstChild<SdtContentDate>();
-                if (dateContent?.DateFormat?.Val?.Value != null)
-                    node.Format["format"] = dateContent.DateFormat.Val.Value;
-
-                // Editable status
-                node.Format["editable"] = IsSdtEditable(sdtProps);
-
-                // Placeholder detection
-                var showingPlcHdr = sdtProps.GetFirstChild<ShowingPlaceholder>();
-                if (showingPlcHdr != null)
-                {
-                    node.Format["placeholder"] = true;
-                    var plcHdrText = sdtProps.GetFirstChild<SdtPlaceholder>()?.DocPartReference?.Val?.Value;
-                    if (plcHdrText != null) node.Format["placeholderText"] = plcHdrText;
-                }
-
-                // Read dropdown/combobox items
-                var ddl = sdtProps.GetFirstChild<SdtContentDropDownList>();
-                var combo = sdtProps.GetFirstChild<SdtContentComboBox>();
-                var listItems = ddl?.Elements<ListItem>() ?? combo?.Elements<ListItem>();
-                if (listItems != null)
-                {
-                    // BUG-R5-07: SDT ListItems carry distinct DisplayText and
-                    // Value attrs. Real Word docs commonly differ (e.g.
-                    // "Draft|DRAFT"). Emit the pipe form when value !=
-                    // displayText so dump→add round-trips. ParseSdtItems on
-                    // the Add side accepts both bare and piped forms.
-                    var items = listItems.Select(li =>
-                    {
-                        var disp = li.DisplayText?.Value ?? li.Value?.Value ?? "";
-                        var val = li.Value?.Value ?? li.DisplayText?.Value ?? "";
-                        return disp == val ? disp : $"{disp}|{val}";
-                    }).ToList();
-                    if (items.Count > 0) node.Format["items"] = string.Join(",", items);
-                }
-            }
-            node.Text = string.Concat(sdtBlockNode.Descendants<Text>().Select(t => t.Text));
-            var sdtContent = sdtBlockNode.SdtContentBlock;
-            node.ChildCount = sdtContent?.ChildElements.Count ?? 0;
-        }
+            return SdtBlockToNode(sdtBlockNode, node);
         else if (element is SdtRun sdtRunNode)
-        {
-            node.Type = "sdt";
-            var sdtProps = sdtRunNode.SdtProperties;
-            if (sdtProps != null)
-            {
-                var alias = sdtProps.GetFirstChild<SdtAlias>();
-                if (alias?.Val?.Value != null) node.Format["alias"] = alias.Val.Value;
-                var tagEl = sdtProps.GetFirstChild<Tag>();
-                if (tagEl?.Val?.Value != null) node.Format["tag"] = tagEl.Val.Value;
-                var lockEl = sdtProps.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.Lock>();
-                if (lockEl?.Val?.Value != null) node.Format["lock"] = lockEl.Val.InnerText;
-                var sdtId = sdtProps.GetFirstChild<SdtId>();
-                if (sdtId?.Val?.Value != null) node.Format["id"] = sdtId.Val.Value;
-
-                if (sdtProps.GetFirstChild<SdtContentDropDownList>() != null) node.Format["type"] = "dropdown";
-                else if (sdtProps.GetFirstChild<SdtContentComboBox>() != null) node.Format["type"] = "combobox";
-                else if (sdtProps.GetFirstChild<SdtContentDate>() != null) node.Format["type"] = "date";
-                else if (sdtProps.GetFirstChild<SdtContentText>() != null) node.Format["type"] = "text";
-                else node.Format["type"] = "richtext";
-
-                // Editable status
-                node.Format["editable"] = IsSdtEditable(sdtProps);
-
-                // Placeholder detection
-                var showingPlcHdrRun = sdtProps.GetFirstChild<ShowingPlaceholder>();
-                if (showingPlcHdrRun != null)
-                {
-                    node.Format["placeholder"] = true;
-                    var plcHdrTextRun = sdtProps.GetFirstChild<SdtPlaceholder>()?.DocPartReference?.Val?.Value;
-                    if (plcHdrTextRun != null) node.Format["placeholderText"] = plcHdrTextRun;
-                }
-
-                var ddl = sdtProps.GetFirstChild<SdtContentDropDownList>();
-                var combo = sdtProps.GetFirstChild<SdtContentComboBox>();
-                var listItems = ddl?.Elements<ListItem>() ?? combo?.Elements<ListItem>();
-                if (listItems != null)
-                {
-                    // BUG-R5-07: SDT ListItems carry distinct DisplayText and
-                    // Value attrs. Real Word docs commonly differ (e.g.
-                    // "Draft|DRAFT"). Emit the pipe form when value !=
-                    // displayText so dump→add round-trips. ParseSdtItems on
-                    // the Add side accepts both bare and piped forms.
-                    var items = listItems.Select(li =>
-                    {
-                        var disp = li.DisplayText?.Value ?? li.Value?.Value ?? "";
-                        var val = li.Value?.Value ?? li.DisplayText?.Value ?? "";
-                        return disp == val ? disp : $"{disp}|{val}";
-                    }).ToList();
-                    if (items.Count > 0) node.Format["items"] = string.Join(",", items);
-                }
-            }
-            node.Text = string.Concat(sdtRunNode.Descendants<Text>().Select(t => t.Text));
-        }
+            return SdtRunToNode(sdtRunNode, node);
         else if (element.LocalName == "oMathPara" || element is M.Paragraph)
         {
             node.Type = "equation";
@@ -3301,106 +3444,11 @@ public partial class WordHandler
             }
         }
         else if (element is M.OfficeMath inlineMath)
-        {
-            node.Type = "equation";
-            node.Format["mode"] = "inline";
-            try { node.Text = Core.FormulaParser.ToLatex(inlineMath); }
-            catch { node.Text = element.InnerText; }
-            if (string.IsNullOrEmpty(node.Text))
-                node.Text = element.InnerText;
-        }
+            return OfficeMathToNode(inlineMath, node);
         else if (element is Header or Footer)
-        {
-            // Header/Footer: enumerate block-level children. Tables are valid
-            // block-level OOXML inside hdr/ftr (same schema as body), so list
-            // them alongside paragraphs. Mirrors body-listing logic above.
-            node.Type = element is Header ? "header" : "footer";
-            node.Text = string.Concat(element.Descendants<Text>().Select(t => t.Text));
-            node.ChildCount = element.Elements<Paragraph>().Count() + element.Elements<Table>().Count();
-            if (depth > 0)
-            {
-                int pIdx = 0, tblIdx = 0;
-                foreach (var child in element.ChildElements)
-                {
-                    if (child is Paragraph hfPara)
-                    {
-                        pIdx++;
-                        var paraSegment = BuildParaPathSegment(hfPara, pIdx);
-                        node.Children.Add(ElementToNode(hfPara, $"{path}/{paraSegment}", depth - 1));
-                    }
-                    else if (child is Table)
-                    {
-                        tblIdx++;
-                        node.Children.Add(ElementToNode(child, $"{path}/tbl[{tblIdx}]", depth - 1));
-                    }
-                }
-            }
-        }
+            return HeaderFooterToNode(element, node, path, depth);
         else if (element is Body bodyNode)
-        {
-            // CONSISTENCY(body-listing): enumerate body children using the
-            // same p[N]/oMathPara[M] counting rules as NavigateToElement so
-            // `get /body` emits paths that `get <path>` can resolve. The
-            // generic fallback would count every LocalName, listing wrapper
-            // <w:p> (pure oMathPara) as p[2] even though the resolver skips
-            // them. Mirrors the logic in WordHandler.View.ViewAsText.
-            node.ChildCount = bodyNode.ChildElements.Count;
-            if (depth > 0)
-            {
-                int pIdx = 0, tblIdx = 0, mathParaIdx = 0, sdtIdx = 0;
-                // BUG-DUMP7-04: w:customXml body wrappers are non-structural —
-                // their inner paragraphs and tables should appear as direct
-                // body children (with shared p/tbl/sdt counters) so the
-                // wrapper itself is invisible to dump but its content
-                // round-trips. Recursively flatten any depth of customXml
-                // nesting. Without this, the wrapper fell to the generic
-                // else and its children were never enumerated.
-                void WalkBodyChild(OpenXmlElement child)
-                {
-                    if (child.LocalName == "oMathPara" || child is M.Paragraph)
-                    {
-                        mathParaIdx++;
-                        node.Children.Add(ElementToNode(child, $"{path}/oMathPara[{mathParaIdx}]", depth - 1));
-                    }
-                    else if (child is Paragraph bPara)
-                    {
-                        if (IsOMathParaWrapperParagraph(bPara))
-                        {
-                            mathParaIdx++;
-                            node.Children.Add(ElementToNode(bPara, $"{path}/oMathPara[{mathParaIdx}]", depth - 1));
-                        }
-                        else
-                        {
-                            pIdx++;
-                            var bSeg = BuildParaPathSegment(bPara, pIdx);
-                            node.Children.Add(ElementToNode(bPara, $"{path}/{bSeg}", depth - 1));
-                        }
-                    }
-                    else if (child is Table)
-                    {
-                        tblIdx++;
-                        node.Children.Add(ElementToNode(child, $"{path}/tbl[{tblIdx}]", depth - 1));
-                    }
-                    else if (child is SdtBlock)
-                    {
-                        sdtIdx++;
-                        node.Children.Add(ElementToNode(child, $"{path}/sdt[{sdtIdx}]", depth - 1));
-                    }
-                    else if (child is CustomXmlBlock cxBlock)
-                    {
-                        foreach (var inner in cxBlock.ChildElements)
-                            WalkBodyChild(inner);
-                    }
-                    else
-                    {
-                        // Non-structural (sectPr etc.) — keep localName naming
-                        node.Children.Add(ElementToNode(child, $"{path}/{child.LocalName}[1]", depth - 1));
-                    }
-                }
-                foreach (var child in bodyNode.ChildElements)
-                    WalkBodyChild(child);
-            }
-        }
+            return BodyToNode(bodyNode, node, path, depth);
         else
         {
             // Generic fallback: collect XML attributes and child val patterns

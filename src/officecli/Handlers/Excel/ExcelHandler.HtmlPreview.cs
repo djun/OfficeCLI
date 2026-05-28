@@ -2069,15 +2069,8 @@ public partial class ExcelHandler
 
     // ==================== Utility ====================
 
-    private static string HtmlEncode(string text)
-    {
-        return text
-            .Replace("&", "&amp;")
-            .Replace("<", "&lt;")
-            .Replace(">", "&gt;")
-            .Replace("\"", "&quot;")
-            .Replace("'", "&#39;");
-    }
+    // CONSISTENCY(html-encode): shared plain entity-encoder lives in Core/HtmlPreviewHelper.
+    private static string HtmlEncode(string text) => HtmlPreviewHelper.HtmlEncode(text);
 
     /// <summary>HtmlEncode + convert newlines to br for cell display</summary>
     private static string CellHtml(string text)

@@ -66,9 +66,8 @@ internal partial class ChartSvgRenderer
     public int DataLabelFontPx { get; set; } = 8;
     public int AxisTickCount { get; set; } = 4;
 
-    public static string HtmlEncode(string text) =>
-        text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
-            .Replace("\"", "&quot;").Replace("'", "&#39;");
+    // CONSISTENCY(html-encode): shared plain entity-encoder lives in Core/HtmlPreviewHelper.
+    public static string HtmlEncode(string text) => HtmlPreviewHelper.HtmlEncode(text);
 
     public void RenderBarChartSvg(StringBuilder sb, List<(string name, double[] values)> series,
         string[] categories, List<string> colors, int ox, int oy, int pw, int ph,
