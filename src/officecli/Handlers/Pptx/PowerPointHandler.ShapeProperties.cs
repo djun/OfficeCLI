@@ -544,7 +544,7 @@ public partial class PowerPointHandler
                     break;
                 }
 
-                case "align":
+                case "align" or "alignment" or "halign":
                 {
                     var alignment = ParseTextAlignment(value);
                     foreach (var para in shape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
