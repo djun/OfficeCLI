@@ -777,6 +777,18 @@ internal static partial class ChartHelper
                     if (valRef != null) seriesNode.Format["valuesRef"] = valRef;
                     var catRef = ReadFormulaRef(serEl.GetFirstChild<C.CategoryAxisData>());
                     if (catRef != null) seriesNode.Format["categoriesRef"] = catRef;
+
+                    // R44 major-2: scatter series carry X data under <c:xVal>
+                    // (not <c:cat>). ReadAllSeries returns only Y values; surface
+                    // X here so series.Format["x"] round-trips for scatter charts.
+                    var xValEl = serEl.Elements<OpenXmlCompositeElement>()
+                        .FirstOrDefault(e => e.LocalName == "xVal");
+                    if (xValEl != null)
+                    {
+                        var xVals = ReadNumericData(xValEl);
+                        if (xVals != null && xVals.Length > 0)
+                            seriesNode.Format["x"] = string.Join(",", xVals.Select(v => v.ToString("G")));
+                    }
                     var nameRefF = serEl.GetFirstChild<C.SeriesText>()
                         ?.GetFirstChild<C.StringReference>()
                         ?.GetFirstChild<C.Formula>()?.Text;
@@ -1222,7 +1234,25 @@ internal static partial class ChartHelper
     internal static string[]? ReadCategories(C.PlotArea plotArea)
     {
         var catData = plotArea.Descendants<C.CategoryAxisData>().FirstOrDefault();
-        if (catData == null) return null;
+        if (catData == null)
+        {
+            // R44 major-2: scatter charts have no <c:cat>; their X-axis data
+            // lives under each series' <c:xVal>. Fall back to the first ser's
+            // xVal so chart-level Format["categories"] still surfaces the
+            // X-axis labels for scatter dump→replay round-trip.
+            var firstSer = plotArea.Descendants<OpenXmlCompositeElement>()
+                .FirstOrDefault(e => e.LocalName == "ser" && e.Parent != null &&
+                    (e.Parent.LocalName.Contains("Chart") || e.Parent.LocalName.Contains("chart")));
+            var xValEl = firstSer?.Elements<OpenXmlCompositeElement>()
+                .FirstOrDefault(e => e.LocalName == "xVal");
+            if (xValEl != null)
+            {
+                var xVals = ReadNumericData(xValEl);
+                if (xVals != null && xVals.Length > 0)
+                    return xVals.Select(v => v.ToString("G")).ToArray();
+            }
+            return null;
+        }
 
         var strLit = catData.GetFirstChild<C.StringLiteral>();
         if (strLit != null)
