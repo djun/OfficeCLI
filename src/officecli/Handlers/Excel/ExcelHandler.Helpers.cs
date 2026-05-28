@@ -1610,9 +1610,13 @@ public partial class ExcelHandler
             // external relationship — they live entirely in the @location
             // attribute. Without this branch, internal links round-trip
             // through Set but vanish from Get.
+            // CONSISTENCY(internal-link-hash): OOXML stores the bare location
+            // (no '#') but Set accepts (and documents) the '#'-prefixed form
+            // — re-prepend '#' on readback so the value is directly usable as
+            // `set link=...` input. External URL branch above stays unchanged.
             else if (hyperlink?.Location?.Value is { Length: > 0 } loc)
             {
-                node.Format["link"] = loc;
+                node.Format["link"] = "#" + loc;
             }
 
             // Border readback from stylesheet
