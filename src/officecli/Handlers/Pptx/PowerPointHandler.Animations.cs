@@ -2573,6 +2573,7 @@ public partial class PowerPointHandler
         return effect switch
         {
             "fly" or "flyin" or "flyout" => 4,  // from bottom
+            "fade" or "fadein" or "fadeout" => 0,  // fade has no directional subtype
             "wipe"                       => 1,   // from left
             "blinds"                     => 10,  // horizontal
             "checkerboard" or "checker"  => 5,   // across
@@ -2600,7 +2601,7 @@ public partial class PowerPointHandler
                 "crawlin" or "crawlout" or "crawl"=> (7,  "crawl"),
                 "diamond"                         => (8,  "diamond"),
                 "dissolve"                        => (9,  "dissolve"),
-                "fade"                            => (10, "fade"),
+                "fade" or "fadein" or "fadeout"   => (10, "fade"),
                 "flash" or "flashonce"            => (11, "flash"),
                 "float"                           => (12, null),
                 "plus"                            => (13, "plus"),
