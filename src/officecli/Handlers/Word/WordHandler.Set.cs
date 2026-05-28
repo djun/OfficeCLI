@@ -242,7 +242,8 @@ public partial class WordHandler
         }
 
         // Document-level properties
-        if (path == "/" || path == "" || path.Equals("/body", StringComparison.OrdinalIgnoreCase))
+        if (path == "/" || path == "" || path.Equals("/body", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/document", StringComparison.OrdinalIgnoreCase))
         {
             SetDocumentProperties(properties, unsupported);
             _doc.MainDocumentPart?.Document?.Save();
