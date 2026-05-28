@@ -213,6 +213,23 @@ public partial class WordHandler
         if (imgBlip?.Embed?.Value != null)
             node.Format["relId"] = imgBlip.Embed.Value;
 
+        // Mirror the brightness/contrast write encoding from
+        // WordHandler.Set.Element.cs:748-781: lumOff carries brightness
+        // (lumOff/1000 in -100..100) and lumMod carries contrast
+        // ((lumMod-100000)/1000 in -100..100). Defaults (lumOff=0,
+        // lumMod=100000) mean "no change" — only surface keys when the
+        // stored values differ from those defaults so an untouched picture
+        // doesn't gain spurious brightness=0/contrast=0 Format entries.
+        if (imgBlip != null)
+        {
+            var lumOffEl = imgBlip.Elements<DocumentFormat.OpenXml.Drawing.LuminanceOffset>().FirstOrDefault();
+            if (lumOffEl?.Val?.Value is int lumOffVal && lumOffVal != 0)
+                node.Format["brightness"] = (lumOffVal / 1000).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var lumModEl = imgBlip.Elements<DocumentFormat.OpenXml.Drawing.LuminanceModulation>().FirstOrDefault();
+            if (lumModEl?.Val?.Value is int lumModVal && lumModVal != 100000)
+                node.Format["contrast"] = ((lumModVal - 100000) / 1000).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         // Distinguish inline from floating (anchor) and, for anchors, expose
         // the wrap mode, position offsets, and behind-text flag so callers
         // can inspect how the image is laid out.
