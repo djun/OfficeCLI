@@ -2622,8 +2622,11 @@ public partial class WordHandler
                     paragraphs.AddRange(mainPart.FootnotesPart.Footnotes.Descendants<Paragraph>());
                 if (mainPart.EndnotesPart?.Endnotes != null)
                     paragraphs.AddRange(mainPart.EndnotesPart.Endnotes.Descendants<Paragraph>());
-                if (mainPart.WordprocessingCommentsPart?.Comments != null)
-                    paragraphs.AddRange(mainPart.WordprocessingCommentsPart.Comments.Descendants<Paragraph>());
+                // R46 Blocker-3: comment bodies are author-only annotations and must
+                // NOT be swept by body-scoped find/replace. Excluding the comments part
+                // here keeps "/" and "/body" scope to document text + header/footer/
+                // footnote/endnote (the previously-added R21-1 fan-out). Comment text
+                // is still mutable via explicit /comment[N] paths.
             }
             return paragraphs;
         }
