@@ -1079,14 +1079,27 @@ public partial class ExcelHandler
             if (totalRow == null)
             {
                 totalRow = new Row { RowIndex = totalRowIdx };
-                // Insert in correct position
+                // Insert in correct position. Excel requires sheetData rows to be
+                // in strictly ascending order — appending the totals row when no
+                // lower-indexed row exists places it AFTER any higher pre-existing
+                // row (e.g. a user-set row 7 while the totals row is row 5),
+                // which Excel rejects with 0x800A03EC. Anchor to the first higher
+                // row when present; only AppendChild when there is truly nothing
+                // after our position.
                 var lastRow = tblSheetData.Elements<Row>()
                     .Where(r => r.RowIndex?.Value < totalRowIdx)
                     .LastOrDefault();
                 if (lastRow != null)
                     lastRow.InsertAfterSelf(totalRow);
                 else
-                    tblSheetData.AppendChild(totalRow);
+                {
+                    var nextRow = tblSheetData.Elements<Row>()
+                        .FirstOrDefault(r => r.RowIndex?.Value > totalRowIdx);
+                    if (nextRow != null)
+                        nextRow.InsertBeforeSelf(totalRow);
+                    else
+                        tblSheetData.AppendChild(totalRow);
+                }
             }
 
             var tblCols = tableColumns.Elements<TableColumn>().ToList();
