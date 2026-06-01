@@ -534,14 +534,19 @@ public partial class PowerPointHandler
                     // to preset name when no custom-geometry signal is present.
                     if (properties.TryGetValue("customGeometryXml", out var custXml) && custXml.Length > 0)
                     {
-                        // OuterXml round-trip: load the raw <a:custGeom> string,
-                        // pull its children as InnerXml. System.Xml.Linq tolerates
-                        // namespace declarations on the root and preserves them on
-                        // the children when re-serialized.
-                        var doc = System.Xml.Linq.XDocument.Parse(custXml);
-                        var custElem = new Drawing.CustomGeometry();
-                        custElem.InnerXml = string.Concat(doc.Root!.Nodes().Select(n => n.ToString(System.Xml.Linq.SaveOptions.DisableFormatting)));
-                        newShape.ShapeProperties.AppendChild(custElem);
+                        // Parse the raw <a:custGeom> string and load it through
+                        // OpenXmlReader so child namespaces resolve against the
+                        // root scope ONCE rather than being re-declared per
+                        // child. The earlier InnerXml-copy approach retained
+                        // a redundant xmlns:a on every direct child (avLst,
+                        // gdLst, ahLst, cxnLst, rect, pathLst) — the SDK
+                        // then wrote the bloated attributes back to slide
+                        // XML and every dump→replay round trip doubled the
+                        // byte count of the custGeom block (test-samples/
+                        // a.pptx slide5: 1.2KB → 2.4KB → 4.8KB across three
+                        // round trips).
+                        var parsed = new Drawing.CustomGeometry(custXml);
+                        newShape.ShapeProperties.AppendChild(parsed);
                     }
                     else
                     {
