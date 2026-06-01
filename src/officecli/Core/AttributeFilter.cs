@@ -521,4 +521,344 @@ internal static class AttributeFilter
         }
         return "";
     }
+
+    // ==================== Boolean expression layer (and / or) ====================
+    //
+    // XPath-predicate-style booleans inside a bracket:
+    //   cell[value>5000 and value<8000]
+    //   cell[type=number or type=date]
+    //   cell[(type=number or type=date) and value>0]
+    // Precedence: and > or; parens override. Only `and` / `or` are reserved —
+    // `not` is intentionally left free (no negation yet). Atoms are the existing
+    // `key op value` predicates (same operators, same value grammar incl. r"...").
+    // Inside ONE bracket, AND must be explicit (`and`); implicit AND stays the
+    // stacked-bracket form [a][b]. A value containing a reserved word
+    // (and/or/not), whitespace, or parens must be quoted: [text~="salt and pepper"].
+    //
+    // The flat List<Condition> path above is unchanged. ParseExpr is additive:
+    // consumers parse to a FilterExpr, then TryFlatten lets a pure AND-of-
+    // predicates fall back to the legacy List path byte-for-byte; only or/not/
+    // grouped selectors use the tree evaluator.
+
+    public abstract record FilterExpr;
+    public sealed record PredicateExpr(Condition Cond) : FilterExpr;
+    public sealed record AndExpr(IReadOnlyList<FilterExpr> Parts) : FilterExpr;
+    public sealed record OrExpr(IReadOnlyList<FilterExpr> Parts) : FilterExpr;
+
+    /// <summary>
+    /// Parse a selector's bracket filters into one expression tree. Multiple
+    /// top-level brackets are ANDed (stacking). A pure-numeric bracket ([2]) is a
+    /// positional index, skipped here. Returns null when there is no filter
+    /// bracket (match-all). Throws CliException on malformed input, mirroring Parse.
+    /// </summary>
+    public static FilterExpr? ParseExpr(string selector)
+    {
+        var openCount = selector.Count(c => c == '[');
+        var closeCount = selector.Count(c => c == ']');
+        if (openCount != closeCount)
+            throw new CliException($"Malformed selector: unclosed bracket in \"{selector}\"")
+            {
+                Code = "invalid_selector",
+                Suggestion = "Ensure every '[' has a matching ']'. Example: cell[value>5000 and value<8000]"
+            };
+
+        var parts = new List<FilterExpr>();
+        foreach (Match block in BracketBlockRegex.Matches(selector))
+        {
+            var content = block.Groups[1].Value;
+            if (string.IsNullOrWhiteSpace(content))
+                throw new CliException($"Malformed selector: empty brackets \"[]\" in \"{selector}\"")
+                {
+                    Code = "invalid_selector",
+                    Suggestion = "Use [key=value] or a boolean expression. Example: cell[a and b]"
+                };
+            if (int.TryParse(content.Trim(), out _)) continue;   // [2] positional index
+            parts.Add(new ExprParser(content).ParseTop());
+        }
+        if (parts.Count == 0) return null;
+        return parts.Count == 1 ? parts[0] : new AndExpr(parts);
+    }
+
+    /// <summary>
+    /// When the expression is a pure AND of predicates (i.e. equivalent to the
+    /// legacy flat List&lt;Condition&gt;), return that list so callers can take the
+    /// existing code path unchanged. Returns null when the tree contains or/not,
+    /// which the flat list cannot represent.
+    /// </summary>
+    public static List<Condition>? TryFlatten(FilterExpr? expr)
+    {
+        if (expr == null) return new List<Condition>();
+        var acc = new List<Condition>();
+        return Flatten(expr, acc) ? acc : null;
+
+        static bool Flatten(FilterExpr e, List<Condition> into)
+        {
+            switch (e)
+            {
+                case PredicateExpr p: into.Add(p.Cond); return true;
+                case AndExpr a: return a.Parts.All(part => Flatten(part, into));
+                default: return false;   // Or / Not are not flattenable
+            }
+        }
+    }
+
+    /// <summary>Rewrite every predicate key through <paramref name="keyResolver"/> (alias map).</summary>
+    public static FilterExpr NormalizeKeysExpr(FilterExpr expr, Func<string, string> keyResolver) => expr switch
+    {
+        PredicateExpr p => new PredicateExpr(new Condition(keyResolver(p.Cond.Key), p.Cond.Op, p.Cond.Value)),
+        AndExpr a => new AndExpr(a.Parts.Select(x => NormalizeKeysExpr(x, keyResolver)).ToList()),
+        OrExpr o => new OrExpr(o.Parts.Select(x => NormalizeKeysExpr(x, keyResolver)).ToList()),
+        _ => expr
+    };
+
+    /// <summary>Evaluate the expression tree against a node.</summary>
+    public static bool MatchesExpr(DocumentNode node, FilterExpr? expr) => expr switch
+    {
+        null => true,
+        PredicateExpr p => MatchOne(node, p.Cond),
+        AndExpr a => a.Parts.All(x => MatchesExpr(node, x)),
+        OrExpr o => o.Parts.Any(x => MatchesExpr(node, x)),
+        _ => true
+    };
+
+    public static List<DocumentNode> ApplyExpr(List<DocumentNode> nodes, FilterExpr? expr)
+        => expr == null ? nodes : nodes.Where(n => MatchesExpr(n, expr)).ToList();
+
+    /// <summary>
+    /// Like ApplyExpr but also collects the same diagnostic warnings
+    /// ApplyWithWarnings emits (missing key, non-numeric comparison value) by
+    /// walking the predicate leaves.
+    /// </summary>
+    public static (List<DocumentNode> Results, List<string> Warnings) ApplyExprWithWarnings(
+        List<DocumentNode> nodes, FilterExpr? expr)
+    {
+        var warnings = new List<string>();
+        if (expr == null) return (nodes, warnings);
+
+        foreach (var cond in LeafConditions(expr))
+        {
+            if (cond.Op != FilterOp.NotEqual)
+            {
+                bool anyHasKey = nodes.Any(n => ResolveValue(n, cond.Key).HasKey);
+                if (!anyHasKey && nodes.Count > 0)
+                    warnings.Add($"Warning: filter key '{cond.Key}' not found in any result's Format. " +
+                        $"Available keys: {string.Join(", ", GetAllFormatKeys(nodes))}");
+            }
+            if (cond.Op is FilterOp.GreaterOrEqual or FilterOp.LessOrEqual or FilterOp.GreaterThan or FilterOp.LessThan
+                && ExtractNumber(cond.Value) == null && !EmuConverter.TryParseEmu(cond.Value, out _))
+                warnings.Add($"Warning: '{cond.Value}' in [{cond.Key}{OpToString(cond.Op)}{cond.Value}] " +
+                    $"is not numeric — comparison may produce unexpected results");
+        }
+
+        var results = nodes.Where(n => MatchesExpr(n, expr)).ToList();
+        return (results, warnings);
+    }
+
+    private static IEnumerable<Condition> LeafConditions(FilterExpr expr) => expr switch
+    {
+        PredicateExpr p => new[] { p.Cond },
+        AndExpr a => a.Parts.SelectMany(LeafConditions),
+        OrExpr o => o.Parts.SelectMany(LeafConditions),
+        _ => Enumerable.Empty<Condition>()
+    };
+
+    // Recursive-descent parser for one bracket's content. Grammar:
+    //   expr   := or
+    //   or     := and ( 'or' and )*
+    //   and    := factor ( 'and' factor )*
+    //   factor := '(' or ')' | predicate
+    //   pred   := key op value
+    private sealed class ExprParser
+    {
+        private readonly string _s;
+        private int _i;
+        public ExprParser(string content) { _s = content; _i = 0; }
+
+        public FilterExpr ParseTop()
+        {
+            var e = ParseOr();
+            SkipWs();
+            if (_i < _s.Length) throw Err($"unexpected '{_s[_i..]}'");
+            return e;
+        }
+
+        private FilterExpr ParseOr()
+        {
+            var parts = new List<FilterExpr> { ParseAnd() };
+            while (TryKeyword("or")) parts.Add(ParseAnd());
+            return parts.Count == 1 ? parts[0] : new OrExpr(parts);
+        }
+
+        private FilterExpr ParseAnd()
+        {
+            var parts = new List<FilterExpr> { ParseFactor() };
+            while (TryKeyword("and")) parts.Add(ParseFactor());
+            return parts.Count == 1 ? parts[0] : new AndExpr(parts);
+        }
+
+        private FilterExpr ParseFactor()
+        {
+            SkipWs();
+            // Only `and` / `or` are reserved. `not` is intentionally NOT a keyword
+            // — it parses as an ordinary value/identifier, leaving the word free
+            // for a future negation design.
+            if (Peek() == '(')
+            {
+                _i++;
+                var inner = ParseOr();
+                SkipWs();
+                Expect(')');
+                return inner;
+            }
+            return new PredicateExpr(ParsePredicate());
+        }
+
+        private Condition ParsePredicate()
+        {
+            SkipWs();
+            int keyStart = _i;
+            if (_i < _s.Length && _s[_i] == '@') _i++;
+            while (_i < _s.Length && (char.IsLetterOrDigit(_s[_i]) || _s[_i] == '.' || _s[_i] == '_')) _i++;
+            var key = _s[keyStart.._i];
+            if (key.Length == 0 || key == "@")
+                throw Err($"expected a predicate (key op value) at '{_s[_i..]}'");
+            SkipWs();
+            var op = ReadOp();
+            var rawVal = ReadValue();
+            return BuildCondition(key, op, rawVal);
+        }
+
+        private string ReadOp()
+        {
+            foreach (var op in new[] { ">=", "<=", "!=", "~=", "=", ">", "<" })
+                if (_i + op.Length <= _s.Length && _s.Substring(_i, op.Length) == op)
+                {
+                    _i += op.Length;
+                    return op;
+                }
+            throw Err($"expected an operator (=, !=, ~=, >, <, >=, <=) at '{(_i < _s.Length ? _s[_i..] : "end")}'");
+        }
+
+        private string ReadValue()
+        {
+            SkipWs();
+            if (_i < _s.Length)
+            {
+                char c = _s[_i];
+                bool rPrefixed = c == 'r' && _i + 1 < _s.Length && (_s[_i + 1] == '"' || _s[_i + 1] == '\'');
+                if (c == '"' || c == '\'' || rPrefixed)
+                    return ReadQuoted(rPrefixed);
+            }
+            int start = _i;
+            while (_i < _s.Length)
+            {
+                char c = _s[_i];
+                if (c == ')') break;
+                if (char.IsWhiteSpace(c) && ConnectiveAhead(_i)) break;
+                _i++;
+            }
+            var v = _s[start.._i].TrimEnd();
+            if (v.Length == 0) throw Err("expected a value after the operator");
+            return v;
+        }
+
+        // Returns the raw token INCLUDING quotes (and any r-prefix) so
+        // BuildCondition applies the same regex-form / trim logic as Parse.
+        private string ReadQuoted(bool rPrefixed)
+        {
+            int start = _i;
+            if (rPrefixed) _i++;                 // consume 'r'
+            char quote = _s[_i];
+            _i++;                                // consume opening quote
+            while (_i < _s.Length && _s[_i] != quote) _i++;
+            if (_i >= _s.Length) throw Err($"unterminated quoted value in '{_s[start..]}'");
+            _i++;                                // consume closing quote
+            return _s[start.._i];
+        }
+
+        // True when the whitespace at wsPos is followed by an `and`/`or` keyword
+        // at a word boundary — the point where an unquoted value ends.
+        private bool ConnectiveAhead(int wsPos)
+        {
+            int j = wsPos;
+            while (j < _s.Length && char.IsWhiteSpace(_s[j])) j++;
+            foreach (var kw in new[] { "and", "or" })
+            {
+                if (j + kw.Length <= _s.Length
+                    && string.Compare(_s, j, kw, 0, kw.Length, StringComparison.OrdinalIgnoreCase) == 0)
+                {
+                    int after = j + kw.Length;
+                    if (after >= _s.Length || char.IsWhiteSpace(_s[after]) || _s[after] == '(') return true;
+                }
+            }
+            return false;
+        }
+
+        // Consume a keyword (and/or/not) at the cursor if present, word-bounded.
+        private bool TryKeyword(string kw)
+        {
+            SkipWs();
+            if (_i + kw.Length <= _s.Length
+                && string.Compare(_s, _i, kw, 0, kw.Length, StringComparison.OrdinalIgnoreCase) == 0)
+            {
+                int after = _i + kw.Length;
+                // word boundary: next is end, whitespace, or '(' (for not()).
+                if (after >= _s.Length || char.IsWhiteSpace(_s[after]) || _s[after] == '(')
+                {
+                    _i = after;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private void SkipWs() { while (_i < _s.Length && char.IsWhiteSpace(_s[_i])) _i++; }
+        private char Peek() { SkipWs(); return _i < _s.Length ? _s[_i] : '\0'; }
+        private void Expect(char c)
+        {
+            SkipWs();
+            if (_i >= _s.Length || _s[_i] != c) throw Err($"expected '{c}'");
+            _i++;
+        }
+        private CliException Err(string what) => new($"Malformed filter expression: {what} in \"{_s}\"")
+        {
+            Code = "invalid_selector",
+            Suggestion = "Use: key op value joined by and/or/not(...). Quote values with spaces or reserved words: [text~=\"a and b\"]."
+        };
+    }
+
+    // Build a Condition from raw key/op/value with the SAME validation and value
+    // handling as Parse (regex r"..." preservation, mis-parsed-operator guard,
+    // wildcard rejection). Shared so the expression parser and the flat parser
+    // agree on predicate semantics.
+    private static Condition BuildCondition(string key, string opStr, string rawVal)
+    {
+        var isRegexForm = rawVal.Length >= 3 && rawVal[0] == 'r' && (rawVal[1] == '"' || rawVal[1] == '\'');
+        var val = isRegexForm ? rawVal : rawVal.Trim('\'', '"');
+
+        if (val.StartsWith("=") || val.StartsWith("~") || val.StartsWith("!"))
+            throw new CliException($"Malformed selector: invalid operator near \"{key}{opStr}{val}\". Supported operators: =, !=, ~=, >=, <=, >, <")
+            {
+                Code = "invalid_selector",
+                Suggestion = $"Did you mean [{key}={val.TrimStart('=', '~', '!')}]?"
+            };
+        if (val.Contains('*'))
+            throw new CliException($"Wildcards (*) are not supported in attribute filters. Use ~= for contains, e.g. {key}~={val.Trim('*')}.")
+            {
+                Code = "invalid_selector",
+                Suggestion = $"Did you mean [{key}~={val.Trim('*')}]?"
+            };
+
+        var op = opStr switch
+        {
+            "~=" => FilterOp.Contains,
+            ">=" => FilterOp.GreaterOrEqual,
+            "<=" => FilterOp.LessOrEqual,
+            ">" => FilterOp.GreaterThan,
+            "<" => FilterOp.LessThan,
+            "!=" => FilterOp.NotEqual,
+            _ => FilterOp.Equal
+        };
+        return new Condition(key.TrimStart('@'), op, val);
+    }
 }
