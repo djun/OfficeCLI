@@ -999,11 +999,13 @@ public partial class PowerPointHandler
             }
 
             // CONSISTENCY(rpr-attr-fallback / R21-fuzzer-1+2): surface long-tail
-            // rPr attributes (lang, kern, kumimoji, normalizeH, ...) at shape
+            // rPr attributes (kern, kumimoji, normalizeH, ...) at shape
             // level too, mirroring BuildRunNode. Without this, shape-level Add
-            // can write `lang` to first-run rPr but shape-level Get cannot
-            // surface it unless the user descends to /shape[N]/r[1] explicitly.
-            FillUnknownRunProps(firstRun.RunProperties, node);
+            // can write a long-tail attr to first-run rPr but shape-level Get
+            // cannot surface it unless the user descends to /shape[N]/r[1].
+            // bt-6: rPr-only attrs (err, dirty, smtClean, lang) are filtered
+            // out — they describe the run's editor state, not the shape.
+            FillUnknownRunProps(firstRun.RunProperties, node, shapeLevel: true);
         }
         else
         {
@@ -1764,7 +1766,18 @@ public partial class PowerPointHandler
         "latin", "ea", "cs", "solidFill", "gradFill", "hlinkClick", "effectLst",
     };
 
-    private static void FillUnknownRunProps(Drawing.RunProperties? rPr, DocumentNode node)
+    // bt-6: rPr attributes that describe the run's editor state (spell-check
+    // marker, dirty/needs-recheck flag, smart-tag clean flag, BCP-47 language)
+    // are meaningless when surfaced as shape-level Format keys. The shape
+    // doesn't have a single language or spelling state — it just aggregates
+    // first-run properties for convenience. Skip these in shape-level scans.
+    private static readonly System.Collections.Generic.HashSet<string> RunOnlyAttrs =
+        new(System.StringComparer.Ordinal)
+    {
+        "err", "dirty", "smtClean", "lang",
+    };
+
+    private static void FillUnknownRunProps(Drawing.RunProperties? rPr, DocumentNode node, bool shapeLevel = false)
     {
         if (rPr == null) return;
 
@@ -1774,6 +1787,7 @@ public partial class PowerPointHandler
             var name = attr.LocalName;
             if (string.IsNullOrEmpty(name)) continue;
             if (CuratedRunAttrs.Contains(name)) continue;
+            if (shapeLevel && RunOnlyAttrs.Contains(name)) continue;
             if (node.Format.ContainsKey(name)) continue;
             // CONSISTENCY(rpr-bool-readback): normalize OOXML xsd:boolean
             // attrs ("1"/"0", "true"/"false") to canonical "true"/"false"
