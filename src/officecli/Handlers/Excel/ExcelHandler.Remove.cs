@@ -32,11 +32,15 @@ public partial class ExcelHandler
         // order: deleting /Sheet/row[2] first renumbers the old row[4] to row[3]
         // and the next delete would hit the wrong row. Non-row targets carry
         // index 0 and keep a stable relative order.
-        if (!string.IsNullOrEmpty(path) && !path.StartsWith("/"))
+        if (!string.IsNullOrEmpty(path)
+            && (!path.StartsWith("/") || Core.AttributeFilter.IsContentFilterPath(path)))
         {
             // Narrow via the shared engine (same as Set / query): pure-AND on the
             // legacy path, `or` selectors queried bracket-stripped then narrowed by
-            // the boolean expression tree.
+            // the boolean expression tree. The IsContentFilterPath arm routes a
+            // `/`-scoped content filter (`/Sheet1/cell[value>5 or value<1]`) here
+            // too, matching the Set dispatch — query, set and remove now agree on
+            // every selector shape.
             var (targets, _) = Core.AttributeFilter.FilterSelector(path, Query, ResolveCellAttributeAlias);
             if (targets.Count == 0)
                 throw new ArgumentException($"No elements matched selector: {path}");

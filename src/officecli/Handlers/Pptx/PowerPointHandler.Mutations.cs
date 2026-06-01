@@ -29,6 +29,35 @@ public partial class PowerPointHandler
             throw new ArgumentException(
                 $"Cannot remove container element '{path}': it is a required structural element of the document.");
 
+        // Batch Remove by selector: a bare selector (`shape[width>5cm or text~=AA]`)
+        // or a `/`-scoped content filter (`/slide[1]/shape[width>5cm or text~=AA]`)
+        // resolves through the shared engine — the same FilterSelector query and
+        // set use — then each match is removed in reverse document order so a
+        // positional-index removal doesn't renumber not-yet-removed targets
+        // (shapes addressed by stable `@id` don't shift, so order is harmless
+        // there). Mirrors ExcelHandler.Remove's selector branch. Structural slash
+        // paths (`/slide[1]/shape[2]`, `/slide[*]`) are not content filters, so
+        // they fall through to the normalization + dispatch below.
+        if (!string.IsNullOrEmpty(path)
+            && (!path.StartsWith("/") || OfficeCli.Core.AttributeFilter.IsContentFilterPath(path)))
+        {
+            var (targets, _) = OfficeCli.Core.AttributeFilter.FilterSelector(
+                path, Query, keyResolver: null, applyAll: false);
+            if (targets.Count == 0)
+                throw new ArgumentException($"No elements matched selector: {path}");
+            var ordered = targets
+                .OrderByDescending(t => OfficeCli.Core.AttributeFilter.ReverseDocOrderKey(t.Path), StringComparer.Ordinal)
+                .ToList();
+            string? lastWarning = null;
+            foreach (var target in ordered)
+            {
+                var w = Remove(target.Path, properties);
+                if (w != null) lastWarning = w;
+            }
+            var summary = $"{ordered.Count} element(s) removed by selector '{path}'";
+            return lastWarning != null ? $"{summary}; {lastWarning}" : summary;
+        }
+
         path = NormalizePptxPathSegmentCasing(path);
         path = NormalizeCellPath(path);
         path = ResolveIdPath(path);

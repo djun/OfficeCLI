@@ -28,6 +28,36 @@ public partial class WordHandler
         {
             return RemoveWithTrackChange(path, properties);
         }
+
+        // Batch Remove by selector: a bare selector (`run[bold=true or size=20pt]`)
+        // or a `/`-scoped content filter (`/body/p[1]/r[bold=true or size=20pt]`)
+        // resolves through the shared engine — the same FilterSelector query and
+        // set use — then each match is removed. Removals run in REVERSE document
+        // order (descending path indices) so deleting an earlier element does not
+        // renumber a not-yet-removed target (`r[2]` first would shift `r[3]`→`r[2]`).
+        // Mirrors ExcelHandler.Remove's selector branch. Structural slash paths
+        // (`/body/p[1]/r[2]`, `/watermark`, `/styles/X`) are not content filters,
+        // so they fall through to the guards + NavigateToElement below.
+        if (!string.IsNullOrEmpty(path)
+            && (!path.StartsWith("/") || OfficeCli.Core.AttributeFilter.IsContentFilterPath(path)))
+        {
+            var (targets, _) = OfficeCli.Core.AttributeFilter.FilterSelector(
+                path, Query, keyResolver: null, applyAll: false);
+            if (targets.Count == 0)
+                throw new ArgumentException($"No elements matched selector: {path}");
+            var ordered = targets
+                .OrderByDescending(t => OfficeCli.Core.AttributeFilter.ReverseDocOrderKey(t.Path), StringComparer.Ordinal)
+                .ToList();
+            string? lastWarning = null;
+            foreach (var target in ordered)
+            {
+                var w = Remove(target.Path, properties);
+                if (w != null) lastWarning = w;
+            }
+            var summary = $"{ordered.Count} element(s) removed by selector '{path}'";
+            return lastWarning != null ? $"{summary}; {lastWarning}" : summary;
+        }
+
         // CONSISTENCY(container-remove-guard): reject removal of required
         // structural container elements up front. Without this guard,
         // `remove /body` / `remove /styles` etc. fall through to

@@ -37,6 +37,11 @@ internal static class AttributeFilter
         @"\[([^\]]*)\]",
         RegexOptions.Compiled);
 
+    // Regex: numeric positional index [N] only (used for reverse-doc-order keys).
+    private static readonly Regex BracketIndexRegex = new(
+        @"\[(\d+)\]",
+        RegexOptions.Compiled);
+
     /// <summary>
     /// Parse all [key op value] conditions from a selector string.
     /// Throws CliException for malformed selectors.
@@ -754,6 +759,20 @@ internal static class AttributeFilter
         }
         return false;
     }
+
+    /// <summary>
+    /// Sort key for index-shift-safe batch removal. A path's numeric `[N]`
+    /// indices, zero-padded and joined left-to-right, so that
+    /// <c>OrderByDescending(ReverseDocOrderKey)</c> yields reverse document order:
+    /// the latest element is removed first, keeping every earlier index valid for
+    /// the not-yet-removed targets (deleting `r[2]` before `r[3]` would otherwise
+    /// renumber `r[3]`→`r[2]`). `@attr`/non-indexed segments contribute nothing —
+    /// stable locators (`@id`, `@paraId`) don't shift. Used by the Word/Pptx
+    /// selector-remove branches.
+    /// </summary>
+    public static string ReverseDocOrderKey(string? path) =>
+        string.Join(".", BracketIndexRegex.Matches(path ?? "")
+            .Select(m => m.Groups[1].Value.PadLeft(8, '0')));
 
     // True when the selector's element resolves its own virtual attributes that a
     // bare query would not carry (Excel row/col table-column predicates). Such a
