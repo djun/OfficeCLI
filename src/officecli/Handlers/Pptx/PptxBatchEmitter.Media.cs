@@ -47,7 +47,14 @@ public static partial class PptxBatchEmitter
 
         // Drop Get-only diagnostic keys that AddPicture neither expects nor
         // accepts (mirrors docx WordBatchEmitter picture emit).
-        props.Remove("id");
+        // CONSISTENCY(shape-id-high-range): KEEP the source cNvPr.Id —
+        // AcquireShapeId in AddPicture honors caller-supplied id and the
+        // auto-assign base is 100000+, so the source id (typically a single-
+        // or low-double-digit number for PowerPoint-authored pictures)
+        // never collides with the counter. Without preserving it, the
+        // picture's cNvPr id rewrites to 100000+ on round-trip, drifting
+        // against the source and breaking any animation/spTgt that targeted
+        // the picture by id. Mirrors EmitPlaceholder / EmitShape behavior.
         props.Remove("contentType");
         props.Remove("fileSize");
         props.Remove("alt");

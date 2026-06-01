@@ -22,7 +22,11 @@ public static partial class PptxBatchEmitter
         var fullChart = ppt.Get(chartNode.Path, depth: 1);
         var props = FilterEmittableProps(fullChart.Format);
         // Strip Get-only keys AddChart neither expects nor accepts.
-        props.Remove("id");
+        // CONSISTENCY(shape-id-high-range): KEEP the source cNvPr.Id —
+        // AcquireShapeId in AddChart honors caller-supplied id, mirror of
+        // the placeholder / shape / picture preservation contract. The
+        // graphicFrame id otherwise rewrites to 100000+ on replay, drifting
+        // against the source and breaking spTgt references.
         props.Remove("seriesCount");
 
         // Scatter/bubble charts intrinsically carry TWO c:valAx (X and Y are
