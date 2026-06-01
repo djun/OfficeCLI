@@ -1921,6 +1921,16 @@ public partial class PowerPointHandler
         if (alphaModFix?.Amount?.HasValue == true)
             node.Format["opacity"] = $"{alphaModFix.Amount.Value / 100000.0:0.##}";
 
+        // bt-2: surface <a:biLevel thresh="N"/> as the `biLevel` Format key.
+        // BiLevel converts the picture to 1-bit black/white using `thresh`
+        // as the luminance cutoff (0..100000 permille). Without this readback
+        // the dump path silently dropped the effect on round-trip — the
+        // image came back in full color and the high-contrast art look
+        // (mono outline / printable mode) collapsed.
+        var picBiLevel = picBlip?.GetFirstChild<Drawing.BiLevel>();
+        if (picBiLevel?.Threshold?.HasValue == true)
+            node.Format["biLevel"] = $"{picBiLevel.Threshold.Value / 1000.0:0.##}";
+
         // Click-hyperlink on the picture (nvPicPr/cNvPr/a:hlinkClick).
         // CONSISTENCY(shape-picture-parity): pictures share the cNvPr
         // hyperlink slot with shapes; reuse the same reader.

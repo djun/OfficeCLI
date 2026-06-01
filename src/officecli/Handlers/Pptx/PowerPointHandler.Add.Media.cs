@@ -357,6 +357,37 @@ public partial class PowerPointHandler
                         (int)(ParseHelpers.SafeParseDouble(picRotStr, "rotation") * 60000);
                 }
 
+                // bt-2: blip-level filters. Set.Media accepts opacity and
+                // biLevel on a picture; Add must mirror so dump→replay
+                // round-trips the alphaModFix / biLevel children that
+                // ride on the source blip.
+                var picBlipForFilters = picture.BlipFill?.GetFirstChild<Drawing.Blip>();
+                if (picBlipForFilters != null
+                    && properties.TryGetValue("opacity", out var picOpacityStr))
+                {
+                    if (!double.TryParse(picOpacityStr, System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var picOpacityNum)
+                        || double.IsNaN(picOpacityNum) || double.IsInfinity(picOpacityNum))
+                        throw new ArgumentException($"Invalid 'opacity' value: '{picOpacityStr}'. Expected a finite decimal 0.0-1.0.");
+                    if (picOpacityNum > 1.0 && picOpacityNum < 2.0)
+                        throw new ArgumentException($"Invalid 'opacity' value: '{picOpacityStr}'. Expected 0.0-1.0 as decimal or 2-100 as percent (values in (1, 2) are ambiguous).");
+                    if (picOpacityNum > 1.0) picOpacityNum /= 100.0;
+                    if (picOpacityNum < 0.0 || picOpacityNum > 1.0)
+                        throw new ArgumentException($"Invalid 'opacity' value: '{picOpacityStr}'. Expected 0.0-1.0 (or 0-100 as percent).");
+                    picBlipForFilters.RemoveAllChildren<Drawing.AlphaModulationFixed>();
+                    picBlipForFilters.AppendChild(new Drawing.AlphaModulationFixed { Amount = (int)(picOpacityNum * 100000) });
+                }
+                if (picBlipForFilters != null
+                    && properties.TryGetValue("biLevel", out var picBiLevelStr))
+                {
+                    if (!double.TryParse(picBiLevelStr, System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var picBiLevelNum)
+                        || picBiLevelNum < 0 || picBiLevelNum > 100)
+                        throw new ArgumentException($"Invalid 'biLevel' value: '{picBiLevelStr}'. Expected 0..100 (threshold percent).");
+                    picBlipForFilters.RemoveAllChildren<Drawing.BiLevel>();
+                    picBlipForFilters.AppendChild(new Drawing.BiLevel { Threshold = (int)(picBiLevelNum * 1000) });
+                }
+
                 // CONSISTENCY(shape-picture-parity): pictures are routinely
                 // click-targets — wire link= the same way shape does.
                 // Tooltip is the same secondary key as on shape.

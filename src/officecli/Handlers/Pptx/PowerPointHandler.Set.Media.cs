@@ -230,6 +230,25 @@ public partial class PowerPointHandler
                         srcRect.Remove();
                     break;
                 }
+                case "bilevel":
+                {
+                    // bt-2: <a:biLevel thresh="N"/> on the picture's blip
+                    // (1-bit black/white threshold; thresh is permille).
+                    // Accept either bare 0..100 (percent) or thresh=N raw.
+                    var biBlip = pic.BlipFill?.GetFirstChild<Drawing.Blip>();
+                    if (biBlip == null) { unsupported.Add(key); break; }
+                    biBlip.RemoveAllChildren<Drawing.BiLevel>();
+                    if (!value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                        && !value.Equals("false", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out var bp)
+                            || bp < 0 || bp > 100)
+                            throw new ArgumentException($"Invalid 'biLevel' value: '{value}'. Expected 0..100 (threshold percent) or 'none'.");
+                        biBlip.AppendChild(new Drawing.BiLevel { Threshold = (int)(bp * 1000) });
+                    }
+                    break;
+                }
                 case "opacity":
                 {
                     if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var opacityVal)
