@@ -561,13 +561,17 @@ public partial class PowerPointHandler
         var sp3d = spPr.GetFirstChild<Drawing.Shape3DType>();
         if (sp3d != null) return sp3d;
 
-        // PowerPoint silently renders sp3d as flat 2D unless a scene3d
-        // sibling supplies camera + light rig. Auto-inject default scene3d
-        // (orthographicFront camera + threePt light rig) on first sp3d emit
-        // so users get visible 3D from bare bevel=/depth=/material= props
-        // without having to know about lighting=.
-        EnsureScene3D(spPr);
-
+        // CONSISTENCY(dump-replay-no-auto-scene3d): NO auto-inject of a
+        // sibling <a:scene3d>. PowerPoint authors can (and do) ship shapes
+        // with only <a:sp3d> in the spPr — NodeBuilder surfaces those as
+        // bevel=/depth=/material=/extrusionColor=/contourColor= Format keys
+        // WITHOUT a camera= or lighting= key (because the source had no
+        // scene3d). Auto-injecting scene3d here re-synthesizes a
+        // <a:scene3d><a:camera prst="orthographicFront"/><a:lightRig
+        // rig="threePt" dir="t"/></a:scene3d> on round-trip — drift against
+        // the source. Users who want their bevel/depth visibly rendered must
+        // pass camera= and/or lighting= explicitly; that path threads through
+        // EnsureScene3D via ApplyCameraPreset / ApplyLighting.
         sp3d = new Drawing.Shape3DType();
         // Schema order: scene3d → sp3d → extLst
         // Insert before extLst if it exists, otherwise append
