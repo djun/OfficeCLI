@@ -48,6 +48,19 @@ public partial class WordHandler
                 cols.Separator = IsTruthy(value);
                 return true;
             }
+            // colWidths / colSpaces — non-equal-width column layout. Mirrors the
+            // canonical Get-side emit (separate width and space lists; see
+            // WordHandler.Query.cs `colWidths` / `colSpaces`). Without this,
+            // Get emitted both keys but Set silently dropped them — dump→batch
+            // round-trip lost the non-equal layout.
+            case "colwidths":
+            case "colspaces":
+            {
+                var sectPr = EnsureSectionProperties();
+                var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { { key, value } };
+                ApplySectionColumnWidthsSpaces(props, sectPr);
+                return true;
+            }
 
             // ==================== Title page / page numbering ====================
             // CONSISTENCY(section-layout-fallback): SetSectionPath (/section[N]) and

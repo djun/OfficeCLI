@@ -849,6 +849,21 @@ public partial class WordHandler
                 }
                 case "colwidths":
                 {
+                    // Two accepted forms — disambiguated by whether colSpaces
+                    // is also provided in the same call:
+                    //  - Alternating "width,space,width,space,...,width" (legacy)
+                    //  - Separate-list "width,width,..." paired with a
+                    //    `colSpaces=space,space,...` --prop (Get-emit form,
+                    //    canonical round-trip for non-equal layouts).
+                    bool hasSeparateSpaces = effectiveProps.ContainsKey("colSpaces")
+                                          || effectiveProps.ContainsKey("colspaces");
+                    if (hasSeparateSpaces)
+                    {
+                        // Route through the shared helper so widths+spaces are
+                        // applied together (regardless of --prop ordering).
+                        ApplySectionColumnWidthsSpaces(effectiveProps, sectPr);
+                        break;
+                    }
                     // Custom column widths: "3000,720,2000,720,3000"
                     // Alternating: width,space,width,space,...,width
                     var cwCols = EnsureColumns(sectPr);
@@ -865,6 +880,18 @@ public partial class WordHandler
                         colCount++;
                     }
                     cwCols.ColumnCount = (Int16Value)(short)colCount;
+                    break;
+                }
+                case "colspaces":
+                {
+                    // Companion to `colwidths` separate-list form. When colWidths
+                    // is also provided in the same call, the colwidths case
+                    // already routed to ApplySectionColumnWidthsSpaces — skip
+                    // here to avoid double-application. Otherwise apply
+                    // colSpaces against existing column widths (Get-emit shape).
+                    if (effectiveProps.ContainsKey("colWidths") || effectiveProps.ContainsKey("colwidths"))
+                        break;
+                    ApplySectionColumnWidthsSpaces(effectiveProps, sectPr);
                     break;
                 }
                 case "separator" or "sep":

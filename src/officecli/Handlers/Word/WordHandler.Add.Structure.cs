@@ -131,6 +131,22 @@ public partial class WordHandler
             var cols = EnsureSectPrChild<Columns>(sectPr);
             cols.EqualWidth = IsTruthy(eqW);
         }
+        // CONSISTENCY(add-set-symmetry): mirror TrySetSectionLayout's columns.separator
+        // case so AddSection round-trips the vertical column separator. Without an
+        // explicit handler the key falls through TypedAttributeFallback against sectPr
+        // (separator lives on <w:cols>, not sectPr) and gets dropped silently.
+        if (properties.TryGetValue("columns.separator", out var colSep))
+        {
+            var cols = EnsureSectPrChild<Columns>(sectPr);
+            cols.Separator = IsTruthy(colSep);
+        }
+        // colWidths/colSpaces — non-equal-width column layout. Comma-separated lists
+        // of twip values (or unit-qualified like "4cm,3cm"). colWidths sets per-column
+        // widths; colSpaces sets per-column spacing AFTER each column (last value
+        // typically 0). Both lists must have the same length and equal columns.count.
+        // Writes <w:cols><w:col w:w="…" w:space="…"/>…</w:cols> and implicitly flips
+        // equalWidth=false (OOXML rule: explicit widths imply non-equal layout).
+        ApplySectionColumnWidthsSpaces(properties, sectPr);
 
         // Per-section margin overrides — mutate the PageMargin child of the
         // new sectPr (not the body sectPr). Margins use Int32Value for Top/
@@ -252,6 +268,14 @@ public partial class WordHandler
         var sectionAlreadyConsumed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "columns.count", "columns.space",
+            // CONSISTENCY(add-set-symmetry): explicit hand-rolled branches above
+            // consumed these — keep the dotted fallback from re-running
+            // TypedAttributeFallback against sectPr (it'd fail to find the attr
+            // on sectPr because separator/equalWidth/widths/spaces live on the
+            // nested <w:cols>, then flag them as unsupported despite being
+            // applied correctly).
+            "columns.separator", "columns.equalwidth", "columns.equalWidth",
+            "colwidths", "colWidths", "colspaces", "colSpaces",
         };
         foreach (var (key, value) in properties)
         {
@@ -2038,5 +2062,60 @@ public partial class WordHandler
 
         var fIdx = mainPartF.FooterParts.ToList().IndexOf(footerPart);
         return $"/footer[{fIdx + 1}]";
+    }
+
+    /// <summary>
+    /// Apply colWidths / colSpaces non-equal-width column layout to a sectPr.
+    /// Mirrors the Get-side emit form in WordHandler.Query.cs (separate widths
+    /// and spaces lists). Without this, Get emits `colWidths="4000,6000"` +
+    /// `colSpaces="720,0"` but Add/Set silently dropped both — round-trip
+    /// loses the non-equal layout. Accepts either key alone (the missing side
+    /// fills with the existing col children's value or zero).
+    /// </summary>
+    private static void ApplySectionColumnWidthsSpaces(
+        Dictionary<string, string> properties, SectionProperties sectPr)
+    {
+        bool hasW = properties.TryGetValue("colWidths", out var widthsVal)
+                 || properties.TryGetValue("colwidths", out widthsVal);
+        bool hasS = properties.TryGetValue("colSpaces", out var spacesVal)
+                 || properties.TryGetValue("colspaces", out spacesVal);
+        if (!hasW && !hasS) return;
+
+        var cols = EnsureSectPrChild<Columns>(sectPr);
+        var widths = hasW
+            ? widthsVal!.Split(',').Select(s => ParseTwips(s.Trim()).ToString()).ToList()
+            : null;
+        var spaces = hasS
+            ? spacesVal!.Split(',').Select(s => ParseTwips(s.Trim()).ToString()).ToList()
+            : null;
+
+        // Preserve the orthogonal axis from any existing <w:col> children so
+        // per-prop Set dispatch (one --prop colWidths followed by one --prop
+        // colSpaces, called separately) doesn't wipe the first axis on the
+        // second call.
+        var existing = cols.Elements<Column>().ToList();
+
+        int n = widths?.Count ?? spaces!.Count;
+        if (widths != null && spaces != null && widths.Count != spaces.Count)
+            throw new ArgumentException(
+                $"colWidths and colSpaces must have the same length (got {widths.Count} vs {spaces.Count}).");
+
+        cols.RemoveAllChildren<Column>();
+        for (int i = 0; i < n; i++)
+        {
+            var col = new Column();
+            if (widths != null)
+                col.Width = widths[i];
+            else if (i < existing.Count && existing[i].Width?.Value is string w)
+                col.Width = w;
+            if (spaces != null)
+                col.Space = spaces[i];
+            else if (i < existing.Count && existing[i].Space?.Value is string sp)
+                col.Space = sp;
+            cols.AppendChild(col);
+        }
+        cols.ColumnCount = (short)n;
+        // Explicit per-column widths imply non-equal layout per OOXML.
+        cols.EqualWidth = false;
     }
 }
