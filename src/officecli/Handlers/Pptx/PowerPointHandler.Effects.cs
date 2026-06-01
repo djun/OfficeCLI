@@ -495,6 +495,20 @@ public partial class PowerPointHandler
         return outline;
     }
 
+    /// <summary>
+    /// Set the camera preset on a scene3d/camera (a:scene3d/a:camera/@prst).
+    /// Value is the OOXML inner-text name (orthographicFront,
+    /// perspectiveContrastingRightFacing, isometricTopUp, …). The
+    /// PresetCameraValues string ctor validates against the schema enum
+    /// and throws on invalid input, so we don't pre-validate here.
+    /// </summary>
+    private static void ApplyCameraPreset(ShapeProperties spPr, string value)
+    {
+        var scene3d = EnsureScene3D(spPr);
+        var camera = scene3d.Camera!;
+        camera.Preset = new Drawing.PresetCameraValues(value);
+    }
+
     private static Drawing.Scene3DType EnsureScene3D(ShapeProperties spPr)
     {
         var scene3d = spPr.GetFirstChild<Drawing.Scene3DType>();

@@ -1371,6 +1371,20 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "camera" or "camerapreset" or "cameraprst":
+                {
+                    // a:scene3d/a:camera/@prst. Accept the raw OOXML name
+                    // (orthographicFront, perspectiveContrastingRightFacing,
+                    // isometricTopUp, …) — there are 62 presets and
+                    // maintaining a lowercase-alias table would just lag the
+                    // schema. PresetCameraValues' string ctor accepts the
+                    // OOXML inner text directly.
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    ApplyCameraPreset(spPr, value);
+                    break;
+                }
+
                 case "name":
                 {
                     var nvPr = shape.NonVisualShapeProperties?.NonVisualDrawingProperties;

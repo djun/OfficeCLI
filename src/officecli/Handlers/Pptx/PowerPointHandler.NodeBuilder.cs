@@ -1162,6 +1162,13 @@ public partial class PowerPointHandler
                 if (rx != 0 || ry != 0 || rz != 0)
                     node.Format["rot3d"] = $"{rx / 60000.0:0.##},{ry / 60000.0:0.##},{rz / 60000.0:0.##}";
             }
+            // Camera preset (a:scene3d/a:camera/@prst). Previously dropped on
+            // round-trip — EnsureScene3D hard-coded OrthographicFront, so any
+            // source preset (perspectiveContrastingRightFacing, isometricTopUp,
+            // ...) was silently rewritten to the default. Emit the OOXML
+            // camelCase name verbatim; Set re-applies via PresetCameraValues.
+            if (cam?.Preset?.HasValue == true)
+                node.Format["camera"] = cam.Preset.InnerText ?? "";
             var lightRig = scene3d.LightRig;
             if (lightRig?.Rig?.HasValue == true) node.Format["lighting"] = lightRig.Rig.InnerText;
         }

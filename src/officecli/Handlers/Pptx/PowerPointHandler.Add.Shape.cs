@@ -743,6 +743,7 @@ public partial class PowerPointHandler
                       "softedge", "blur", "fliph", "flipv", "rot3d", "rotation3d",
                       "rotx", "roty", "rotz", "bevel", "beveltop", "bevelbottom",
                       "depth", "extrusion", "material", "lighting", "lightrig",
+                      "camera", "camerapreset", "cameraprst",
                       "spacing", "charspacing", "letterspacing",
                       "indent", "marginleft", "marl", "marginright", "marr",
                       "textfill", "textgradient", "geometry",
