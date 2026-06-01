@@ -1544,6 +1544,15 @@ public partial class ExcelHandler
         // returned cell nodes (BUG-BT-R33-2).
         if (elementName is "row")
         {
+            // row[<colname|colletter> op val] → match table data rows by a
+            // column's cell value (e.g. row[Salary>5000]); distinct from
+            // row[hidden=true] which filters row attributes. Column predicates
+            // resolve header names against a ListObject — see
+            // ExcelHandler.Query.RowWhere.cs.
+            var rowColPreds = ParseRowColumnPredicates(selector);
+            if (rowColPreds.Count > 0)
+                return QueryRowsByColumnPredicate(parsed.Sheet, rowColPreds);
+
             foreach (var (sheetName, worksheetPart) in GetWorksheets())
             {
                 if (parsed.Sheet != null && !sheetName.Equals(parsed.Sheet, StringComparison.OrdinalIgnoreCase))
