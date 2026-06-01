@@ -600,6 +600,8 @@ public static partial class PptxBatchEmitter
             EmitRawSlideSlice(slidePath, "p:timing", exotic.TimingXml, items, ctx);
         if (exotic.ExtLstXml != null)
             EmitRawSlideSlice(slidePath, "p:extLst", exotic.ExtLstXml, items, ctx);
+        if (exotic.TrailingTransitionXml != null)
+            EmitRawSlideSlice(slidePath, "p:transition", exotic.TrailingTransitionXml, items, ctx);
 
         // SmartArt graphicFrames live in /p:sld/p:cSld/p:spTree but are
         // skipped by NodeBuilder (table/chart-only routing). Phase 3b emits
@@ -732,7 +734,19 @@ public static partial class PptxBatchEmitter
         // pointing to a slide-rels ImagePart) are flagged with a warning
         // because the freshly-added replay slide has no matching relationship
         // — a follow-up add-part pass would be needed for full image bg.
-        string? BgXml);
+        string? BgXml,
+        // R48: trailing plain <p:transition> appearing AFTER <p:timing> as a
+        // direct sibling. The first-transition scan above stops at the first
+        // <p:transition (typically inside mc:AlternateContent for morph /
+        // p14 / p15 decks); a second plain transition with attributes like
+        // advTm / advClick is then silently dropped. ReadSlideTransition's
+        // typed accessor returns this trailing one (it's the first DIRECT
+        // <p:transition> child since the inner one is wrapped), but the
+        // regex fallback path harvests advanceTime from the mc-inner block
+        // and never inspects the trailing element. Captured as its own
+        // verbatim slice and raw-set appended on /p:sld so both transitions
+        // round-trip in source order.
+        string? TrailingTransitionXml);
 
     private static SlideExoticContent ScanSlideExoticContent(PowerPointHandler ppt, string slidePath)
     {
@@ -938,8 +952,43 @@ public static partial class PptxBatchEmitter
             }
         }
 
+        // R48: trailing <p:transition> sibling after the first one (and
+        // outside any mc:AlternateContent wrap we already captured). Walk
+        // from just past the first <p:transition> end (or its mc wrap end)
+        // and look for another. Skip transitions nested under <mc:Choice> /
+        // <mc:Fallback> branches that belong to ALREADY captured wrappers.
+        string? trailingTransXml = null;
+        if (tIdx >= 0)
+        {
+            // Resume scanning at the end of the first transition slice (or
+            // the end of its mc:AlternateContent wrap if present).
+            int resumeFrom;
+            var firstMcStart = xml.LastIndexOf("<mc:AlternateContent", tIdx, StringComparison.Ordinal);
+            if (firstMcStart >= 0)
+            {
+                var firstMcEnd = xml.IndexOf("</mc:AlternateContent>", firstMcStart, StringComparison.Ordinal);
+                resumeFrom = firstMcEnd > tIdx
+                    ? firstMcEnd + "</mc:AlternateContent>".Length
+                    : SliceEnd(xml, tIdx, "p:transition");
+            }
+            else
+            {
+                resumeFrom = SliceEnd(xml, tIdx, "p:transition");
+            }
+            if (resumeFrom > 0 && resumeFrom < xml.Length)
+            {
+                var t2Idx = xml.IndexOf("<p:transition", resumeFrom, StringComparison.Ordinal);
+                if (t2Idx >= 0)
+                {
+                    var t2End = SliceEnd(xml, t2Idx, "p:transition");
+                    if (t2End > t2Idx)
+                        trailingTransXml = xml.Substring(t2Idx, t2End - t2Idx);
+                }
+            }
+        }
+
         return new SlideExoticContent(transExotic, transXml, timingExotic, timingXml,
-            clrMapOvrXml, extLstXml, bgXml);
+            clrMapOvrXml, extLstXml, bgXml, trailingTransXml);
     }
 
     // Normalize a slide raw slice into a stable textual form so the first-pass
