@@ -664,20 +664,35 @@ public partial class PowerPointHandler
             ?? throw new ArgumentException(
                 $"Invalid placeholder type: '{phTypeStr}'. Valid: title, body, subtitle, date, footer, slidenum, header, picture, chart, table, diagram, media, obj, clipart.");
 
-        // PowerPoint disallows two placeholders with the same phType in a
-        // single slide — UI auto-deduplicates and the file becomes ill-formed
-        // for round-trip. Pre-check spTree before allocating a new <p:sp> so
-        // dump→replay or scripted Add can't silently double up. Set is the
-        // canonical update path; if caller really wants to drop the old slot
-        // first, they should Remove then Add.
-        var existingPh = phShapeTree.Elements<Shape>()
-            .FirstOrDefault(s => s.NonVisualShapeProperties
-                ?.ApplicationNonVisualDrawingProperties
-                ?.GetFirstChild<PlaceholderShape>()?.Type?.Value == phTypeVal);
-        if (existingPh != null)
-            throw new ArgumentException(
-                $"Placeholder phType='{phTypeStr}' already exists on slide {phSlideIdx}. " +
-                "Use Set to update the existing placeholder, or Remove the existing one first.");
+        // Title/ctrTitle are the only placeholder types PowerPoint treats as
+        // unique-per-slide (ECMA-376 §19.3.1.36; UI auto-deduplicates). Body,
+        // object, picture, chart, etc. can legitimately appear multiple times
+        // on one slide — each binds to a different layout slot via @idx
+        // (two-content / comparison layouts; also bare <p:ph/> defaulted to
+        // body where the source had two unattributed placeholders). The
+        // uniqueness check is therefore restricted to title-family, and
+        // (idx, type) pairs are deduplicated only when both placeholders share
+        // the same explicit @idx. Otherwise dump→replay of a slide with two
+        // bare <p:ph/> elements (both canonicalize to phType=body) throws on
+        // the second Add — false positive against ECMA-376.
+        bool phTypeIsTitleFamily = phTypeVal == PlaceholderValues.Title
+            || phTypeVal == PlaceholderValues.CenteredTitle;
+        if (phTypeIsTitleFamily)
+        {
+            var existingTitle = phShapeTree.Elements<Shape>()
+                .FirstOrDefault(s =>
+                {
+                    var existingType = s.NonVisualShapeProperties
+                        ?.ApplicationNonVisualDrawingProperties
+                        ?.GetFirstChild<PlaceholderShape>()?.Type?.Value;
+                    return existingType == PlaceholderValues.Title
+                        || existingType == PlaceholderValues.CenteredTitle;
+                });
+            if (existingTitle != null)
+                throw new ArgumentException(
+                    $"Placeholder phType='{phTypeStr}' already exists on slide {phSlideIdx}. " +
+                    "Use Set to update the existing placeholder, or Remove the existing one first.");
+        }
 
         var phId = AcquireShapeId(phShapeTree, properties);
         var phName = properties.GetValueOrDefault("name", $"{phTypeStr} Placeholder {phId}");
