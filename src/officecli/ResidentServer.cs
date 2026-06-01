@@ -1436,8 +1436,11 @@ public class ResidentServer : IDisposable
             // R10-bug1: surface docx dump warnings via stderr so the
             // envelope-builder in HandleClient picks them up as
             // envelope.warnings — same wiring as the pptx branch below.
+            // R11 aux-parts: include the Reason on the stderr line so
+            // resident-routed callers see the same explanation the direct
+            // path (CommandBuilder.Dump.cs) puts in its envelope-side message.
             foreach (var w in wWarnings)
-                Console.Error.WriteLine($"warning: skipped {w.Element} at {w.Path}");
+                Console.Error.WriteLine($"warning: skipped {w.Element} at {w.Path}: {w.Reason}");
         }
         else if (_handler is OfficeCli.Handlers.PowerPointHandler ppt)
         {

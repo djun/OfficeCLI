@@ -210,6 +210,15 @@ public static partial class WordBatchEmitter
                     it.Props["noMarkRPrInherit"] = "true";
             }
         }
+        // R11 aux-parts: surface a warning per package part the dump surface
+        // does not round-trip (customXml, glossary, webSettings, fontTable,
+        // embedded fonts, modern-comment metadata, user docProps). Silent
+        // data loss is worse than a noisy warning — the warning channel
+        // lets agents/users see exactly which content vanished on dump.
+        // Scoped to full-document dumps only; subtree paths (`/body/p[5]`,
+        // `/styles`, etc.) intentionally do NOT include sibling parts, so
+        // warning about them every time would be noise.
+        EmitAuxiliaryPartsScan(word, warnings);
         return (items, warnings);
     }
 

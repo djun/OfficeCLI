@@ -107,7 +107,12 @@ static partial class CommandBuilder
                             Message = $"skipped {w.Element} at {w.Path}: {w.Reason}",
                             Code = "unsupported_element"
                         });
-                        Console.Error.WriteLine($"warning: skipped {w.Element} at {w.Path}");
+                        // R11 aux-parts: include the reason on the stderr line
+                        // so resident-routed callers (whose BuildWarnings parses
+                        // stderr text back into envelope.warnings) also see the
+                        // explanation, not just "<element> at <path>". The
+                        // direct-path message above already includes Reason.
+                        Console.Error.WriteLine($"warning: skipped {w.Element} at {w.Path}: {w.Reason}");
                     }
                 }
             }

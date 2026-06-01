@@ -47,6 +47,77 @@ public partial class WordHandler : IDocumentHandler
     /// </summary>
     internal bool Modified { get; set; }
 
+    /// <summary>
+    /// Enumerate every <see cref="OpenXmlPart"/> in the package (transitive
+    /// walk via the SDK's own <c>GetAllParts</c> extension) yielding each
+    /// part's zip-URI (<c>OpenXmlPart.Uri.OriginalString</c>). Used by the
+    /// batch emitter's auxiliary-parts scan to surface warnings for parts the
+    /// dump surface does not round-trip (customXml, glossary, webSettings,
+    /// fontTable, embedded fonts, modern-comment metadata, user docProps).
+    /// </summary>
+    internal IEnumerable<string> EnumeratePartUris()
+    {
+        // Two complementary sources:
+        //   1. SDK part graph (GetAllParts) — only reachable via the
+        //      relationship graph; misses orphan parts but matches every
+        //      real Word file produced by Office / python-docx / WPS.
+        //   2. Raw zip entries — catches orphan parts (fuzzer-injected
+        //      content, partial-rel files dropped by failed save), parts
+        //      whose `_rels/.rels` reference disappeared, and anything the
+        //      SDK refuses to surface as a typed part.
+        // Union them so the aux-parts scan can warn on both cases. Skips
+        // duplicates inside the consumer.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var part in _doc.GetAllParts())
+        {
+            var u = part.Uri.OriginalString;
+            if (seen.Add(u)) yield return u;
+        }
+        // Raw zip walk — opens the file independently. Use FileShare.ReadWrite
+        // because the SDK's _backingStream already holds the file handle in
+        // editable mode (FileShare.Read on our side). Falling back to the SDK
+        // package via reflection is also possible (RawXmlHelper does this for
+        // TryReadByZipUri), but the raw zip is simpler and sees the full
+        // on-disk truth.
+        if (File.Exists(_filePath))
+        {
+            List<string> zipEntries;
+            try
+            {
+                using var fs = File.Open(_filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var zip = new System.IO.Compression.ZipArchive(fs, System.IO.Compression.ZipArchiveMode.Read);
+                zipEntries = zip.Entries.Select(e => e.FullName).ToList();
+            }
+            catch { yield break; }
+            foreach (var name in zipEntries)
+            {
+                if (string.IsNullOrEmpty(name)) continue;
+                var u = name.StartsWith("/") ? name : "/" + name;
+                if (seen.Add(u)) yield return u;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Surface the <c>docProps/custom.xml</c> property names (if any).
+    /// Used by the batch emitter to detect user-defined custom document
+    /// properties whose values are silently dropped by dump (only
+    /// <c>OfficeCLI.*</c> values are auto-restamped on save; user-authored
+    /// props vanish). Returns an empty list if no custom part exists.
+    /// </summary>
+    internal IReadOnlyList<string> EnumerateCustomDocPropertyNames()
+    {
+        var part = _doc.CustomFilePropertiesPart;
+        if (part?.Properties == null) return Array.Empty<string>();
+        var names = new List<string>();
+        foreach (var p in part.Properties.Elements<DocumentFormat.OpenXml.CustomProperties.CustomDocumentProperty>())
+        {
+            var n = p.Name?.Value;
+            if (!string.IsNullOrEmpty(n)) names.Add(n!);
+        }
+        return names;
+    }
+
     public WordHandler(string filePath, bool editable)
     {
         _filePath = filePath;
