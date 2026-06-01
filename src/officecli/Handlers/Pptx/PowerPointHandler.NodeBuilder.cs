@@ -1443,6 +1443,28 @@ public partial class PowerPointHandler
                     var pSa = paraPProps?.GetFirstChild<Drawing.SpaceAfter>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
                     if (pSa.HasValue) paraNode.Format["spaceAfter"] = SpacingConverter.FormatPptSpacing(pSa.Value);
 
+                    // R48: surface <a:endParaRPr sz=…> on EMPTY paragraphs
+                    // (no Run children). Designers use a runless paragraph
+                    // with a small endParaRPr font size as a vertical spacer
+                    // between visible runs in the same shape — e.g. four
+                    // cards on aionui.pptx slide 7 carry an
+                    // `<a:p><a:endParaRPr sz="400"/></a:p>` (4pt spacer)
+                    // between the heading and body. The dump path treats an
+                    // empty paragraph as `text=""` and replay reseeds a
+                    // default-size empty <a:r> which inflates the spacer to
+                    // the inherited body size (~18-24pt), shifting the body
+                    // copy down by 15-20pt per spacer (~30-40px total
+                    // across two such paragraphs). Capture sz as
+                    // `size` on the empty-paragraph node so AddParagraph
+                    // can re-stamp it via the existing size= setter.
+                    if (paraRuns.Count == 0)
+                    {
+                        var endRPr = para.GetFirstChild<Drawing.EndParagraphRunProperties>();
+                        var endSz = endRPr?.FontSize?.Value;
+                        if (endSz.HasValue)
+                            paraNode.Format["size"] = $"{endSz.Value / 100.0:0.##}pt";
+                    }
+
                     // Include runs at depth > 1
                     if (depth > 1)
                     {
