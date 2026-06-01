@@ -73,6 +73,22 @@ public static partial class PptxBatchEmitter
         // add prop AND the animation row was missing entirely (bug 5
         // double-fault).
         "chartBuild",
+        // hmerge / vmerge are Get-side continuation markers (NodeBuilder /
+        // Query emit them on cells that participate in a horizontal or
+        // vertical span). Set has no case for them — `merge.right=N` /
+        // `merge.down=N` (or gridSpan / rowSpan on the anchor cell) are the
+        // canonical write paths and already stamp the continuation cells'
+        // hMerge / vMerge attributes via OneOnBool(). Emitting hmerge=true
+        // on dump→batch would either fall through to the OOXML reflection
+        // fallback (which serialises BooleanValue(true) as the literal
+        // string "true", producing hMerge="true" instead of the canonical
+        // "1" PowerPoint writes) or be rejected as unsupported. Strip both
+        // from the emitter so cell-merge round-trips ride on the anchor's
+        // gridSpan / rowSpan (which DO route through OneOnBool).
+        // CONSISTENCY(merge-bool-form): see PowerPointHandler.ShapeProperties
+        // OneOnBool helper (R43 779099bc) — same lexical-form concern as
+        // the setter pinned to "1".
+        "hmerge", "vmerge",
     };
 
     // Shape-level `animation` is filtered above. The same readback emits
