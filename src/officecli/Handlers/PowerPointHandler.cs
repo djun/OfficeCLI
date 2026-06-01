@@ -1703,6 +1703,37 @@ public partial class PowerPointHandler : IDocumentHandler
         catch { return null; }
     }
 
+    // Return the verbatim <a:clrChange> outer XML on a picture's <a:blip>,
+    // or null when absent. Used by PptxBatchEmitter.EmitPicture to round-
+    // trip color-change adjustments (recolor) — there is no typed Set
+    // vocabulary for clrChange today, so the emitter copies the element
+    // through a raw-set passthrough on the freshly-added picture's blip.
+    // Mirrors the GetImageBinary path-resolution preamble verbatim.
+    public string? GetPictureBlipClrChangeXml(string picturePath)
+    {
+        var m = Regex.Match(picturePath,
+            @"^/slide\[(\d+)\]/(?:.+/)?picture\[(?:@id=)?(\d+)\]$");
+        if (!m.Success) return null;
+        var slideIdx = int.Parse(m.Groups[1].Value);
+        var idOrIdx = int.Parse(m.Groups[2].Value);
+        var byId = picturePath.Contains("@id=", StringComparison.Ordinal);
+        var parts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > parts.Count) return null;
+        var slidePart = parts[slideIdx - 1];
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+        if (shapeTree == null) return null;
+        var pictures = shapeTree.Descendants<Picture>().ToList();
+        Picture? pic = byId
+            ? pictures.FirstOrDefault(p =>
+                p.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value
+                    == (uint)idOrIdx)
+            : (idOrIdx >= 1 && idOrIdx <= pictures.Count ? pictures[idOrIdx - 1] : null);
+        if (pic == null) return null;
+        var blip = pic.BlipFill?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Blip>();
+        var clrChange = blip?.GetFirstChild<DocumentFormat.OpenXml.Drawing.ColorChange>();
+        return clrChange?.OuterXml;
+    }
+
     // Probe whether a shape's NonVisualDrawingProperties carries a
     // hlinkClick child. Used by PptxBatchEmitter.EmitShape to disambiguate
     // a Format["link"] surfaced by NodeBuilder's single-run shortcut

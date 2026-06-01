@@ -20,6 +20,13 @@ public static partial class PptxBatchEmitter
         var props = FilterEmittableProps(fullPic.Format);
         DeferSlideJumpLink(props, replayPath, ctx);
 
+        // <a:clrChange> recolor adjustment — there is no typed Set
+        // vocabulary today, so capture the source element's outer XML and
+        // re-inject it on replay via raw-set after the picture has been
+        // added. Pulled here so the raw-set lands on the correct
+        // picture[K]/blipFill/blip xpath.
+        string? clrChangeXml = ppt.GetPictureBlipClrChangeXml(picNode.Path);
+
         var binary = ppt.GetImageBinary(picNode.Path);
         if (binary.HasValue)
         {
@@ -82,6 +89,30 @@ public static partial class PptxBatchEmitter
                 Command = "set",
                 Path = replayPath,
                 Props = deferredEffects,
+            });
+        }
+
+        // CONSISTENCY(picture-clrchange-rawset): inject <a:clrChange> back
+        // onto the just-added picture's <a:blip>. Schema position: the
+        // clrChange child sits between the optional <a:alphaBiLevel> /
+        // <a:alphaCeiling> / etc. siblings and before any fill-mode
+        // elements; appending to the blip element keeps the same relative
+        // ordering as the source for the common one-effect case. The
+        // replayPath form is `/slide[N]/picture[K]` where K is the
+        // 1-based picture ordinal within spTree's <p:pic> siblings — the
+        // same scope `p:pic[K]` resolves through the xpath engine.
+        if (clrChangeXml != null
+            && System.Text.RegularExpressions.Regex.Match(replayPath,
+                @"^/slide\[(\d+)\]/picture\[(\d+)\]$") is { Success: true } picM)
+        {
+            var picOrd = int.Parse(picM.Groups[2].Value);
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = parentSlidePath,
+                Xpath = $"/p:sld/p:cSld/p:spTree/p:pic[{picOrd}]/p:blipFill/a:blip",
+                Action = "append",
+                Xml = clrChangeXml,
             });
         }
     }
