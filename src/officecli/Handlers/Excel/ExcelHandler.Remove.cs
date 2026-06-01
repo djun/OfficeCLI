@@ -25,6 +25,35 @@ public partial class ExcelHandler
             throw new ArgumentException(
                 $"Cannot remove container element '{path}': it is a required structural element of the document.");
 
+        // Batch Remove: a selector path (not starting with '/') → Query → Remove
+        // each match, mirroring ExcelHandler.Set's selector branch. Row removals
+        // are TRUE shift-deletes (rows below shift up — see "row[N] — true shift
+        // delete"), so multiple matched rows MUST be removed in DESCENDING row
+        // order: deleting /Sheet/row[2] first renumbers the old row[4] to row[3]
+        // and the next delete would hit the wrong row. Non-row targets carry
+        // index 0 and keep a stable relative order.
+        if (!string.IsNullOrEmpty(path) && !path.StartsWith("/"))
+        {
+            var targets = Query(path);
+            // Narrow via the shared comparison post-filter (same as Set) so a
+            // selector with >, <, >=, <= matches exactly, not over-broadly.
+            var compFilters = Core.AttributeFilter.NormalizeKeys(
+                Core.AttributeFilter.Parse(path), ResolveCellAttributeAlias);
+            targets = Core.AttributeFilter.Apply(targets, compFilters);
+            if (targets.Count == 0)
+                throw new ArgumentException($"No elements matched selector: {path}");
+
+            var ordered = targets.OrderByDescending(t => ExtractRowIndexForRemoval(t.Path)).ToList();
+            string? lastWarning = null;
+            foreach (var target in ordered)
+            {
+                var w = Remove(target.Path, properties);
+                if (w != null) lastWarning = w;
+            }
+            var summary = $"{ordered.Count} element(s) removed by selector '{path}'";
+            return lastWarning != null ? $"{summary}; {lastWarning}" : summary;
+        }
+
         path = NormalizeExcelPath(path);
         path = ResolveSheetIndexInPath(path);
         var segments = path.TrimStart('/').Split('/', 2);
@@ -799,6 +828,15 @@ public partial class ExcelHandler
         DeleteCalcChainIfPresent();
         SaveWorksheet(worksheet);
         return null;
+    }
+
+    // Trailing /row[N] index of a path, or 0 when the path is not a row. Used to
+    // order selector-Remove deletions descending so a row shift-delete never
+    // invalidates the indices of not-yet-deleted matches.
+    private static int ExtractRowIndexForRemoval(string? path)
+    {
+        var m = Regex.Match(path ?? "", @"/row\[(\d+)\]$", RegexOptions.IgnoreCase);
+        return m.Success ? int.Parse(m.Groups[1].Value) : 0;
     }
 
     /// <summary>
