@@ -829,17 +829,27 @@ public partial class WordHandler
         // returns "/formfield[N]" as the new element's identity; resolve it to
         // the body-level paragraph containing the Nth form field's begin-run
         // so callers can use the returned path directly as --after/--before.
-        if (first.Name.ToLowerInvariant() == "formfield" && segments.Count == 1 && first.Index.HasValue)
+        // R14-bug4: also accept /formfield[@name=NAME] (the schema-documented
+        // stable form, signalled by first.StringIndex starting with "@name=").
+        if (first.Name.ToLowerInvariant() == "formfield" && segments.Count == 1)
         {
             var allFf = FindFormFields();
-            var n = first.Index.Value;
-            if (n >= 1 && n <= allFf.Count)
+            (FieldInfo Field, FormFieldData FfData) hit = default;
+            if (first.Index.HasValue)
             {
-                var beginRun = allFf[n - 1].Field.BeginRun;
-                // Walk up to the nearest Paragraph so the anchor is a direct
-                // child of the body (matching what the user typically passes
-                // as --parent /body). If no paragraph ancestor (shouldn't
-                // happen for a valid form field), fall back to the begin run.
+                var n = first.Index.Value;
+                if (n >= 1 && n <= allFf.Count) hit = allFf[n - 1];
+            }
+            else if (first.StringIndex != null
+                && first.StringIndex.StartsWith("@name=", StringComparison.OrdinalIgnoreCase))
+            {
+                var target = first.StringIndex["@name=".Length..];
+                hit = allFf.FirstOrDefault(ff =>
+                    ff.FfData.GetFirstChild<FormFieldName>()?.Val?.Value == target);
+            }
+            if (hit.Field != null)
+            {
+                var beginRun = hit.Field.BeginRun;
                 OpenXmlElement? cur = beginRun;
                 while (cur != null && cur is not Paragraph) cur = cur.Parent;
                 return cur ?? beginRun;

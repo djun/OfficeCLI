@@ -262,17 +262,21 @@ public partial class WordHandler
         if (path.Equals("/watermark", StringComparison.OrdinalIgnoreCase))
             return SetWatermarkPath(properties);
 
-        // FormField paths: /formfield[N] or /formfield[name]
+        // FormField paths: /formfield[N], /formfield[name], or /formfield[@name=NAME]
         // Routed BEFORE ParsePath because the generic predicate validator
         // only accepts positive-integer / last() / [@attr=v] predicates and
         // would reject the documented /formfield[name] form.
-        var ffSetMatchEarly = System.Text.RegularExpressions.Regex.Match(path, @"^/formfield\[(\w+)\]$");
+        // R14-bug4: schema declared /formfield[@name=NAME] as the stable
+        // selector; mirror the [@name=…] arm here so set commands match
+        // the same surface as get.
+        var ffSetMatchEarly = System.Text.RegularExpressions.Regex.Match(path, @"^/formfield\[(?:@name=)?([^\]]+)\]$");
         if (ffSetMatchEarly.Success)
         {
             var allFormFields = FindFormFields();
             var indexOrName = ffSetMatchEarly.Groups[1].Value;
+            bool nameForm = path.Contains("@name=", StringComparison.OrdinalIgnoreCase);
             (FieldInfo Field, FormFieldData FfData) target;
-            if (int.TryParse(indexOrName, out var ffIdx))
+            if (!nameForm && int.TryParse(indexOrName, out var ffIdx))
             {
                 if (ffIdx < 1 || ffIdx > allFormFields.Count)
                     throw new ArgumentException($"FormField {ffIdx} not found (total: {allFormFields.Count})");

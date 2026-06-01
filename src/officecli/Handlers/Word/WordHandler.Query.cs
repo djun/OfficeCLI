@@ -213,17 +213,21 @@ public partial class WordHandler
             return node;
         }
 
-        // FormField paths: /formfield[N] or /formfield[name]
+        // FormField paths: /formfield[N], /formfield[name], or /formfield[@name=NAME]
         // Routed BEFORE ParsePath because the generic predicate validator
         // only accepts positive-integer / last() / [@attr=v] predicates and
         // would reject the documented /formfield[name] form.
-        var ffMatchEarly = System.Text.RegularExpressions.Regex.Match(path, @"^/formfield\[(\w+)\]$",
+        // R14-bug4: schema declared /formfield[@name=NAME] as the stable
+        // selector; mirror the [@name=…] arm so callers (and dump round-trips)
+        // can use the documented form.
+        var ffMatchEarly = System.Text.RegularExpressions.Regex.Match(path, @"^/formfield\[(?:@name=)?([^\]]+)\]$",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (ffMatchEarly.Success)
         {
             var allFormFields = FindFormFields();
             var indexOrName = ffMatchEarly.Groups[1].Value;
-            if (int.TryParse(indexOrName, out var ffIdx))
+            bool nameForm = path.Contains("@name=", StringComparison.OrdinalIgnoreCase);
+            if (!nameForm && int.TryParse(indexOrName, out var ffIdx))
             {
                 if (ffIdx < 1 || ffIdx > allFormFields.Count)
                     return new DocumentNode { Path = path, Type = "error", Text = $"FormField {ffIdx} not found (total: {allFormFields.Count})" };
