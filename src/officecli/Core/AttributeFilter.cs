@@ -352,19 +352,19 @@ internal static class AttributeFilter
 
             case FilterOp.GreaterOrEqual:
                 if (!hasKey) return false;
-                return CompareNumeric(actualStr, cond.Value) >= 0;
+                return CompareNumeric(actualStr, cond.Value) is int ge && ge >= 0;
 
             case FilterOp.LessOrEqual:
                 if (!hasKey) return false;
-                return CompareNumeric(actualStr, cond.Value) <= 0;
+                return CompareNumeric(actualStr, cond.Value) is int le && le <= 0;
 
             case FilterOp.GreaterThan:
                 if (!hasKey) return false;
-                return CompareNumeric(actualStr, cond.Value) > 0;
+                return CompareNumeric(actualStr, cond.Value) is int gt && gt > 0;
 
             case FilterOp.LessThan:
                 if (!hasKey) return false;
-                return CompareNumeric(actualStr, cond.Value) < 0;
+                return CompareNumeric(actualStr, cond.Value) is int lt && lt < 0;
 
             default:
                 return true;
@@ -454,9 +454,13 @@ internal static class AttributeFilter
     /// - pt-suffixed: "24pt", "10.5pt"
     /// - EMU/dimension values: "2cm", "1in"
     /// Returns negative if actual &lt; expected, 0 if equal, positive if actual &gt; expected.
-    /// Falls back to string comparison if neither numeric nor dimension.
+    /// Returns <c>null</c> when the values are not both numerically/dimensionally
+    /// comparable. The &gt;/&lt;/&gt;=/&lt;= operators treat null as "no match" so a
+    /// numeric filter never matches non-numeric text via a string comparison —
+    /// e.g. cell[value&gt;5000] must NOT match the text cell "张三" (whose code
+    /// points would otherwise sort above "5000").
     /// </summary>
-    private static int CompareNumeric(string actual, string expected)
+    private static int? CompareNumeric(string actual, string expected)
     {
         // Try plain decimal comparison (handles "24", "1.5", "24pt" vs "20pt", etc.)
         var actualNum = ExtractNumber(actual);
@@ -480,12 +484,13 @@ internal static class AttributeFilter
             return actualEmu.CompareTo(expectedEmu);
         }
 
-        // Fallback: plain number comparison
+        // Fallback: plain number comparison (mixed units, both unitless numbers)
         if (actualNum.HasValue && expectedNum.HasValue)
             return actualNum.Value.CompareTo(expectedNum.Value);
 
-        // Last resort: string comparison
-        return string.Compare(actual, expected, StringComparison.OrdinalIgnoreCase);
+        // Not numerically comparable — no string fallback. A numeric operator on
+        // a non-numeric value is "no match", not a lexical comparison.
+        return null;
     }
 
     private static decimal? ExtractNumber(string value)
