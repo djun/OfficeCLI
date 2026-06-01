@@ -285,6 +285,26 @@ public static partial class PptxBatchEmitter
         TranslateConnectorEndpoint(ppt, cxnNode, props, "startShape", "from");
         TranslateConnectorEndpoint(ppt, cxnNode, props, "endShape", "to");
 
+        // CONSISTENCY(connector-arrow-recurse): NodeBuilder.ConnectorToNode
+        // reads BOTH a:headEnd and a:tailEnd off the outline, but a fuzzer
+        // round-trip found cases where the source's <a:headEnd type="..."/>
+        // dropped on replay — only the tail-end survived. Defensive: lift
+        // headEnd and tailEnd out of the inline `add connector` bag and
+        // re-emit them via a deferred `set` once the connector exists. The
+        // dedicated Set cases (`case "headend"`, `case "tailend"`) reapply
+        // them after the outline's other children settle, so the schema
+        // order (fill → prstDash → headEnd → tailEnd) is always respected
+        // independent of any Add-side append-order edge case.
+        var deferredArrows = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in new[] { "headEnd", "tailEnd" })
+        {
+            if (props.TryGetValue(key, out var v) && !string.IsNullOrEmpty(v))
+            {
+                deferredArrows[key] = v;
+                props.Remove(key);
+            }
+        }
+
         items.Add(new BatchItem
         {
             Command = "add",
@@ -292,6 +312,42 @@ public static partial class PptxBatchEmitter
             Type = "connector",
             Props = props.Count > 0 ? props : null,
         });
+
+        if (deferredArrows.Count > 0)
+        {
+            // Connector's replay path: parentSlidePath + /connector[K] where
+            // K is the source connector's positional index within
+            // shapeTree.Elements<ConnectionShape>(). Reuse the source path's
+            // tail segment — it already encodes that positional index in
+            // BuildElementPathSegment-emitted form (`connector[K]` or
+            // `connector[@id=N]`). Both forms route through SetConnector.
+            var replayPath = ReplayPathForCxn(cxnNode.Path ?? "", parentSlidePath);
+            ctx.DeferredLinks.Add(new BatchItem
+            {
+                Command = "set",
+                Path = replayPath,
+                Props = deferredArrows,
+            });
+        }
+    }
+
+    // Translate a NodeBuilder-emitted cxnNode.Path (which may use the
+    // @id= form via BuildElementPathSegment) into a positional replay
+    // path under <paramref name="parentSlidePath"/>. The source's cNvPr id
+    // is preserved through AcquireShapeId's high-range floor, so the
+    // @id= form still resolves at replay; falling back to a positional
+    // form keeps parity with TranslateConnectorEndpoint.
+    private static string ReplayPathForCxn(string sourcePath, string parentSlidePath)
+    {
+        // Strip the source's /slide[N] prefix, replace with the replay's
+        // parentSlidePath. Group-nested cxn paths (containing /group[K]/)
+        // are passed through verbatim — TranslateConnectorEndpoint's
+        // CONSISTENCY(group-id-autoassign) note explains that group
+        // children resolve positionally on Set.
+        var m = System.Text.RegularExpressions.Regex.Match(sourcePath,
+            @"^/slide\[\d+\](?<tail>(?:/group\[\d+\])*/connector\[[^\]]+\])$");
+        if (!m.Success) return sourcePath;
+        return parentSlidePath + m.Groups["tail"].Value;
     }
 
     private static void TranslateConnectorEndpoint(PowerPointHandler ppt,
