@@ -1553,6 +1553,18 @@ public partial class ExcelHandler
             if (rowColPreds.Count > 0)
                 return QueryRowsByColumnPredicate(parsed.Sheet, rowColPreds);
 
+            // row[N] — a pure-numeric bracket is a positional index (1-based
+            // RowIndex), not a filter. Resolve it to that single row so the
+            // selector form `Sheet1!row[2]` means the same as the Get path
+            // `/Sheet1/row[2]`. Without this the numeric bracket was silently
+            // ignored and every row matched — harmless for read-only query but a
+            // footgun once Set/Remove began accepting selectors (`set
+            // "Sheet1!row[2]"` then mutated all rows while reporting success).
+            uint? rowIndexFilter = null;
+            var rowIdxMatch = Regex.Match(selectorForType, @"^row\[\s*(\d+)\s*\]$", RegexOptions.IgnoreCase);
+            if (rowIdxMatch.Success)
+                rowIndexFilter = uint.Parse(rowIdxMatch.Groups[1].Value);
+
             foreach (var (sheetName, worksheetPart) in GetWorksheets())
             {
                 if (parsed.Sheet != null && !sheetName.Equals(parsed.Sheet, StringComparison.OrdinalIgnoreCase))
@@ -1565,6 +1577,7 @@ public partial class ExcelHandler
                 {
                     var rowIdx = row.RowIndex?.Value ?? 0u;
                     if (rowIdx == 0) continue;
+                    if (rowIndexFilter.HasValue && rowIdx != rowIndexFilter.Value) continue;
                     var node = new DocumentNode
                     {
                         Path = $"/{sheetName}/row[{rowIdx}]",
@@ -1592,6 +1605,22 @@ public partial class ExcelHandler
         // with the Get path format.
         if (elementName is "col" or "column")
         {
+            // col[A] / col[2] — a single bracket token (column letter or 1-based
+            // numeric index) is a positional index, not a filter. Resolve it to
+            // that one column so the selector form mirrors the Get path
+            // `/Sheet1/col[A]`. CONSISTENCY(selector-positional-index): same
+            // footgun fix as the row[N] branch — without it the bracket was
+            // silently ignored and every column matched.
+            string? colIndexFilter = null;
+            var colIdxMatch = Regex.Match(selectorForType, @"^col(?:umn)?\[\s*([A-Za-z]+|\d+)\s*\]$", RegexOptions.IgnoreCase);
+            if (colIdxMatch.Success)
+            {
+                var tok = colIdxMatch.Groups[1].Value;
+                colIndexFilter = int.TryParse(tok, out var ci0)
+                    ? IndexToColumnName(ci0)
+                    : tok.ToUpperInvariant();
+            }
+
             foreach (var (sheetName, worksheetPart) in GetWorksheets())
             {
                 if (parsed.Sheet != null && !sheetName.Equals(parsed.Sheet, StringComparison.OrdinalIgnoreCase))
@@ -1608,6 +1637,8 @@ public partial class ExcelHandler
                     for (uint ci = min; ci <= max; ci++)
                     {
                         var colName = IndexToColumnName((int)ci);
+                        if (colIndexFilter != null && !colName.Equals(colIndexFilter, StringComparison.OrdinalIgnoreCase))
+                            continue;
                         var node = new DocumentNode
                         {
                             Path = $"/{sheetName}/col[{colName}]",
