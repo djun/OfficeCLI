@@ -83,8 +83,8 @@
     },
     "hidden": {
       "type": "bool",
-      "description": "true when the slide is hidden from slideshow (Slide/@show=false). Surfaces only on Get/Query.",
-      "add": false, "set": false, "get": true,
+      "description": "true when the slide is hidden from slideshow (Slide/@show=false).",
+      "add": true, "set": true, "get": true,
       "readback": "true if slide is hidden in slideshow",
       "enforcement": "report"
     },
