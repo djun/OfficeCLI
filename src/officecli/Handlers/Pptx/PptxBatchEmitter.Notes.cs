@@ -7,13 +7,21 @@ namespace OfficeCli.Handlers;
 
 public static partial class PptxBatchEmitter
 {
-    // PR2: emit speaker notes as a single `add notes parent=/slide[N]` row
-    // carrying the concatenated body text. AddNotes accepts only `text=` /
-    // `direction=` / `lang=` for the notes body — there is no typed Add
-    // path for arbitrary shapes on a notesSlide, so the docx-mirror
-    // "walk spTree as shape tree" approach has no replay surface to land
-    // on. Emit only the body-placeholder text + direction/lang carried by
-    // the `/slide[N]/notes` Get node. Mirrors AddNotes's input vocabulary.
+    // Emit speaker notes. The typed `add notes` row only seeds the body
+    // placeholder text (AddNotes's input vocabulary is text/direction/lang
+    // — no surface for additional shapes, rich rPr, or layout customs in
+    // the notesSlide spTree). Without a raw-set passthrough the rest of
+    // the notesSlide content silently dropped on round-trip — notes with
+    // multiple paragraphs, embedded run formatting, or extra placeholders
+    // all degraded to a single plain-text body line.
+    //
+    // Fix: emit the typed add (creates / instantiates the NotesSlidePart
+    // on the blank target, since AddNotes wires up the master/layout
+    // links blank decks lack), then immediately overwrite the whole
+    // /p:notes root via raw-set replace using the source's verbatim XML.
+    // raw-set runs after every shape/animation row, so the notes
+    // placeholder created by the typed add is overwritten with the
+    // original byte form on replay.
     private static void EmitNotes(PowerPointHandler ppt, string slidePath,
                                   List<BatchItem> items, SlideEmitContext ctx)
     {
@@ -22,33 +30,56 @@ public static partial class PptxBatchEmitter
         var slideIdx = int.Parse(slideMatch.Groups[1].Value);
         if (!ppt.SlideHasNotes(slideIdx)) return;
 
+        // Phase 1 — typed add so the NotesSlidePart + slide-rel exist on
+        // the replay target. Without this the subsequent raw-set
+        // /noteSlide[N] throws because the part hasn't been wired up
+        // (blank decks ship with no NotesSlidePart per slide).
         DocumentNode notes;
         try { notes = ppt.Get($"{slidePath}/notes"); }
-        catch { return; }
-        if (notes.Type == "error") return;
-
-        var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrEmpty(notes.Text))
-            props["text"] = notes.Text!;
-        // Direction/lang are surfaced on the notes node Format bag by
-        // AddNotes round-trip; forward them through the same canonical
-        // keys AddNotes accepts.
-        foreach (var key in new[] { "direction", "lang" })
+        catch { notes = new DocumentNode { Type = "notes" }; }
+        if (notes.Type != "error")
         {
-            if (notes.Format.TryGetValue(key, out var v) && v != null)
+            var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrEmpty(notes.Text))
+                props["text"] = notes.Text!;
+            foreach (var key in new[] { "direction", "lang" })
             {
-                var s = v.ToString() ?? "";
-                if (s.Length > 0) props[key] = s;
+                if (notes.Format.TryGetValue(key, out var v) && v != null)
+                {
+                    var s = v.ToString() ?? "";
+                    if (s.Length > 0) props[key] = s;
+                }
             }
+            // Always emit the add — even when props are empty, AddNotes
+            // still creates the part with an empty body which raw-set
+            // then overwrites with the source XML. text="" is the empty-
+            // body marker; AddNotes accepts it.
+            if (props.Count == 0) props["text"] = "";
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = slidePath,
+                Type = "notes",
+                Props = props,
+            });
         }
-        if (props.Count == 0) return;
 
+        // Phase 2 — raw-set replace with the verbatim source /p:notes XML.
+        // Mirrors EmitNoteSlideRawOne in PptxBatchEmitter.Resources.cs but
+        // is called per-slide here so it lands AFTER the typed add has
+        // created the underlying NotesSlidePart.
+        string notesXml;
+        try { notesXml = ppt.Raw($"/noteSlide[{slideIdx}]"); }
+        catch { return; }
+        if (string.IsNullOrEmpty(notesXml) || !notesXml.StartsWith("<")) return;
+        notesXml = CanonicalizeRawXml(notesXml);
         items.Add(new BatchItem
         {
-            Command = "add",
-            Parent = slidePath,
-            Type = "notes",
-            Props = props,
+            Command = "raw-set",
+            Part = $"/noteSlide[{slideIdx}]",
+            Xpath = "/p:notes",
+            Action = "replace",
+            Xml = notesXml,
         });
     }
 
