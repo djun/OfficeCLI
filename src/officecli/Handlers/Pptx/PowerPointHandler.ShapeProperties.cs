@@ -483,9 +483,11 @@ public partial class PowerPointHandler
                 case "baseline" or "superscript" or "subscript":
                 {
                     // Baseline offset: positive = superscript, negative = subscript
-                    // Value in percent (e.g. "30" = 30% superscript, "-25" = 25% subscript)
-                    // OOXML stores as 1/1000ths of percent (30000 = 30%)
-                    // Shortcuts: "super"/"true" = 30%, "sub" = -25%, "none"/"false" = 0
+                    // Value in percent (e.g. "30" or "30%" = 30% superscript, "-25"
+                    // or "-25%" = 25% subscript). OOXML stores as 1/1000ths of
+                    // percent (30000 = 30%). Shortcuts: "super"/"true" = 30%,
+                    // "sub" = -25%, "none"/"false" = 0. R56 bt-3: accept the
+                    // canonical `%` suffix the Get reader now emits.
                     int baselineVal;
                     if (key.ToLowerInvariant() == "superscript")
                         baselineVal = IsTruthy(value) ? 30000 : 0;
@@ -493,14 +495,15 @@ public partial class PowerPointHandler
                         baselineVal = IsTruthy(value) ? -25000 : 0;
                     else
                     {
-                        baselineVal = value.ToLowerInvariant() switch
+                        var blNorm = value.Trim().TrimEnd('%').Trim();
+                        baselineVal = blNorm.ToLowerInvariant() switch
                         {
                             "super" or "true" => 30000,
                             "sub" => -25000,
                             "none" or "false" or "0" => 0,
-                            _ => double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var blVal) && !double.IsNaN(blVal) && !double.IsInfinity(blVal)
+                            _ => double.TryParse(blNorm, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var blVal) && !double.IsNaN(blVal) && !double.IsInfinity(blVal)
                                 ? (int)(blVal * 1000)
-                                : throw new ArgumentException($"Invalid 'baseline' value: '{value}'. Expected 'super', 'sub', 'none', or a percentage (e.g. 30 for superscript 30%).")
+                                : throw new ArgumentException($"Invalid 'baseline' value: '{value}'. Expected 'super', 'sub', 'none', or a percentage (e.g. 30 or 30% for superscript 30%).")
                         };
                     }
                     foreach (var run in runs)

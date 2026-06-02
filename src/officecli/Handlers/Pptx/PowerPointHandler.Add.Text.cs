@@ -330,13 +330,16 @@ public partial class PowerPointHandler
                 }
                 if (properties.TryGetValue("baseline", out var pBaseline))
                 {
-                    rProps.Baseline = pBaseline.ToLowerInvariant() switch
+                    // R56 bt-3: accept the canonical `33%` form emitted by Get
+                    // alongside the legacy bare `33` (both = 33% superscript).
+                    var pBlNorm = pBaseline.Trim().TrimEnd('%').Trim();
+                    rProps.Baseline = pBlNorm.ToLowerInvariant() switch
                     {
                         "super" or "true" => 30000,
                         "sub" => -25000,
-                        _ => double.TryParse(pBaseline, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pBlVal) && !double.IsNaN(pBlVal) && !double.IsInfinity(pBlVal)
+                        _ => double.TryParse(pBlNorm, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pBlVal) && !double.IsNaN(pBlVal) && !double.IsInfinity(pBlVal)
                             ? (int)(pBlVal * 1000)
-                            : throw new ArgumentException($"Invalid 'baseline' value: '{pBaseline}'. Expected 'super', 'sub', or a percentage.")
+                            : throw new ArgumentException($"Invalid 'baseline' value: '{pBaseline}'. Expected 'super', 'sub', or a percentage (e.g. 30 or 30%).")
                     };
                 }
 
@@ -683,12 +686,14 @@ public partial class PowerPointHandler
                 }
                 if (properties.TryGetValue("baseline", out var rBaseline))
                 {
-                    rProps.Baseline = rBaseline.ToLowerInvariant() switch
+                    // R56 bt-3: accept canonical `33%` (Get emit form) and bare `33`.
+                    var rBlNorm = rBaseline.Trim().TrimEnd('%').Trim();
+                    rProps.Baseline = rBlNorm.ToLowerInvariant() switch
                     {
                         "super" or "true" => 30000,
                         "sub" => -25000,
                         "none" or "false" or "0" => 0,
-                        _ => (int)(ParseHelpers.SafeParseDouble(rBaseline, "baseline") * 1000)
+                        _ => (int)(ParseHelpers.SafeParseDouble(rBlNorm, "baseline") * 1000)
                     };
                 }
                 else if (properties.TryGetValue("superscript", out var rSuper))
