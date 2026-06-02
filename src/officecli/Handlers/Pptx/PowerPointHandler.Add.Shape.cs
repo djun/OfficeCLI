@@ -620,6 +620,19 @@ public partial class PowerPointHandler
                     ApplyGradientFill(newShape.ShapeProperties!, gradVal);
                 }
 
+                // bt-7: AddShape consumes gradientRaw inline so the verbatim
+                // <a:gradFill flip=…><a:tileRect/></a:gradFill> emitted by
+                // NodeBuilder (when HasGradientNonSemanticTuning returns true)
+                // re-installs at create time. Without this branch the key
+                // round-tripped through the prop bag, AddShape silently
+                // ignored it, and replay decks lost flip / tileRect attrs the
+                // semantic gradient= form can't carry.
+                if (properties.TryGetValue("gradientRaw", out var gradRawVal)
+                    || properties.TryGetValue("gradientraw", out gradRawVal))
+                {
+                    ApplyGradientRaw(newShape.ShapeProperties!, gradRawVal);
+                }
+
                 // Pattern fill (mutually exclusive with fill/gradient — last one wins, following fill/gradient convention)
                 if (properties.TryGetValue("pattern", out var patternVal))
                 {

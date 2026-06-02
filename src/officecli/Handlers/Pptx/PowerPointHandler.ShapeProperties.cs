@@ -529,56 +529,17 @@ public partial class PowerPointHandler
 
                 case "gradientraw":
                 {
-                    // bt-B2 dump→replay passthrough. Value is the captured
-                    // <a:gradFill ...> verbatim including flip= and any
-                    // <a:tileRect/> child — attributes BuildGradientFill
-                    // never re-emits. Strip any existing GradientFill and
-                    // install the raw element so the source's fine-tuning
-                    // round-trips intact.
+                    // bt-B2 / bt-7 dump→replay passthrough. Value is the
+                    // captured <a:gradFill ...> verbatim including flip= and
+                    // any <a:tileRect/> child — attributes BuildGradientFill
+                    // never re-emits. Delegates to ApplyGradientRaw so AddShape
+                    // and SetShape share one parser; previously the Set side
+                    // inlined the XmlReader walk while AddShape silently
+                    // dropped the key — the helper closed that gap.
                     var spPr = shape.ShapeProperties;
                     if (spPr == null) { unsupported.Add(key); break; }
-                    spPr.RemoveAllChildren<Drawing.GradientFill>();
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        try
-                        {
-                            var raw = value.Contains("xmlns:a=")
-                                ? value
-                                : value.Replace("<a:gradFill",
-                                    "<a:gradFill xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"");
-                            var unk = new OpenXmlUnknownElement(raw);
-                            // Coerce the unknown element back into a typed
-                            // GradientFill so InsertFillInOrder finds it via
-                            // typed lookups; round-trip via XmlReader on the
-                            // captured string is the SDK-blessed path.
-                            using var sr = new System.IO.StringReader(raw);
-                            using var xr = System.Xml.XmlReader.Create(sr);
-                            xr.MoveToContent();
-                            // Build a fresh GradientFill, copy attributes,
-                            // then load children from the raw inner xml.
-                            var grad = new Drawing.GradientFill();
-                            if (xr.HasAttributes)
-                            {
-                                while (xr.MoveToNextAttribute())
-                                {
-                                    if (xr.Prefix == "xmlns" || xr.Name == "xmlns") continue;
-                                    grad.SetAttribute(new OpenXmlAttribute(
-                                        xr.Prefix, xr.LocalName, xr.NamespaceURI, xr.Value));
-                                }
-                                xr.MoveToElement();
-                            }
-                            // Inner XML: extract substring between first '>' and last '<'.
-                            var gt = raw.IndexOf('>');
-                            var lt = raw.LastIndexOf('<');
-                            if (gt > 0 && lt > gt)
-                                grad.InnerXml = raw[(gt + 1)..lt];
-                            spPr.AppendChild(grad);
-                        }
-                        catch
-                        {
-                            unsupported.Add(key);
-                        }
-                    }
+                    if (!ApplyGradientRaw(spPr, value))
+                        unsupported.Add(key);
                     break;
                 }
 

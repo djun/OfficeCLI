@@ -246,6 +246,56 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// bt-7 dump→replay raw passthrough for gradient. Value is the captured
+    /// <a:gradFill ...> verbatim including flip= / rotWithShape= attrs and
+    /// any <a:tileRect/> child — attributes BuildGradientFill never re-emits.
+    /// Mirrors the Set.gradientRaw branch so AddShape can consume the same
+    /// key inline at create time rather than relying on a follow-up Set.
+    /// Returns true on success, false on parse failure (caller surfaces as
+    /// unsupported).
+    /// </summary>
+    internal static bool ApplyGradientRaw(ShapeProperties spPr, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        try
+        {
+            var raw = value.Contains("xmlns:a=")
+                ? value
+                : value.Replace("<a:gradFill",
+                    "<a:gradFill xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"");
+            using var sr = new System.IO.StringReader(raw);
+            using var xr = System.Xml.XmlReader.Create(sr);
+            xr.MoveToContent();
+            var grad = new Drawing.GradientFill();
+            if (xr.HasAttributes)
+            {
+                while (xr.MoveToNextAttribute())
+                {
+                    if (xr.Prefix == "xmlns" || xr.Name == "xmlns") continue;
+                    grad.SetAttribute(new OpenXmlAttribute(
+                        xr.Prefix, xr.LocalName, xr.NamespaceURI, xr.Value));
+                }
+                xr.MoveToElement();
+            }
+            var gt = raw.IndexOf('>');
+            var lt = raw.LastIndexOf('<');
+            if (gt > 0 && lt > gt)
+                grad.InnerXml = raw[(gt + 1)..lt];
+            spPr.RemoveAllChildren<Drawing.SolidFill>();
+            spPr.RemoveAllChildren<Drawing.NoFill>();
+            spPr.RemoveAllChildren<Drawing.GradientFill>();
+            spPr.RemoveAllChildren<Drawing.PatternFill>();
+            spPr.RemoveAllChildren<Drawing.BlipFill>();
+            InsertFillElement(spPr, grad);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Apply pattern fill to ShapeProperties.
     /// Format: "<preset>" or "<preset>:<fgColor>" or "<preset>:<fgColor>:<bgColor>"
     ///   preset: e.g. pct25, ltHorz, cross, weave, zigZag (Drawing.PresetPatternValues)
