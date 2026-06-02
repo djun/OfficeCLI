@@ -2481,6 +2481,14 @@ public partial class PowerPointHandler
                 node.Format["endIdx"] = endCxn.Index.Value;
         }
 
+        // R53 bt-2: surface <a:cxnSpLocks noChangeShapeType="1"> — the
+        // shape-type lock PowerPoint emits to pin a connector primitive in
+        // place. Reader-only support of the most common bit; AddConnector
+        // honors `lockShapeType=true` to re-emit on dump→replay.
+        var cxnLocks = cxnDrawProps?.GetFirstChild<Drawing.ConnectionShapeLocks>();
+        if (cxnLocks?.NoChangeShapeType?.Value == true)
+            node.Format["lockShapeType"] = "true";
+
         return node;
     }
 

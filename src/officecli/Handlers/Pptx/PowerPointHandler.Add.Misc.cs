@@ -154,6 +154,19 @@ public partial class PowerPointHandler
                     cxnDrawProps.EndConnection = new Drawing.EndConnection { Id = endIdVal, Index = 0 };
                 }
 
+                // R53 bt-2: <a:cxnSpLocks noChangeShapeType="1"> — pinned
+                // connector primitive (PowerPoint stamps it on inserted
+                // connectors). Honor the `lockShapeType` input so dump→replay
+                // round-trips the lock instead of silently dropping it.
+                if (properties.TryGetValue("lockShapeType", out var cxnLockSt)
+                    && IsTruthy(cxnLockSt))
+                {
+                    cxnDrawProps.AppendChild(new Drawing.ConnectionShapeLocks
+                    {
+                        NoChangeShapeType = true
+                    });
+                }
+
                 connector.NonVisualConnectionShapeProperties = cxnNvProps;
                 var cxnTransform = new Drawing.Transform2D(
                     new Drawing.Offset { X = cxnX, Y = cxnY },
