@@ -901,6 +901,26 @@ public partial class PowerPointHandler
                     ReorderDrawingRunProperties(rProps);
                 }
 
+                // R62 bt-5: fillOverlayRaw — verbatim <a:fillOverlay…/> install
+                // on the new run's <a:rPr><a:effectLst>. AddShape funnels this
+                // through SetRunOrShapeProperties.effectKeys (so the shape-spPr
+                // and run-rPr branches both fire); AddRun has its own narrower
+                // prop loop and would otherwise drop the key as UNSUPPORTED on
+                // dump→replay of a run carrying a fillOverlay. Mirror the
+                // shape-Add routing here so `add run fillOverlayRaw=…` lands
+                // on the new run instead of the silent-drop path.
+                if (properties.TryGetValue("fillOverlayRaw", out var rFillOv)
+                    || properties.TryGetValue("filloverlayraw", out rFillOv))
+                {
+                    // Run is not yet attached; bind rProps first so ApplyRunFillOverlayRaw
+                    // can call run.RunProperties ?? new RunProperties() safely.
+                    newRun.RunProperties = rProps;
+                    ApplyRunFillOverlayRaw(newRun, rFillOv);
+                    // RunProperties may have been mutated; reassign for the
+                    // subsequent newRun.RunProperties = rProps no-op below.
+                    rProps = newRun.RunProperties!;
+                }
+
                 newRun.RunProperties = rProps;
                 // Hyperlink on the new run. Schema declares link.add=true with
                 // parent "shape|run" — without this branch the shape-level Add

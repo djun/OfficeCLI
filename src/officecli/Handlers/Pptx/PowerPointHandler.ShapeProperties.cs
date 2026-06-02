@@ -1615,6 +1615,20 @@ public partial class PowerPointHandler
                     // BuildGlow have no equivalent for fillOverlay; without
                     // raw passthrough the composited tint is dropped from
                     // the shape's effectLst on every round-trip.
+                    //
+                    // R62 bt-5: run-level <a:rPr><a:fillOverlay> needs the same
+                    // passthrough — NodeBuilder now emits fillOverlayRaw on run
+                    // nodes too. Honor runContext so a /paragraph[N]/run[K]
+                    // path writes to the run's own rPr/effectLst instead of
+                    // the shape's spPr/effectLst (which would over-broad apply
+                    // the overlay to the shape body). Mirror the shadow/glow/
+                    // reflection routing at lines 1410, 1667, 1747.
+                    if (runContext && runs.Count > 0)
+                    {
+                        foreach (var run in runs)
+                            ApplyRunFillOverlayRaw(run, value);
+                        break;
+                    }
                     var spPr = shape.ShapeProperties;
                     if (spPr == null) { unsupported.Add(key); break; }
                     var effectList = EnsureEffectList(spPr);
@@ -1623,30 +1637,7 @@ public partial class PowerPointHandler
                     {
                         try
                         {
-                            var raw = value.Contains("xmlns:a=")
-                                ? value
-                                : value.Replace("<a:fillOverlay",
-                                    "<a:fillOverlay xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"");
-                            var overlay = new Drawing.FillOverlay();
-                            using var sr = new System.IO.StringReader(raw);
-                            using var xr = System.Xml.XmlReader.Create(sr);
-                            xr.MoveToContent();
-                            if (xr.HasAttributes)
-                            {
-                                while (xr.MoveToNextAttribute())
-                                {
-                                    if (xr.Prefix == "xmlns" || xr.Name == "xmlns") continue;
-                                    overlay.SetAttribute(new OpenXmlAttribute(
-                                        xr.Prefix, xr.LocalName, xr.NamespaceURI, xr.Value));
-                                }
-                                xr.MoveToElement();
-                            }
-                            if (!xr.IsEmptyElement)
-                            {
-                                var inner = xr.ReadInnerXml();
-                                if (!string.IsNullOrWhiteSpace(inner))
-                                    overlay.InnerXml = inner;
-                            }
+                            var overlay = BuildFillOverlayFromRaw(value);
                             InsertEffectInOrder(effectList, overlay);
                         }
                         catch

@@ -254,6 +254,67 @@ public partial class PowerPointHandler
         return true;
     }
 
+    /// <summary>
+    /// R62 bt-5: lift the verbatim <a:fillOverlay blend=…>…</a:fillOverlay>
+    /// passed as the fillOverlayRaw= value into a fresh Drawing.FillOverlay
+    /// element. Extracted from the shape-level Set branch so the run-level
+    /// branch (ApplyRunFillOverlayRaw) can share the parser — both paths must
+    /// build the same OOXML element for the dump→replay round-trip to be
+    /// byte-stable.
+    /// </summary>
+    internal static Drawing.FillOverlay BuildFillOverlayFromRaw(string value)
+    {
+        var raw = value.Contains("xmlns:a=")
+            ? value
+            : value.Replace("<a:fillOverlay",
+                "<a:fillOverlay xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"");
+        var overlay = new Drawing.FillOverlay();
+        using var sr = new System.IO.StringReader(raw);
+        using var xr = System.Xml.XmlReader.Create(sr);
+        xr.MoveToContent();
+        if (xr.HasAttributes)
+        {
+            while (xr.MoveToNextAttribute())
+            {
+                if (xr.Prefix == "xmlns" || xr.Name == "xmlns") continue;
+                overlay.SetAttribute(new OpenXmlAttribute(
+                    xr.Prefix, xr.LocalName, xr.NamespaceURI, xr.Value));
+            }
+            xr.MoveToElement();
+        }
+        if (!xr.IsEmptyElement)
+        {
+            var inner = xr.ReadInnerXml();
+            if (!string.IsNullOrWhiteSpace(inner))
+                overlay.InnerXml = inner;
+        }
+        return overlay;
+    }
+
+    /// <summary>
+    /// R62 bt-5: run-level analogue of the shape-spPr fillOverlayRaw apply.
+    /// Mirrors ApplyTextShadow / ApplyTextGlow shape — get-or-create the run's
+    /// <a:rPr><a:effectLst>, drop any existing fillOverlay child, install the
+    /// fresh one at schema-correct position. Empty / whitespace value removes
+    /// the overlay (and the effectLst if it becomes empty), matching the
+    /// shape-level "value cleared → strip element" contract.
+    /// </summary>
+    internal static void ApplyRunFillOverlayRaw(Drawing.Run run, string value)
+    {
+        var rPr = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
+        var effectList = OfficeCli.Core.DrawingEffectsHelper.EnsureRunEffectList(rPr);
+        effectList.RemoveAllChildren<Drawing.FillOverlay>();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            var overlay = BuildFillOverlayFromRaw(value);
+            InsertEffectInOrder(effectList, overlay);
+        }
+        else if (!effectList.HasChildren)
+        {
+            rPr.RemoveChild(effectList);
+        }
+    }
+
     private static void ApplyReflection(ShapeProperties spPr, string value)
     {
         var effectList = EnsureEffectList(spPr);
@@ -312,8 +373,9 @@ public partial class PowerPointHandler
 
     /// <summary>
     /// Apply blur effect to ShapeProperties.
-    /// Value: radius in points (e.g. "4" or "4pt") or "none" to remove.
-    /// Converts pt → EMU (1pt = 12700 EMU). Sets GrowBounds = true.
+    /// Value: radius in points (e.g. "4" or "4pt") with optional grow
+    /// boolean (`4pt:true` / `4pt:false`), or "none" to remove. Converts
+    /// pt → EMU (1pt = 12700 EMU). Grow defaults to true (OOXML default).
     /// </summary>
     private static void ApplyBlur(ShapeProperties spPr, string value)
     {
@@ -326,12 +388,26 @@ public partial class PowerPointHandler
             return;
         }
 
-        var numStr = value.EndsWith("pt", StringComparison.OrdinalIgnoreCase) ? value[..^2].Trim() : value;
+        // R58 bt-1: NodeBuilder emits `blur=<rad>pt:<grow>` so a source-
+        // authored `grow="0"` survives the round-trip. Parse the optional
+        // `:bool` tail; legacy bare-radius form (`4pt`) still works with
+        // grow defaulting to true per the OOXML schema.
+        var radPart = value;
+        var grow = true;
+        var colonIdx = value.IndexOf(':');
+        if (colonIdx >= 0)
+        {
+            radPart = value[..colonIdx].Trim();
+            var growPart = value[(colonIdx + 1)..].Trim();
+            grow = IsTruthy(growPart);
+        }
+
+        var numStr = radPart.EndsWith("pt", StringComparison.OrdinalIgnoreCase) ? radPart[..^2].Trim() : radPart;
         if (!double.TryParse(numStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var radiusPt)
             || double.IsNaN(radiusPt) || double.IsInfinity(radiusPt) || radiusPt < 0)
-            throw new ArgumentException($"Invalid 'blur' value '{value}'. Expected a finite non-negative numeric radius in points.");
+            throw new ArgumentException($"Invalid 'blur' value '{value}'. Expected a finite non-negative numeric radius in points (optionally `<rad>pt:<grow>`).");
 
-        InsertEffectInOrder(effectList, new Drawing.Blur { Radius = (long)(radiusPt * EmuConverter.EmuPerPoint), Grow = true });
+        InsertEffectInOrder(effectList, new Drawing.Blur { Radius = (long)(radiusPt * EmuConverter.EmuPerPoint), Grow = grow });
     }
 
     private static void ApplyTextReflection(Drawing.Run run, string value)

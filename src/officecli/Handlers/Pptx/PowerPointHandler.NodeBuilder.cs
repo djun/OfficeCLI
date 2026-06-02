@@ -2076,6 +2076,20 @@ public partial class PowerPointHandler
                 var rSoftEdge = runEffectList.GetFirstChild<Drawing.SoftEdge>();
                 if (rSoftEdge?.Radius?.HasValue == true)
                     node.Format["softEdge"] = $"{rSoftEdge.Radius.Value / EmuConverter.EmuPerPointF:0.##}pt";
+                // R62 bt-5: <a:fillOverlay blend=…><a:srgbClr/></a:fillOverlay>
+                // can sit on a run's <a:rPr><a:effectLst> too (per-character
+                // tinted overlay), parallel to the shape-spPr emit above. The
+                // run reader walked outerShdw/glow/reflection/softEdge but
+                // skipped fillOverlay, so source-authored run-level overlays
+                // round-tripped to nothing — Get returned `size`+`lang` only.
+                // Mirror the shape-level passthrough: surface the verbatim
+                // <a:fillOverlay…/> as `fillOverlayRaw` so Set can re-install
+                // it on the same run's rPr without inventing a compressed
+                // `blend:color` form that would lose alpha / gradient overlay
+                // variants. CONSISTENCY(effects-raw-passthrough).
+                var rFillOverlay = runEffectList.GetFirstChild<Drawing.FillOverlay>();
+                if (rFillOverlay != null)
+                    node.Format["fillOverlayRaw"] = rFillOverlay.OuterXml;
             }
 
             // R61 bt-1: <a:ln> (text outline / stroke) on rPr. Distinct from

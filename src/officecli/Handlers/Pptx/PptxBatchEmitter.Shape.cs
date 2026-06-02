@@ -78,6 +78,13 @@ public static partial class PptxBatchEmitter
         // single-run paragraphs and over-broad emit for multi-run ones.
         "shadow", "shadowRaw", "innerShadow", "innerShadowRaw", "glow",
         "reflection", "reflectionRaw", "softEdge", "blur",
+        // R62 bt-5: run-level <a:rPr><a:effectLst><a:fillOverlay> belongs to
+        // the run (per-character tinted overlay). NodeBuilder now emits
+        // `fillOverlayRaw=<a:fillOverlay…/>` on run nodes; keep it on the run
+        // through single-run-collapse so it doesn't leak onto the paragraph
+        // set bag (where the paragraph dispatcher fans it out to every run
+        // via the NoFillShape heuristic, double-emit for single-run paragraphs).
+        "fillOverlayRaw",
         // R57 bt-2: underline + its uLn/uFill companion keys live on
         // <a:rPr> (run only). The collapse used to promote them onto the
         // paragraph set bag, so a single-run colored underline replayed
