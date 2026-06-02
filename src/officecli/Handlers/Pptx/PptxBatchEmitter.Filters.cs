@@ -182,6 +182,14 @@ public static partial class PptxBatchEmitter
         if (result.ContainsKey("reflectionRaw"))
             result.Remove("reflection");
 
+        // bt-2: same shape as reflectionRaw — shadowRaw carries the verbatim
+        // <a:outerShdw sx=… sy=… …>color</a:outerShdw>. The companion
+        // shadow=COLOR-BLUR-… key would overwrite the raw element via
+        // ApplyShadow → BuildOuterShadow (which doesn't know about sx/sy)
+        // if it ran after the raw install.
+        if (result.ContainsKey("shadowRaw"))
+            result.Remove("shadow");
+
         // bt-B2: same shape as reflectionRaw — gradientRaw carries the
         // verbatim <a:gradFill flip=… ><a:tileRect/></a:gradFill>. The
         // companion semantic gradient=linear;… key would overwrite it via

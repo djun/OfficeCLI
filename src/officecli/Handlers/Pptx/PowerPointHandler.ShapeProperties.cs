@@ -1299,6 +1299,73 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "shadowraw":
+                {
+                    // bt-2 dump→replay path. Value is the verbatim
+                    // <a:outerShdw .../> element captured by NodeBuilder
+                    // when sx/sy/kx/ky/algn/rotWithShape deviate from
+                    // ApplyShadow's compressed-form defaults. Re-install
+                    // verbatim so source-authored scale/skew survives the
+                    // round-trip instead of collapsing to the COLOR-BLUR-
+                    // ANGLE-DIST-OPACITY tuple. Mirrors reflectionRaw shape.
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var effectList = EnsureEffectList(spPr);
+                    effectList.RemoveAllChildren<Drawing.OuterShadow>();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        try
+                        {
+                            var raw = value.Contains("xmlns:a=")
+                                ? value
+                                : value.Replace("<a:outerShdw",
+                                    "<a:outerShdw xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"");
+                            var shadow = new Drawing.OuterShadow();
+                            shadow.InnerXml = "";
+                            // OpenXml SDK supports OuterXml-style construction via
+                            // OuterXml setter only on some types; for OuterShadow
+                            // we set InnerXml + lift attributes manually.
+                            using var sr = new System.IO.StringReader(raw);
+                            using var xr = System.Xml.XmlReader.Create(sr);
+                            xr.MoveToContent();
+                            if (xr.HasAttributes)
+                            {
+                                while (xr.MoveToNextAttribute())
+                                {
+                                    if (xr.Prefix == "xmlns" || xr.Name == "xmlns") continue;
+                                    shadow.SetAttribute(new OpenXmlAttribute(
+                                        xr.Prefix, xr.LocalName, xr.NamespaceURI, xr.Value));
+                                }
+                                xr.MoveToElement();
+                            }
+                            // Lift inner XML (color child + its alpha) so the
+                            // shadow color round-trips through the raw path.
+                            if (!xr.IsEmptyElement)
+                            {
+                                var subtreeXml = xr.ReadInnerXml();
+                                if (!string.IsNullOrWhiteSpace(subtreeXml))
+                                {
+                                    var inner = subtreeXml.Contains("xmlns:a=")
+                                        ? subtreeXml
+                                        : "<wrap xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">"
+                                          + subtreeXml + "</wrap>";
+                                    // Cheap approach: set InnerXml on the shadow
+                                    // directly — OpenXml SDK accepts a-namespaced
+                                    // children when the namespace is declared on
+                                    // the parent already (shape's a:graphic root).
+                                    shadow.InnerXml = subtreeXml;
+                                }
+                            }
+                            InsertEffectInOrder(effectList, shadow);
+                        }
+                        catch
+                        {
+                            unsupported.Add(key);
+                        }
+                    }
+                    break;
+                }
+
                 case "glow":
                 {
                     var spPr = shape.ShapeProperties;

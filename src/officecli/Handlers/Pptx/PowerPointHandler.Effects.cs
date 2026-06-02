@@ -172,6 +172,32 @@ public partial class PowerPointHandler
         return true;
     }
 
+    /// <summary>
+    /// bt-2: Detect "plain" outerShdw — one whose attributes are only the
+    /// ones BuildOuterShadow round-trips through the `shadow=` compressed
+    /// form (BlurRadius / Direction / Distance, plus inferred alpha from
+    /// the color child). When ANY of sx/sy (scale), kx/ky (skew), algn,
+    /// rotWithShape is set to a non-default value, BuildOuterShadow's
+    /// re-emit would drop them — surface OuterXml as shadowRaw instead.
+    ///
+    /// ApplyShadow emits Alignment=TopLeft, RotateWithShape=false — those
+    /// are the compressed form's implicit defaults. We treat them as
+    /// "compressible" only when present at exactly those values.
+    /// </summary>
+    internal static bool IsPlainOuterShadow(Drawing.OuterShadow s)
+    {
+        if (s.HorizontalRatio?.HasValue == true) return false;
+        if (s.VerticalRatio?.HasValue == true) return false;
+        if (s.HorizontalSkew?.HasValue == true) return false;
+        if (s.VerticalSkew?.HasValue == true) return false;
+        if (s.Alignment?.HasValue == true
+            && s.Alignment.Value != Drawing.RectangleAlignmentValues.TopLeft)
+            return false;
+        if (s.RotateWithShape?.HasValue == true && s.RotateWithShape.Value)
+            return false;
+        return true;
+    }
+
     private static void ApplyReflection(ShapeProperties spPr, string value)
     {
         var effectList = EnsureEffectList(spPr);

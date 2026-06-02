@@ -1174,6 +1174,16 @@ public partial class PowerPointHandler
                 // alpha=FF inputs as a 40% shadow on round-trip.
                 var opacity = alphaEl?.Val?.HasValue == true ? $"{alphaEl.Val.Value / 1000.0:0.##}" : "100";
                 node.Format["shadow"] = $"{shadowColor}-{blurPt}-{angleDeg}-{distPt}-{opacity}";
+                // bt-2: a source-authored <a:outerShdw> can carry scale/skew
+                // attributes (sx/sy stretch the shadow, kx/ky skew it, algn
+                // anchors the projection, rotWithShape toggles whether the
+                // shadow rotates with its host). BuildOuterShadow only knows
+                // the COLOR-BLUR-ANGLE-DIST-OPACITY tuple, so re-build drops
+                // every extra attr on the floor. Mirror reflectionRaw — when
+                // any non-compressible attr is present, surface the element's
+                // OuterXml as `shadowRaw` so Set can re-install it verbatim.
+                if (!IsPlainOuterShadow(outerShadow))
+                    node.Format["shadowRaw"] = outerShadow.OuterXml;
             }
             // bt-1: surface <a:innerShdw> as `innerShadow=COLOR-BLUR-ANGLE-DIST-OPACITY`
             // (parallel to `shadow=` for outer). Without this readback the dump
