@@ -666,6 +666,71 @@ public partial class PowerPointHandler
                         "false" or "none" => Drawing.TextUnderlineValues.None,
                         _ => throw new ArgumentException($"Invalid underline value: '{rUnderline}'. Valid values: single, double, heavy, dotted, dash, wavy, none.")
                     };
+                // R61 bt-1: AddRun honors textOutline (and its width/color
+                // split keys) so a single-run-collapse dump emits `add run
+                // textOutline=…` and re-add round-trips the <a:ln> on rPr.
+                // Symmetric with the Set branch in ShapeProperties.cs. Schema
+                // order is enforced by ReorderDrawingRunProperties at the end
+                // of this method (already invoked for endParaRPr inheritance).
+                if (properties.TryGetValue("textOutline", out var rTextOutline)
+                    || properties.TryGetValue("textoutline", out rTextOutline))
+                {
+                    if (!rTextOutline.Equals("none", StringComparison.OrdinalIgnoreCase)
+                        && !rTextOutline.Equals("false", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Compound is width:color (Get emit form). See Set
+                        // branch in ShapeProperties.cs for the name-shadowing
+                        // rationale on SplitCompoundLineValue's positional tuple.
+                        var (toWidthPart, toColorPart, _) = SplitCompoundLineValue(rTextOutline);
+                        long? widthEmu = null;
+                        string? colorRgb = null;
+                        if (toColorPart != null)
+                        {
+                            widthEmu = Core.EmuConverter.ParseLineWidth(toWidthPart);
+                            colorRgb = toColorPart.Equals("none", StringComparison.OrdinalIgnoreCase)
+                                ? null : ParseHelpers.SanitizeColorForOoxml(toColorPart).Rgb;
+                        }
+                        else
+                        {
+                            try { widthEmu = Core.EmuConverter.ParseLineWidth(rTextOutline); }
+                            catch { widthEmu = null; }
+                            if (widthEmu == null && !rTextOutline.Equals("true", StringComparison.OrdinalIgnoreCase))
+                                colorRgb = ParseHelpers.SanitizeColorForOoxml(rTextOutline).Rgb;
+                        }
+                        var ln = new Drawing.Outline();
+                        if (widthEmu.HasValue) ln.Width = (int)widthEmu.Value;
+                        if (colorRgb != null)
+                            ln.AppendChild(new Drawing.SolidFill(
+                                new Drawing.RgbColorModelHex { Val = colorRgb }));
+                        rProps.PrependChild(ln);
+                    }
+                }
+                if (properties.TryGetValue("textOutline.width", out var rToWidth)
+                    || properties.TryGetValue("textoutline.width", out rToWidth))
+                {
+                    var widthEmu = Core.EmuConverter.ParseLineWidth(rToWidth);
+                    var ln = rProps.GetFirstChild<Drawing.Outline>();
+                    if (ln == null)
+                    {
+                        ln = new Drawing.Outline();
+                        rProps.PrependChild(ln);
+                    }
+                    ln.Width = (int)widthEmu;
+                }
+                if (properties.TryGetValue("textOutline.color", out var rToColor)
+                    || properties.TryGetValue("textoutline.color", out rToColor))
+                {
+                    var rgb = ParseHelpers.SanitizeColorForOoxml(rToColor).Rgb;
+                    var ln = rProps.GetFirstChild<Drawing.Outline>();
+                    if (ln == null)
+                    {
+                        ln = new Drawing.Outline();
+                        rProps.PrependChild(ln);
+                    }
+                    ln.RemoveAllChildren<Drawing.SolidFill>();
+                    ln.AppendChild(new Drawing.SolidFill(
+                        new Drawing.RgbColorModelHex { Val = rgb }));
+                }
                 if (properties.TryGetValue("strikethrough", out var rStrike) || properties.TryGetValue("strike", out rStrike))
                     rProps.Strike = rStrike.ToLowerInvariant() switch
                     {

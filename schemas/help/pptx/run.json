@@ -85,6 +85,53 @@
       "readback": "BCP-47 tag as written (e.g. 'en-US')",
       "enforcement": "strict"
     },
+    "textOutline": {
+      "type": "string",
+      "description": "text outline / glyph stroke (a:rPr/a:ln). Compound form 'width:color' (mirrors connector 'line='); split forms 'textOutline.width' and 'textOutline.color' allow additive Set. Pass 'none' or 'false' to clear.",
+      "aliases": [
+        "textoutline"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop textOutline=0.5pt:#FF0000",
+        "--prop textOutline=2pt",
+        "--prop textOutline=none"
+      ],
+      "readback": "width:color (e.g. '0.5pt:#FF0000') when both present; otherwise the part present",
+      "enforcement": "strict"
+    },
+    "textOutline.color": {
+      "type": "string",
+      "description": "text outline colour (a:rPr/a:ln/a:solidFill). Accepts #RRGGBB, named colors, rgb(...), or scheme tokens.",
+      "aliases": [
+        "textoutline.color"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop textOutline.color=#FF0000"
+      ],
+      "readback": "#-prefixed hex color",
+      "enforcement": "strict"
+    },
+    "textOutline.width": {
+      "type": "string",
+      "description": "text outline stroke width (a:rPr/a:ln/@w). Accepts pt/cm/in/emu units.",
+      "aliases": [
+        "textoutline.width"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop textOutline.width=0.5pt"
+      ],
+      "readback": "point value with 'pt' suffix (e.g. '0.5pt')",
+      "enforcement": "strict"
+    },
     "cap": {
       "type": "enum",
       "values": [

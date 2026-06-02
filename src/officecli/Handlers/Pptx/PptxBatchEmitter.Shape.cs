@@ -87,6 +87,12 @@ public static partial class PptxBatchEmitter
         // them on the run so a true single-run underline emits exactly
         // one `set …/run[1] underline=…` op.
         "underline", "underline.color", "underline.width",
+        // R61 bt-1: textOutline lives on <a:rPr><a:ln> — distinct from
+        // shape-level line= on spPr. Keep on the run so a single-run
+        // outlined glyph emits `add run textOutline=…` instead of leaking
+        // onto the paragraph set bag and silently broadcasting to every
+        // run in the paragraph.
+        "textOutline", "textOutline.color", "textOutline.width",
     };
 
     // Pull a `link=slide[N]` prop out of the bag and queue a deferred `set`

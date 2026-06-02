@@ -2148,6 +2148,11 @@ public partial class PowerPointHandler
         new(System.StringComparer.Ordinal)
     {
         "latin", "ea", "cs", "solidFill", "gradFill", "hlinkClick", "effectLst",
+        // R61 bt-1: <a:ln> (text outline) — surfaced via the curated
+        // textOutline / textOutline.color / textOutline.width keys.
+        // Without this the fallback re-emits a bare <a:ln/> as `ln: true`
+        // alongside the curated keys.
+        "ln",
     };
 
     // bt-6: rPr attributes that describe the run's editor state (spell-check
