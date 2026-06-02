@@ -70,6 +70,19 @@ public partial class PowerPointHandler
                         throw new ArgumentException(
                             $"Invalid height '{value}': table row height cannot be negative.");
                     row.Height = hEmu;
+                    // CONSISTENCY(table-frame-sync): Add.Table.AddRow (Add.Table.cs ~L428)
+                    // re-syncs GraphicFrame.Transform.Extents.Cy to the sum of row heights
+                    // after inserting a row. Set on row height must do the same — otherwise
+                    // the frame retains its old cy while rows grow past it, and PowerPoint
+                    // renders rows beyond the frame bounds with no warning.
+                    var rowTable = row.Ancestors<Drawing.Table>().FirstOrDefault();
+                    var graphicFrame = rowTable?.Ancestors<GraphicFrame>().FirstOrDefault();
+                    if (rowTable != null && graphicFrame?.Transform?.Extents != null)
+                    {
+                        long totalRowHeight = rowTable.Elements<Drawing.TableRow>()
+                            .Sum(r => r.Height?.Value ?? 370840);
+                        graphicFrame.Transform.Extents.Cy = totalRowHeight;
+                    }
                     break;
                 }
                 case "text":
@@ -163,6 +176,18 @@ public partial class PowerPointHandler
                         throw new ArgumentException(
                             $"Invalid width '{value}': table column width cannot be negative.");
                     gc.Width = wEmu;
+                    // CONSISTENCY(table-frame-sync): mirror Add.Table.AddColumn (Add.Table.cs
+                    // ~L503) — re-sync GraphicFrame.Transform.Extents.Cx to sum of column
+                    // widths so the frame stays aligned with the grid.
+                    var colTable = gc.Ancestors<Drawing.Table>().FirstOrDefault();
+                    var graphicFrame = colTable?.Ancestors<GraphicFrame>().FirstOrDefault();
+                    var tableGrid = colTable?.GetFirstChild<Drawing.TableGrid>();
+                    if (tableGrid != null && graphicFrame?.Transform?.Extents != null)
+                    {
+                        long totalColWidth = tableGrid.Elements<Drawing.GridColumn>()
+                            .Sum(c => c.Width?.Value ?? 914400);
+                        graphicFrame.Transform.Extents.Cx = totalColWidth;
+                    }
                     break;
                 }
                 default:
@@ -271,6 +296,12 @@ public partial class PowerPointHandler
                             }).ToArray();
                             for (int ci = 0; ci < gridCols.Count; ci++)
                                 gridCols[ci].Width = ci < widths.Length ? widths[ci] : widths[^1];
+                            // CONSISTENCY(table-frame-sync): keep frame Cx aligned with grid.
+                            if (gf.Transform?.Extents != null)
+                            {
+                                long totalColWidth = gridCols.Sum(c => c.Width?.Value ?? 914400);
+                                gf.Transform.Extents.Cx = totalColWidth;
+                            }
                         }
                     }
                     break;
