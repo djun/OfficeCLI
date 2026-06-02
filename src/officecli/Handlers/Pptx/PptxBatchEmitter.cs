@@ -171,6 +171,31 @@ public static partial class PptxBatchEmitter
         return (items, ctx.Unsupported);
     }
 
+    // tester-2: cheap descendants-vs-default check for a <p:timing> slice
+    // whose only signal is "the tnLst carries more than an empty tmRoot
+    // <p:cTn>". The literal substring tests in the caller cover the
+    // well-known effect elements (<p:set>, <p:anim*>, <p:audio>, <p:video>,
+    // motion paths). This helper catches the residual: a tmRoot cTn that
+    // has a <p:childTnLst>/<p:iterate>/<p:subTnLst>/<p:stCondLst>/<p:endCondLst>
+    // descendant — PowerPoint's container nodes that hold conditional
+    // triggers, sub-sequences, or iteration timing that BuildSlideAnimationIndex
+    // does not model. Anything inside these containers means there are
+    // effects the semantic emit can't reconstruct.
+    private static bool HasNonTrivialTimingBody(string slice)
+    {
+        // The default skeleton is a tmRoot cTn with no children; presence
+        // of any of these markers means the timing body is substantive.
+        return slice.Contains("<p:childTnLst", StringComparison.Ordinal)
+            || slice.Contains("<p:iterate", StringComparison.Ordinal)
+            || slice.Contains("<p:subTnLst", StringComparison.Ordinal)
+            || slice.Contains("<p:stCondLst", StringComparison.Ordinal)
+            || slice.Contains("<p:endCondLst", StringComparison.Ordinal)
+            || slice.Contains("<p:tmAbs", StringComparison.Ordinal)
+            || slice.Contains("<p:tmPct", StringComparison.Ordinal)
+            || slice.Contains("<p:tav", StringComparison.Ordinal)
+            || slice.Contains("<p:tgtEl", StringComparison.Ordinal);
+    }
+
     // R8-5: emit a single `set /` carrying slideWidth/slideHeight when the
     // source deck deviates from the blank-baseline 33.87cm × 19.05cm
     // widescreen. The blank-doc default is hard-coded inside BlankDocCreator,
@@ -917,7 +942,21 @@ public static partial class PptxBatchEmitter
                     || slice.Contains("<p:audio", StringComparison.Ordinal)
                     || slice.Contains("<p:video", StringComparison.Ordinal)
                     || slice.Contains("<p:animClr", StringComparison.Ordinal)
-                    || slice.Contains("<p:set", StringComparison.Ordinal))
+                    || slice.Contains("<p:set", StringComparison.Ordinal)
+                    // tester-2: pre-R53 the detector only fired on <p:set>
+                    // and the well-known animMotion / animClr / media tags.
+                    // A <p:timing> slice whose only effect node is a bare
+                    // <p:cTn> (or any other p:anim* / p:cmd / p:par / p:seq
+                    // descendant beyond the default empty tnLst skeleton)
+                    // bypassed every signal and the entire animation tree was
+                    // silently dropped on dump → replay. Extend to any p:anim
+                    // family element plus the sequence/parallel/cmd timing
+                    // primitives PowerPoint emits for trigger-based effects.
+                    || slice.Contains("<p:anim", StringComparison.Ordinal)
+                    || slice.Contains("<p:cmd", StringComparison.Ordinal)
+                    || slice.Contains("<p:par>", StringComparison.Ordinal)
+                    || slice.Contains("<p:seq>", StringComparison.Ordinal)
+                    || HasNonTrivialTimingBody(slice))
                 {
                     timingExotic = true;
                     timingXml = slice;
