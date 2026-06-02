@@ -966,34 +966,8 @@ public partial class PowerPointHandler
         var firstParaBullet = shape.TextBody?.Elements<Drawing.Paragraph>().FirstOrDefault()?.ParagraphProperties;
         if (firstParaBullet != null)
         {
-            var charBullet = firstParaBullet.GetFirstChild<Drawing.CharacterBullet>();
-            var autoBullet = firstParaBullet.GetFirstChild<Drawing.AutoNumberedBullet>();
-            if (charBullet != null)
-            {
-                var charVal = charBullet.Char?.Value ?? "•";
-                node.Format["list"] = charVal switch
-                {
-                    "•" or "●" or "○" => "bullet",
-                    "–" or "—" or "-" => "dash",
-                    "►" or "▶" or "▸" or "➤" => "arrow",
-                    "✓" or "✔" => "check",
-                    "★" or "☆" or "⭐" => "star",
-                    _ => charVal
-                };
-            }
-            else if (autoBullet?.Type?.HasValue == true)
-            {
-                var autoVal = autoBullet.Type.InnerText;
-                node.Format["list"] = autoVal switch
-                {
-                    "arabicPeriod" or "arabicParenR" or "arabicPlain" or "arabicParenBoth" => "numbered",
-                    "romanLcPeriod" or "romanLcParenR" or "romanLcParenBoth" => "romanLc",
-                    "romanUcPeriod" or "romanUcParenR" or "romanUcParenBoth" => "romanUc",
-                    "alphaLcPeriod" or "alphaLcParenR" or "alphaLcParenBoth" => "alphaLc",
-                    "alphaUcPeriod" or "alphaUcParenR" or "alphaUcParenBoth" => "alphaUc",
-                    _ => autoVal
-                };
-            }
+            var firstList = ReadListStyleFromPProps(firstParaBullet);
+            if (firstList != null) node.Format["list"] = firstList;
         }
 
         // Collect font info
@@ -1664,6 +1638,17 @@ public partial class PowerPointHandler
                     if (paraPProps?.Indent?.HasValue == true) paraNode.Format["indent"] = FormatPptIndentPoints(paraPProps.Indent.Value);
                     if (paraPProps?.LeftMargin?.HasValue == true) paraNode.Format["marginLeft"] = FormatPptIndentPoints(paraPProps.LeftMargin.Value);
                     if (paraPProps?.RightMargin?.HasValue == true) paraNode.Format["marginRight"] = FormatPptIndentPoints(paraPProps.RightMargin.Value);
+                    // R53 fuzzer-1: per-paragraph bullet (<a:buChar>, <a:buAutoNum>,
+                    // <a:buNone>) was only captured on the shape's first paragraph
+                    // (Format["list"] above), so dump→replay reseeded every
+                    // paragraph after the first as flush-left plain text. Surface
+                    // the canonical `list` value on every paragraph node so
+                    // AddParagraph/Set list= re-applies the per-paragraph marker.
+                    if (paraPProps != null)
+                    {
+                        var paraList = ReadListStyleFromPProps(paraPProps);
+                        if (paraList != null) paraNode.Format["list"] = paraList;
+                    }
                     if (paraPProps?.RightToLeft?.HasValue == true)
                         paraNode.Format["direction"] = paraPProps.RightToLeft.Value ? "rtl" : "ltr";
                     var pLsPct = paraPProps?.GetFirstChild<Drawing.LineSpacing>()?.GetFirstChild<Drawing.SpacingPercent>()?.Val?.Value;

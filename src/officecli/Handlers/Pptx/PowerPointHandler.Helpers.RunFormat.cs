@@ -36,6 +36,51 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Read the canonical `list` value from a paragraph's properties — mirrors
+    /// the input alias table consumed by ApplyListStyle (Fill.cs). Returns null
+    /// when the paragraph carries no <a:buChar>/<a:buAutoNum>/<a:buNone>.
+    /// Used by both the shape-level `list` summary (first paragraph) AND the
+    /// per-paragraph emit so dump→replay preserves per-paragraph bullets
+    /// instead of collapsing every paragraph after the first to flush-left
+    /// plain text. The canonical value can be re-fed to AddParagraph /
+    /// Set paragraph via the existing `list` setter.
+    /// </summary>
+    private static string? ReadListStyleFromPProps(Drawing.ParagraphProperties pProps)
+    {
+        var noBullet = pProps.GetFirstChild<Drawing.NoBullet>();
+        if (noBullet != null) return "none";
+        var charBullet = pProps.GetFirstChild<Drawing.CharacterBullet>();
+        if (charBullet != null)
+        {
+            var charVal = charBullet.Char?.Value ?? "•";
+            return charVal switch
+            {
+                "•" or "●" or "○" => "bullet",
+                "–" or "—" or "-" => "dash",
+                "►" or "▶" or "▸" or "➤" => "arrow",
+                "✓" or "✔" => "check",
+                "★" or "☆" or "⭐" => "star",
+                _ => charVal
+            };
+        }
+        var autoBullet = pProps.GetFirstChild<Drawing.AutoNumberedBullet>();
+        if (autoBullet?.Type?.HasValue == true)
+        {
+            var autoVal = autoBullet.Type.InnerText;
+            return autoVal switch
+            {
+                "arabicPeriod" or "arabicParenR" or "arabicPlain" or "arabicParenBoth" => "numbered",
+                "romanLcPeriod" or "romanLcParenR" or "romanLcParenBoth" => "romanLc",
+                "romanUcPeriod" or "romanUcParenR" or "romanUcParenBoth" => "romanUc",
+                "alphaLcPeriod" or "alphaLcParenR" or "alphaLcParenBoth" => "alphaLc",
+                "alphaUcPeriod" or "alphaUcParenR" or "alphaUcParenBoth" => "alphaUc",
+                _ => autoVal
+            };
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Normalize DrawingML alignment abbreviations to human-readable values.
     /// OOXML stores "l", "r", "ctr", "just" etc. — we return "left", "right", "center", "justify".
     /// </summary>

@@ -434,6 +434,13 @@ public partial class PowerPointHandler
             if (qParaPProps?.Indent?.HasValue == true) paraNode.Format["indent"] = FormatPptIndentPoints(qParaPProps.Indent.Value);
             if (qParaPProps?.LeftMargin?.HasValue == true) paraNode.Format["marginLeft"] = FormatPptIndentPoints(qParaPProps.LeftMargin.Value);
             if (qParaPProps?.RightMargin?.HasValue == true) paraNode.Format["marginRight"] = FormatPptIndentPoints(qParaPProps.RightMargin.Value);
+            // R53 fuzzer-1: surface per-paragraph bullet on direct paragraph
+            // Get too (same canonical `list` key as NodeBuilder.ParaToNode emit).
+            if (qParaPProps != null)
+            {
+                var qParaList = ReadListStyleFromPProps(qParaPProps);
+                if (qParaList != null) paraNode.Format["list"] = qParaList;
+            }
             var qLsPct = qParaPProps?.GetFirstChild<Drawing.LineSpacing>()?.GetFirstChild<Drawing.SpacingPercent>()?.Val?.Value;
             if (qLsPct.HasValue) paraNode.Format["lineSpacing"] = SpacingConverter.FormatPptLineSpacingPercent(qLsPct.Value);
             var qLsPts = qParaPProps?.GetFirstChild<Drawing.LineSpacing>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
