@@ -729,8 +729,16 @@ public partial class PowerPointHandler
                 {
                     var spPr = shape.ShapeProperties;
                     if (spPr == null) { unsupported.Add(key); break; }
-                    // Check if value is a preset shape name (no spaces, no commas, simple identifier)
-                    if (!value.Contains(' ') && !value.Contains(',') && !value.Contains('M'))
+                    // Distinguish preset shape name from SVG-like custom path.
+                    // SVG paths always have whitespace-separated commands and
+                    // comma-separated coordinates ("M 0,0 L 100,0 Z"); preset
+                    // names are bare camelCase identifiers. The previous
+                    // `!value.Contains('M')` heuristic misfired on legitimate
+                    // preset names containing 'M' — flowChartMultidocument,
+                    // flowChartMerge, flowChartManualInput — routing them
+                    // through ParseCustomGeometry which produced an empty
+                    // <a:pathLst><a:path/></a:pathLst> and a blank render.
+                    if (!value.Contains(' ') && !value.Contains(','))
                     {
                         // Treat as preset shape name. Use the strict variant so
                         // an unrecognised name surfaces as unsupported_property
