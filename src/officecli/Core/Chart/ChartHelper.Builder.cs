@@ -634,6 +634,11 @@ internal static partial class ChartHelper
         "title.font", "titlefont", "title.size", "titlesize",
         "title.color", "titlecolor", "title.bold", "titlebold",
         "title.glow", "titleglow", "title.shadow", "titleshadow",
+        // R60 B3 — title.overlay (<c:title><c:overlay val="1"/>) draws the
+        // title on top of the plot area. BuildChartTitle defaults to
+        // overlay=false; defer so Set can flip it post-build, mirroring
+        // legend.overlay.
+        "title.overlay", "titleoverlay",
         // Area fill
         "areafill", "area.fill",
         // R24 — bar chart bar-direction (rtl reverses category order on bar

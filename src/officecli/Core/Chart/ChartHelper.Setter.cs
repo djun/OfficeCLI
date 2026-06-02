@@ -2712,6 +2712,30 @@ internal static partial class ChartHelper
                     break;
                 }
 
+                // R60 B3 — title overlay: draw chart title on top of plot area
+                // (<c:title><c:overlay val="1"/></c:title>). Mirrors
+                // legend.overlay. CT_Title schema order is
+                // tx?, layout?, overlay?, spPr?, txPr?, extLst? — insert
+                // overlay BEFORE the first c:spPr / c:txPr / c:extLst so
+                // schema validators (and PowerPoint open) accept the file.
+                case "title.overlay" or "titleoverlay":
+                {
+                    var titleElSet = chart.GetFirstChild<C.Title>();
+                    if (titleElSet == null) { unsupported.Add(key); break; }
+                    titleElSet.RemoveAllChildren<C.Overlay>();
+                    var newOverlay = new C.Overlay { Val = ParseHelpers.IsTruthy(value) };
+                    OpenXmlElement? insertBefore =
+                        (OpenXmlElement?)titleElSet.GetFirstChild<C.ShapeProperties>()
+                        ?? titleElSet.GetFirstChild<C.ChartShapeProperties>()
+                        ?? (OpenXmlElement?)titleElSet.GetFirstChild<C.TextProperties>()
+                        ?? (OpenXmlElement?)titleElSet.GetFirstChild<C.ExtensionList>();
+                    if (insertBefore != null)
+                        titleElSet.InsertBefore(newOverlay, insertBefore);
+                    else
+                        titleElSet.AppendChild(newOverlay);
+                    break;
+                }
+
                 // CONSISTENCY(rtl-cascade): chart-level reading direction.
                 // Stamps rtl="1" on chartSpace c:txPr → a:lstStyle a:lvl1pPr
                 // so default chart text bodies (axis labels, data labels)

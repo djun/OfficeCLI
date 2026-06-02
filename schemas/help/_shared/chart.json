@@ -1353,6 +1353,20 @@
       "description": "title font name.",
       "readback": "font name"
     },
+    "title.overlay": {
+      "type": "bool",
+      "aliases": [
+        "titleoverlay"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "description": "if true, title overlays the plot area instead of reserving space above it.",
+      "examples": [
+        "--prop title.overlay=true"
+      ],
+      "readback": "true"
+    },
     "title.size": {
       "type": "font-size",
       "add": true,

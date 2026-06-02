@@ -121,6 +121,20 @@ internal static partial class ChartHelper
         }
         if (titleText != null) node.Format["title"] = titleText;
 
+        // Title overlay (<c:title><c:overlay val="1"/></c:title>) — when true,
+        // the title is drawn on top of the plot area instead of reserving
+        // space above it. BuildChartTitle defaults to overlay=false, so only
+        // surface the truthy form (mirrors `legend.overlay` and
+        // `autoTitleDeleted`) for dump→replay round-trip fidelity. Without
+        // this emit, source charts authored with title-on-plot lost the
+        // overlay flag silently via SDK default on replay.
+        if (titleEl != null)
+        {
+            var titleOverlay = titleEl.GetFirstChild<C.Overlay>()?.Val;
+            if (titleOverlay?.HasValue == true && titleOverlay.Value)
+                node.Format["title.overlay"] = "true";
+        }
+
         // AutoTitleDeleted only round-trips when explicitly emitted in the
         // OOXML — its absence is the default. Surface only the truthy form
         // so dump→replay doesn't fight scatter charts, which Excel writes
