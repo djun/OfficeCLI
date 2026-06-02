@@ -181,29 +181,35 @@ internal static class EmuConverter
     public static string FormatEmu(long emu)
     {
         if (emu == 0) return "0cm";
-        var cm = emu / EmuPerCmF;
-        var cmStr = cm.ToString("0.##", CultureInfo.InvariantCulture);
-        // The "0.##" cm format loses precision below ~3600 EMU per side
-        // (less than 0.01cm rounds away). For values that round either
-        // to "0"/"-0" OR re-parse back to a different EMU than the source,
-        // fall back to a `<n>emu` form so Get readback is both non-lossy
-        // AND unit-qualified — round-trips through ParseEmu and satisfies
-        // the documented length-string readback contract.
-        if (cmStr == "0" || cmStr == "-0")
-            return emu.ToString(CultureInfo.InvariantCulture) + "emu";
-        // CONSISTENCY(emu-roundtrip): EMU values that don't survive the
-        // "0.##" cm → ParseEmu(cm) round trip must emit as raw EMU. The
-        // earlier guard caught only the narrow sub-3600-EMU band; values
-        // like y=274320 (= 0.762 cm) formatted as "0.76cm" and re-parsed
-        // as 273600 EMU — losing 720 EMU per coord, accumulating into
-        // visible position drift on dump→replay of any PowerPoint-authored
-        // shape. Check the actual round-trip behaviour instead of relying
-        // on a magnitude heuristic, so every value emits in a form that
-        // parses back to itself.
-        var reparsed = (long)Math.Round(double.Parse(cmStr, CultureInfo.InvariantCulture) * EmuPerCmF);
-        if (reparsed != emu)
-            return emu.ToString(CultureInfo.InvariantCulture) + "emu";
-        return $"{cmStr}cm";
+        // Emit in the first unit whose 2-decimal form round-trips back to the
+        // exact source EMU. cm is preferred (most readable for document
+        // geometry); pt and inch follow because many PowerPoint-authored values
+        // are exact in pt/inch but NOT in cm — e.g. a 13.333in (960pt) slide
+        // width = 12192000 EMU is 33.8667cm, which "0.##" cm rounds to 33.87cm
+        // and re-parses as 12193200 EMU (off by 1200). Only when no cm/pt/inch
+        // form survives the round trip (a value not cleanly expressible in any
+        // human unit) do we fall back to raw `<n>emu`. This keeps Get readback
+        // BOTH exact (no dump→replay position drift) AND unit-qualified
+        // (cm/in/pt) — instead of dumping ugly raw EMU whenever cm alone misses.
+        return TryFormatUnit(emu, EmuPerCmF, "cm")
+            ?? TryFormatUnit(emu, EmuPerPointF, "pt")
+            ?? TryFormatUnit(emu, EmuPerInchF, "in")
+            ?? emu.ToString(CultureInfo.InvariantCulture) + "emu";
+    }
+
+    /// <summary>
+    /// Format <paramref name="emu"/> in <paramref name="suffix"/> units with a
+    /// 2-decimal "0.##" form, returning the string only when it re-parses back to
+    /// the exact source EMU (non-lossy round trip). Returns null when the value
+    /// rounds to 0 in this unit or the round trip loses precision, so the caller
+    /// can try the next unit.
+    /// </summary>
+    private static string? TryFormatUnit(long emu, double emuPerUnit, string suffix)
+    {
+        var str = (emu / emuPerUnit).ToString("0.##", CultureInfo.InvariantCulture);
+        if (str == "0" || str == "-0") return null;
+        var reparsed = (long)Math.Round(double.Parse(str, CultureInfo.InvariantCulture) * emuPerUnit);
+        return reparsed == emu ? str + suffix : null;
     }
 
     /// <summary>
