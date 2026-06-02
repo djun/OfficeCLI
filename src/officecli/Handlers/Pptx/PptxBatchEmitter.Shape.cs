@@ -63,6 +63,13 @@ public static partial class PptxBatchEmitter
     {
         "lang", "altLang", "kern", "kumimoji", "normalizeH",
         "smtClean", "smtId", "bmk", "dirty", "err", "baseline",
+        // R53 bt-6: `textFill` is a run-level <a:gradFill> on the run's
+        // <a:rPr>. The single-run-collapse path used to promote it onto
+        // the paragraph set, where Set then re-applied the gradient to
+        // every run via `set …/paragraph[1] textFill=` instead of the
+        // intended `set …/run[1] textFill=` — drift on the surface form
+        // and on the dump→replay path the agent reads.
+        "textFill",
     };
 
     // Pull a `link=slide[N]` prop out of the bag and queue a deferred `set`
