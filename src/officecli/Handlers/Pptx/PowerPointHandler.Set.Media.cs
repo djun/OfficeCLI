@@ -265,6 +265,25 @@ public partial class PowerPointHandler
                     }
                     break;
                 }
+                case "compressionstate":
+                {
+                    // R57 bt-3: <a:blip cstate="email|print|hqprint|screen|none">.
+                    // PowerPoint Picture Format → Compress Pictures choice;
+                    // dropped on dump→replay before this Add/Set pair was wired.
+                    var csBlip = pic.BlipFill?.GetFirstChild<Drawing.Blip>();
+                    if (csBlip == null) { unsupported.Add(key); break; }
+                    if (value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                        || value.Equals("false", StringComparison.OrdinalIgnoreCase)
+                        || string.IsNullOrEmpty(value))
+                    {
+                        csBlip.CompressionState = null;
+                    }
+                    else
+                    {
+                        csBlip.CompressionState = ParseBlipCompressionState(value);
+                    }
+                    break;
+                }
                 case "opacity":
                 {
                     if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var opacityVal)

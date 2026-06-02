@@ -174,6 +174,19 @@
       ],
       "readback": "`color-radius-opacity`",
       "enforcement": "report"
+    },
+    "compressionState": {
+      "type": "string",
+      "description": "blip compression target (a:blip cstate attribute). PowerPoint's Picture Format → Compress Pictures → target use. Accepted values: email, print, hqprint, screen, none. `none` (the schema default) is suppressed on readback.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop compressionState=email",
+        "--prop compressionState=hqprint"
+      ],
+      "readback": "email | print | hqprint | screen",
+      "enforcement": "report"
     }
   }
 }

@@ -452,6 +452,18 @@ public partial class PowerPointHandler
                     picBlipForFilters.AppendChild(BuildDuotoneFromSpec(picDuotoneStr));
                 }
 
+                // R57 bt-3: `compressionState=email|print|hqprint|screen|none`
+                // mirrors the readback in NodeBuilder. cstate is the
+                // attribute PowerPoint writes when the user picks
+                // Picture Format → Compress Pictures → target use.
+                // Without this Add path the dump→replay batch dropped the
+                // attribute and the image came back at default compression.
+                if (picBlipForFilters != null
+                    && properties.TryGetValue("compressionState", out var picCStateStr))
+                {
+                    picBlipForFilters.CompressionState = ParseBlipCompressionState(picCStateStr);
+                }
+
                 // CONSISTENCY(shape-picture-parity): pictures are routinely
                 // click-targets — wire link= the same way shape does.
                 // Tooltip is the same secondary key as on shape.

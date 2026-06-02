@@ -159,7 +159,7 @@ public partial class PowerPointHandler
                     break;
                 case ConnectionShape cxn:
                     cxnIdx++;
-                    children.Add(ConnectorToNode(cxn, slideNum, cxnIdx, parentPathPrefix));
+                    children.Add(ConnectorToNode(cxn, slideNum, cxnIdx, parentPathPrefix, depth, slidePart));
                     break;
             }
         }
@@ -2196,6 +2196,20 @@ public partial class PowerPointHandler
         var alphaModFix = picBlip?.GetFirstChild<Drawing.AlphaModulationFixed>();
         if (alphaModFix?.Amount?.HasValue == true)
             node.Format["opacity"] = $"{alphaModFix.Amount.Value / 100000.0:0.##}";
+
+        // R57 bt-3: surface <a:blip cstate="email|print|hqprint|screen|none">
+        // as the `compressionState` Format key. cstate is an ATTRIBUTE on the
+        // blip element itself (not a child), so the R56 blip-children raw-set
+        // passthrough does NOT cover it — without this readback the
+        // PowerPoint Picture Format → Compress Pictures choice was silently
+        // dropped on dump→replay and the image came back at the source's
+        // default compression. Skip `none` since that's the schema default.
+        if (picBlip?.CompressionState?.HasValue == true)
+        {
+            var cstate = picBlip.CompressionState.InnerText;
+            if (!string.IsNullOrEmpty(cstate) && cstate != "none")
+                node.Format["compressionState"] = cstate;
+        }
 
         // bt-2: surface <a:biLevel thresh="N"/> as the `biLevel` Format key.
         // BiLevel converts the picture to 1-bit black/white using `thresh`

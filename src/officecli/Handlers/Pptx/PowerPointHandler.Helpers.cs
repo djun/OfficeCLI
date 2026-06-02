@@ -20,6 +20,28 @@ public partial class PowerPointHandler
     private static bool IsValidBooleanString(string? value) =>
         ParseHelpers.IsValidBooleanString(value);
 
+    // R57 bt-3: parse a `compressionState=` Add/Set input into the typed
+    // CT_BlipCompression enum. Accept the schema literals (email, print,
+    // hqprint, screen, none) case-insensitively plus a forgiving alias for
+    // "highqualityprint" since the SDK constant is HighQualityPrint.
+    // Throws ArgumentException on anything else so bad values surface as
+    // invalid_value rather than silently writing default compression.
+    private static EnumValue<Drawing.BlipCompressionValues>
+        ParseBlipCompressionState(string value)
+    {
+        var v = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return v switch
+        {
+            "email" => new EnumValue<Drawing.BlipCompressionValues>(Drawing.BlipCompressionValues.Email),
+            "print" => new EnumValue<Drawing.BlipCompressionValues>(Drawing.BlipCompressionValues.Print),
+            "hqprint" or "highqualityprint" => new EnumValue<Drawing.BlipCompressionValues>(Drawing.BlipCompressionValues.HighQualityPrint),
+            "screen" => new EnumValue<Drawing.BlipCompressionValues>(Drawing.BlipCompressionValues.Screen),
+            "none" => new EnumValue<Drawing.BlipCompressionValues>(Drawing.BlipCompressionValues.None),
+            _ => throw new ArgumentException(
+                $"Invalid 'compressionState' value: '{value}'. Expected one of: email, print, hqprint, screen, none."),
+        };
+    }
+
     /// <summary>
     /// CONSISTENCY(master-layout-shape-edit): resolve a master/layout parent path
     /// to its <see cref="ShapeTree"/> + owning part + root element. Accepts all
