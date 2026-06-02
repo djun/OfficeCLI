@@ -141,17 +141,35 @@ public partial class PowerPointHandler
 
                 // Connect to shapes if specified
                 var cxnDrawProps = cxnNvProps.NonVisualConnectorShapeDrawingProperties!;
+                // bt-6: <a:stCxn idx="M"/> / <a:endCxn idx="M"/> pins the
+                // connector to a specific anchor on the target shape; without
+                // honoring fromIdx / toIdx (the dump→replay-aligned keys
+                // PptxBatchEmitter emits) every connector landed on anchor 0,
+                // breaking source-authored diagram routing.
+                static uint ParseCxnIdx(Dictionary<string, string> p, params string[] keys)
+                {
+                    foreach (var k in keys)
+                    {
+                        if (p.TryGetValue(k, out var raw)
+                            && uint.TryParse(raw?.Trim(), System.Globalization.NumberStyles.Integer,
+                                System.Globalization.CultureInfo.InvariantCulture, out var v))
+                            return v;
+                    }
+                    return 0;
+                }
                 if (properties.TryGetValue("startshape", out var startId) || properties.TryGetValue("startShape", out startId)
                     || properties.TryGetValue("from", out startId))
                 {
                     var startIdVal = ResolveShapeId(startId!, cxnShapeTree);
-                    cxnDrawProps.StartConnection = new Drawing.StartConnection { Id = startIdVal, Index = 0 };
+                    var startIdxVal = ParseCxnIdx(properties, "fromIdx", "fromidx", "startIdx", "startidx");
+                    cxnDrawProps.StartConnection = new Drawing.StartConnection { Id = startIdVal, Index = startIdxVal };
                 }
                 if (properties.TryGetValue("endshape", out var endId) || properties.TryGetValue("endShape", out endId)
                     || properties.TryGetValue("to", out endId))
                 {
                     var endIdVal = ResolveShapeId(endId!, cxnShapeTree);
-                    cxnDrawProps.EndConnection = new Drawing.EndConnection { Id = endIdVal, Index = 0 };
+                    var endIdxVal = ParseCxnIdx(properties, "toIdx", "toidx", "endIdx", "endidx");
+                    cxnDrawProps.EndConnection = new Drawing.EndConnection { Id = endIdVal, Index = endIdxVal };
                 }
 
                 // R53 bt-2: <a:cxnSpLocks noChangeShapeType="1"> — pinned

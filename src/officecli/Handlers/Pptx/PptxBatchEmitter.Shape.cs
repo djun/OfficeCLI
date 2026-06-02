@@ -412,8 +412,25 @@ public static partial class PptxBatchEmitter
                                           // emit a warning instead.
         props.Remove(srcKey);
         props[dstKey] = $"/slide[{slideIdx}]/shape[{shapePathIdx}]";
-        // Drop the auxiliary index — Add re-derives the connection point.
-        props.Remove(srcKey == "startShape" ? "startIdx" : "endIdx");
+        // bt-6: <a:stCxn idx="M"/> / <a:endCxn idx="M"/> identifies the
+        // exact connection-site on the target shape (per-preset glue points:
+        // top/right/bottom/left/center for a rect, multiple anchors for
+        // complex prsts). Previously the auxiliary index was dropped on
+        // the assumption Add would re-derive it, but AddConnector's resolver
+        // has no way to recover the source's pinned anchor — every replayed
+        // connector landed on anchor 0 (top-center for most presets),
+        // breaking the visual routing of source-authored diagrams. Rename
+        // startIdx → fromIdx and endIdx → toIdx so the connector emit bag
+        // stays internally consistent (startShape → from, endShape → to is
+        // the same key-pair renaming the connector emit already does for
+        // the shape ref) and surface to AddConnector.
+        var idxKey = srcKey == "startShape" ? "startIdx" : "endIdx";
+        var renamedIdxKey = dstKey == "from" ? "fromIdx" : "toIdx";
+        if (props.TryGetValue(idxKey, out var idxVal))
+        {
+            props.Remove(idxKey);
+            props[renamedIdxKey] = idxVal;
+        }
     }
 
     private static void EmitGroup(PowerPointHandler ppt, DocumentNode grpNode, string parentSlidePath,
