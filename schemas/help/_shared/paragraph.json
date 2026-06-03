@@ -35,26 +35,6 @@
       "readback": "\"<N>x\" for multiplier or \"<N>pt\" for fixed",
       "enforcement": "strict"
     },
-    "lineRule": {
-      "type": "enum",
-      "description": "line spacing rule paired with lineSpacing. 'auto' = multiplier (default for 1.5x/150%), 'exact' = exact fixed height (default for Npt), 'atLeast' = minimum height (Npt floor; lines may grow to fit tall content).",
-      "values": [
-        "auto",
-        "exact",
-        "atLeast"
-      ],
-      "aliases": [
-        "linerule"
-      ],
-      "add": true,
-      "set": true,
-      "get": true,
-      "examples": [
-        "--prop lineSpacing=14pt --prop lineRule=atLeast"
-      ],
-      "readback": "auto | exact | atLeast",
-      "enforcement": "report"
-    },
     "text": {
       "type": "string",
       "description": "Sets plain text on the paragraph by creating an implicit single run. Do not also add a 'run' child with text on the same paragraph — they will duplicate.",
