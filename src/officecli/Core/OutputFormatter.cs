@@ -367,6 +367,34 @@ internal static class OutputFormatter
             return;
         }
 
+        // Pattern: "<Element> index N out of range (1..M)" / "(1-M)" — raised by
+        // the Excel handler when an index-based element (table, pivottable,
+        // slicer, cf, …) overshoots the live count. The separator varies ("..",
+        // "-") and the phrasing is "out of range" rather than "not found", so it
+        // missed every not_found pattern above and fell through to
+        // internal_error. Semantically identical to "X N not found (total: M)":
+        // the element does not exist. Classify as not_found, mirroring Word/PPTX.
+        if (System.Text.RegularExpressions.Regex.IsMatch(msg, @"\bout of range \(\d+\s*(?:\.\.|-)\s*\d+\)"))
+        {
+            result.Code = "not_found";
+            return;
+        }
+
+        // Pattern: "<thing> not found ..." with a quoted ('X') or bracket-indexed
+        // ([N]) identifier and/or a parenthetical/trailing clause — e.g.
+        // "Named range 'X' not found (no defined names in workbook)" or
+        // "slicer[N] not found on sheet 'Sheet1'". The bare "<Word> <N> not found"
+        // rules above don't match these shapes, so they fell through to
+        // internal_error. Any "not found" that survived the earlier, more
+        // specific rules is a missing-element access — code not_found.
+        // Exclude FileNotFoundException, which has its own file_not_found rule
+        // below (its message also contains "not found").
+        if (ex is not FileNotFoundException && msg.Contains(" not found", StringComparison.Ordinal))
+        {
+            result.Code = "not_found";
+            return;
+        }
+
         // Pattern: "Invalid font size: ..." / "Invalid color value: ..." / "Invalid ... value"
         if (msg.StartsWith("Invalid "))
         {

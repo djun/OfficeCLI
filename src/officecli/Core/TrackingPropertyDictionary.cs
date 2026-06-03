@@ -47,6 +47,8 @@ internal sealed class TrackingPropertyDictionary
 {
     private readonly TrackingComparer _cmp;
     private readonly HashSet<string> _initialKeys;
+    private readonly HashSet<string> _forcedUnsupported =
+        new(System.StringComparer.OrdinalIgnoreCase);
 
     public TrackingPropertyDictionary(IDictionary<string, string> source)
         : base(new TrackingComparer(System.StringComparer.OrdinalIgnoreCase))
@@ -64,8 +66,24 @@ internal sealed class TrackingPropertyDictionary
     /// </summary>
     public IReadOnlyCollection<string> UnusedKeys =>
         _initialKeys
-            .Where(k => !_cmp.AccessedKeys.Contains(k))
+            .Where(k => !_cmp.AccessedKeys.Contains(k) || _forcedUnsupported.Contains(k))
             .ToList();
+
+    /// <summary>
+    /// Mark keys the handler DID observe (via TryGetValue) but then explicitly
+    /// rejected downstream — e.g. a deferred chart property that
+    /// SetChartProperties returns in its unsupported list. Without this, a key
+    /// that was read into a deferred bucket counts as "accessed" and never
+    /// surfaces as unsupported_property even though it was not applied.
+    /// Only keys actually present in the input are forced (mirrors UnusedKeys).
+    /// </summary>
+    public void MarkUnsupported(IEnumerable<string> keys)
+    {
+        if (keys == null) return;
+        foreach (var k in keys)
+            if (k != null && _initialKeys.Contains(k))
+                _forcedUnsupported.Add(k);
+    }
 
     /// <summary>Keys handler accessed (subset of input ∪ keys it added).</summary>
     public IReadOnlyCollection<string> AccessedKeys => _cmp.AccessedKeys;
