@@ -147,6 +147,30 @@ public partial class WordHandler
     /// Apply a w14 text effect to a run's RunProperties.
     /// Handles set and remove logic.
     /// </summary>
+    /// <summary>
+    /// Apply all supported w14 run text effects (textOutline, textFill, shadow,
+    /// glow, reflection) present in <paramref name="properties"/> to a run.
+    /// Shared by AddRun and AddParagraph's implicit run so `add paragraph
+    /// --prop textFill=...` behaves consistently with `--prop bold=...`.
+    /// Returns true if any effect was applied. TryGetValue marks the keys
+    /// consumed for unsupported-property tracking.
+    /// </summary>
+    internal static bool ApplyW14Effects(Run run, Dictionary<string, string> properties)
+    {
+        bool any = false;
+        if (properties.TryGetValue("textOutline", out var toVal) || properties.TryGetValue("textoutline", out toVal))
+        { ApplyW14TextEffect(run, "textOutline", toVal, BuildW14TextOutline); any = true; }
+        if (properties.TryGetValue("textFill", out var tfVal) || properties.TryGetValue("textfill", out tfVal))
+        { ApplyW14TextEffect(run, "textFill", tfVal, BuildW14TextFill); any = true; }
+        if (properties.TryGetValue("w14shadow", out var wsVal))
+        { ApplyW14TextEffect(run, "shadow", wsVal, BuildW14Shadow); any = true; }
+        if (properties.TryGetValue("w14glow", out var wgVal))
+        { ApplyW14TextEffect(run, "glow", wgVal, BuildW14Glow); any = true; }
+        if (properties.TryGetValue("w14reflection", out var wrVal))
+        { ApplyW14TextEffect(run, "reflection", wrVal, BuildW14Reflection); any = true; }
+        return any;
+    }
+
     internal static void ApplyW14TextEffect(Run run, string effectName, string value, Func<string, string> builder)
     {
         var rPr = EnsureRunProperties(run);

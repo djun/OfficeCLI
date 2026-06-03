@@ -95,6 +95,14 @@ internal static class TypedAttributeFallback
         if (ElementAliases.TryGetValue(elementLocal, out var aliased))
             elementLocal = aliased;
 
+        // OOXML hex color attributes never carry a leading '#'. Strip it so the
+        // decomposed color keys (u.color, shd.fill, shd.color, …) accept the
+        // same #RRGGBB forms the curated setters and the schema examples use.
+        if (value.StartsWith("#")
+            && (attrLocal.EndsWith("color", StringComparison.OrdinalIgnoreCase)
+                || attrLocal.Equals("fill", StringComparison.OrdinalIgnoreCase)))
+            value = value.TrimStart('#');
+
         var nsUri  = parent.NamespaceUri;
         var prefix = parent.Prefix;
         // Detached probe elements (e.g. `new StyleParagraphProperties()` not

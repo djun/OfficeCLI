@@ -186,6 +186,8 @@ public partial class WordHandler
             if (properties.TryGetValue("color", out var ntColor)
                 || properties.TryGetValue("font.color", out ntColor))
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "color", ntColor);
+            if (properties.TryGetValue("highlight", out var ntHighlight))
+                ApplyRunFormatting(EnsureNoTextMarkRPr(), "highlight", ntHighlight);
             if (properties.TryGetValue("underline", out var ntUl)
                 || properties.TryGetValue("font.underline", out ntUl))
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "underline", ntUl);
@@ -835,6 +837,10 @@ public partial class WordHandler
             // command on dump replay.
 
             run.AppendChild(rProps);
+            // w14 text effects (textFill/textOutline/w14glow/w14shadow/
+            // w14reflection) are run-level; route them to the implicit text run
+            // so `add paragraph --prop textFill=...` works like `--prop bold=...`.
+            ApplyW14Effects(run, properties);
             AppendTextWithPageFields(para, run, rProps, text);
         }
 
@@ -877,6 +883,9 @@ public partial class WordHandler
             "font", "size", "fontsize", "fontSize", "bold", "italic", "color", "highlight",
             "underline", "strike", "strikethrough", "doublestrike", "dstrike",
             "vanish", "outline", "shadow", "emboss", "imprint", "noproof",
+            // w14 text effects applied to the implicit run via ApplyW14Effects.
+            "textfill", "textFill", "textoutline", "textOutline",
+            "w14glow", "w14shadow", "w14reflection",
             "rtl", "vertAlign", "vertalign", "superscript", "subscript",
             "charspacing", "charSpacing", "letterspacing", "letterSpacing",
             "caps", "smallcaps",
