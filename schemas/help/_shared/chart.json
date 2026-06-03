@@ -532,7 +532,7 @@
       },
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "description": "drop lines on line chart. true|false toggle or line spec 'color[:width[:dash]]'; 'none' removes.",
       "examples": [
         "--prop droplines=true",
@@ -681,7 +681,7 @@
       },
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "description": "high-low lines on line/stock chart. Same format as droplines.",
       "examples": [
         "--prop hilowlines=true"
@@ -1424,7 +1424,7 @@
       },
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "description": "up/down bars on line chart. true | 'gapWidth:upColor:downColor' | 'none'/'false'.",
       "examples": [
         "--prop updownbars=true",
