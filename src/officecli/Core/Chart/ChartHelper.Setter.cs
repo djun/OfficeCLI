@@ -2361,16 +2361,24 @@ internal static partial class ChartHelper
                 case "firstsliceangle" or "sliceangle":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var pie = plotArea2?.GetFirstChild<C.PieChart>();
-                    if (pie == null) { unsupported.Add(key); break; }
+                    // R13: firstSliceAngle is valid on BOTH pie and doughnut
+                    // (CT_PieChart and CT_DoughnutChart each carry firstSliceAng,
+                    // same schema slot — before holeSize). The old code only
+                    // resolved PieChart, so on a doughnut the key fell through to
+                    // UNSUPPORTED and was silently dropped. Mirror the holeSize
+                    // case's DoughnutChart resolution.
+                    OpenXmlCompositeElement? sliceHost =
+                        plotArea2?.GetFirstChild<C.PieChart>()
+                        ?? (OpenXmlCompositeElement?)plotArea2?.GetFirstChild<C.DoughnutChart>();
+                    if (sliceHost == null) { unsupported.Add(key); break; }
                     var angInt = ParseHelpers.SafeParseInt(value, "firstSliceAngle");
                     // CT_FirstSliceAng: minInclusive=0, maxInclusive=360.
                     // Negative input would underflow on the ushort cast and
                     // write 65000+, which Excel rewrites silently on open.
                     if (angInt < 0 || angInt > 360)
                         throw new ArgumentException($"Invalid firstSliceAngle '{value}': must be in [0, 360] (degrees).");
-                    pie.RemoveAllChildren<C.FirstSliceAngle>();
-                    pie.AppendChild(new C.FirstSliceAngle { Val = (ushort)angInt });
+                    sliceHost.RemoveAllChildren<C.FirstSliceAngle>();
+                    sliceHost.AppendChild(new C.FirstSliceAngle { Val = (ushort)angInt });
                     break;
                 }
 

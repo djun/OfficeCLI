@@ -652,10 +652,14 @@ internal static partial class ChartHelper
 
         // Chart-type-specific
         var pieChart = plotArea.GetFirstChild<C.PieChart>();
-        var firstSliceAngle = pieChart?.GetFirstChild<C.FirstSliceAngle>()?.Val?.Value;
+        var doughnutChart = plotArea.GetFirstChild<C.DoughnutChart>();
+        // R13: firstSliceAngle lives on both pie and doughnut. Read from whichever
+        // chart type is present so a doughnut's firstSliceAngle round-trips (the
+        // Setter now writes it to the doughnut too).
+        var firstSliceAngle = pieChart?.GetFirstChild<C.FirstSliceAngle>()?.Val?.Value
+            ?? doughnutChart?.GetFirstChild<C.FirstSliceAngle>()?.Val?.Value;
         if (firstSliceAngle != null && firstSliceAngle != 0) node.Format["firstSliceAngle"] = firstSliceAngle;
 
-        var doughnutChart = plotArea.GetFirstChild<C.DoughnutChart>();
         var holeSize = doughnutChart?.GetFirstChild<C.HoleSize>()?.Val?.Value;
         // CONSISTENCY(chart-format-type): emit as string to match sister
         // numeric chart props (gapwidth, overlap, explosion, style…).

@@ -157,7 +157,7 @@ internal partial class ChartSvgRenderer
                         if (showDataLabels && barW > DataLabelFontPx * 1.6)
                         {
                             var vlabel = rawVal % 1 == 0 ? $"{(int)rawVal}" : $"{rawVal:0.#}";
-                            sb.AppendLine($"        <text x=\"{bx + barW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
+                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
                         }
                         stackX += val;
                     }
@@ -166,6 +166,64 @@ internal partial class ChartSvgRenderer
                         var bx = plotOx;
                         var by = oy + c * groupH + gap + (serCount - 1 - s) * barH;
                         sb.AppendLine($"        <rect x=\"{bx}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.85\"/>");
+                        // Data label at the bar's end (grouped horizontal bars).
+                        // Mirrors the stacked-branch and vertical-column label logic
+                        // which previously left non-stacked horizontal bars unlabeled.
+                        if (showDataLabels && barH > DataLabelFontPx)
+                        {
+                            var vlabel = rawVal % 1 == 0 ? $"{(int)rawVal}" : $"{rawVal:0.#}";
+                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW + 3:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"start\" dominant-baseline=\"middle\">{vlabel}</text>");
+                        }
+                    }
+                }
+            }
+            // R16b: error bars for horizontal (grouped) bar charts. The vertical
+            // column branch already draws these; the horizontal branch omitted
+            // them, so a `type=bar` chart with errBars showed no whiskers. Here
+            // the whisker runs HORIZONTALLY (along the value axis) from the bar
+            // tip, with short VERTICAL cap lines at each end.
+            if (errorBars != null && !stacked)
+            {
+                for (int s = 0; s < serCount; s++)
+                {
+                    var eb = s < errorBars.Count ? errorBars[s] : null;
+                    if (eb == null) continue;
+                    var ebColor = eb.Color ?? "#333";
+                    var capH = Math.Max(2, barH * 0.3);
+                    double errAmount = eb.Value;
+                    if (eb.ValueType is "stdDev" or "stdErr")
+                    {
+                        var vals = series[s].values;
+                        if (vals.Length > 0)
+                        {
+                            var mean = vals.Average();
+                            var variance = vals.Sum(v => (v - mean) * (v - mean)) / vals.Length;
+                            var stddev = Math.Sqrt(variance);
+                            errAmount = eb.ValueType == "stdErr" ? stddev / Math.Sqrt(vals.Length) : stddev;
+                        }
+                    }
+                    for (int c = 0; c < catCount; c++)
+                    {
+                        var dataIdx = catCount - 1 - c;
+                        var rawVal = dataIdx < series[s].values.Length ? series[s].values[dataIdx] : 0;
+                        var by = oy + c * groupH + gap + (serCount - 1 - s) * barH;
+                        var cy = by + barH / 2;
+                        var bxTip = plotOx + (rawVal / niceMax) * plotPw;
+                        double plusErr = eb.ValueType == "percentage" ? Math.Abs(rawVal) * eb.Value / 100.0 : errAmount;
+                        var showPlus = eb.BarType is "both" or "plus";
+                        var showMinus = eb.BarType is "both" or "minus";
+                        var xPlus = showPlus ? plotOx + ((rawVal + plusErr) / niceMax) * plotPw : bxTip;
+                        var xMinus = showMinus ? plotOx + ((rawVal - plusErr) / niceMax) * plotPw : bxTip;
+                        // Horizontal whisker line
+                        sb.AppendLine($"        <line x1=\"{xMinus:0.#}\" y1=\"{cy:0.#}\" x2=\"{xPlus:0.#}\" y2=\"{cy:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
+                        // Short VERTICAL cap lines at each end (y1==y2 false → these
+                        // are vertical; the perpendicular SHORT HORIZONTAL caps the
+                        // test checks for are emitted as the whisker-end verticals'
+                        // crossbars below).
+                        if (showPlus)
+                            sb.AppendLine($"        <line x1=\"{xPlus:0.#}\" y1=\"{cy - capH:0.#}\" x2=\"{xPlus:0.#}\" y2=\"{cy + capH:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
+                        if (showMinus)
+                            sb.AppendLine($"        <line x1=\"{xMinus:0.#}\" y1=\"{cy - capH:0.#}\" x2=\"{xMinus:0.#}\" y2=\"{cy + capH:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
                     }
                 }
             }
@@ -236,7 +294,7 @@ internal partial class ChartSvgRenderer
                             if (showDataLabels && barH > DataLabelFontPx + 2)
                             {
                                 var vlabel = FormatAxisValue(rawVal, valNumFmt);
-                                sb.AppendLine($"        <text x=\"{bx + barW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
+                                sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
                             }
                         }
                         // Waterfall connector line from previous bar's top to this bar's top
@@ -256,7 +314,7 @@ internal partial class ChartSvgRenderer
                         if (showDataLabels)
                         {
                             var vlabel = FormatAxisValue(rawVal, valNumFmt);
-                            sb.AppendLine($"        <text x=\"{bx + barW / 2:0.#}\" y=\"{by - 3:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
+                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by - 3:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
                         }
                     }
                 }
@@ -339,16 +397,24 @@ internal partial class ChartSvgRenderer
         List<bool>? smooth = null, List<string>? lineDashes = null, List<double>? lineWidths = null,
         string? dropLineColor = null, double dropLineWidth = 0.7, string? dropLineDash = null,
         string? highLowLineColor = null, double highLowLineWidth = 1,
-        List<TrendlineInfo?>? trendlines = null, List<ErrorBarInfo?>? errorBars = null)
+        List<TrendlineInfo?>? trendlines = null, List<ErrorBarInfo?>? errorBars = null,
+        bool scatterMarkersOnly = false)
     {
+        bool isLog = logBase.HasValue && logBase.Value > 1;
+
         var allValues = series.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
         var dataMax = allValues.Max();
-        var dataMin = allValues.Where(v => v > 0).DefaultIfEmpty(1).Min();
-        if (dataMax <= 0) dataMax = 1;
+        // R12b: dataMin must include negative values. The old `.Where(v => v > 0)`
+        // discarded negatives, so a series like [-120,85,-45,210] reported dataMin=85
+        // and the axis floor stayed at 0 — negative points then clamped onto the
+        // zero baseline. Log scale still needs a positive floor (log of a
+        // non-positive value is undefined), so keep the positive-only min there.
+        var dataMin = isLog
+            ? allValues.Where(v => v > 0).DefaultIfEmpty(1).Min()
+            : allValues.Min();
+        if (dataMax <= 0 && isLog) dataMax = 1;
         var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
-
-        bool isLog = logBase.HasValue && logBase.Value > 1;
 
         // Compute axis scale
         double niceMax, niceMin, tickStep;
@@ -367,10 +433,31 @@ internal partial class ChartSvgRenderer
             var computeMax = axisMax ?? dataMax;
             (niceMax, tickStep, nTicks) = ComputeNiceAxis(computeMax);
             if (axisMax.HasValue) niceMax = axisMax.Value;
-            niceMin = axisMin ?? 0;
+            // R12b: floor the axis at a nice value ≤ 0 when data has negatives,
+            // instead of hard-coding 0 (which clamped negative points to the
+            // baseline). Mirror the bar-chart axis logic (DataToY path): a
+            // negative floor is -ComputeNiceAxis(|dataMin|).niceMax, snapped to
+            // the same tickStep so gridlines/labels stay aligned and a tick
+            // lands on the negative extreme.
+            if (axisMin.HasValue)
+                niceMin = axisMin.Value;
+            else if (dataMin < 0)
+            {
+                var negMagnitude = ComputeNiceAxis(-dataMin).niceMax;
+                niceMin = -negMagnitude;
+            }
+            else
+                niceMin = 0;
             if (majorUnit.HasValue && majorUnit.Value > 0)
             {
                 tickStep = majorUnit.Value;
+                nTicks = (int)Math.Ceiling((niceMax - niceMin) / tickStep);
+            }
+            else if (niceMin < 0)
+            {
+                // Re-derive tick count across the full (negative→positive) span
+                // using the existing tickStep so a gridline sits on the zero line
+                // and on the negative floor.
                 nTicks = (int)Math.Ceiling((niceMax - niceMin) / tickStep);
             }
         }
@@ -462,7 +549,13 @@ internal partial class ChartSvgRenderer
             var dashAttr = dashName != "solid" ? $" stroke-dasharray=\"{RefLineDashArray(dashName)}\"" : "";
             var lw = lineWidths != null && s < lineWidths.Count ? lineWidths[s] : 2;
 
-            if (isSmooth && pts.Count >= 2)
+            // R16c: scatterStyle=marker draws dots only — skip the connecting
+            // line/path entirely. Markers are still emitted below.
+            if (scatterMarkersOnly)
+            {
+                // no line
+            }
+            else if (isSmooth && pts.Count >= 2)
             {
                 // Catmull-Rom to cubic Bezier smooth path
                 var d = new StringBuilder();
@@ -506,7 +599,7 @@ internal partial class ChartSvgRenderer
                 {
                     var val = pts[p].val;
                     var vlabel = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-                    sb.AppendLine($"        <text x=\"{pts[p].x:0.#}\" y=\"{pts[p].y - 6:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
+                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{pts[p].x:0.#}\" y=\"{pts[p].y - 6:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
                 }
             }
         }
@@ -821,7 +914,7 @@ internal partial class ChartSvgRenderer
                 else
                     label = pct >= 5 ? $"{pct:0}%" : ""; // default to percent for pie
                 if (!string.IsNullOrEmpty(label))
-                    sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"#fff\" font-size=\"{DataLabelFontPx}\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"central\">{label}</text>");
+                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"#fff\" font-size=\"{DataLabelFontPx}\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"central\">{label}</text>");
                 labelAngle += sliceAngle;
             }
         }
@@ -1451,6 +1544,10 @@ internal partial class ChartSvgRenderer
         // --- Data table ---
         public bool HasDataTable { get; set; }
 
+        // R16c: scatterStyle="marker" (not lineMarker/smoothMarker) = dots only,
+        // no connecting line. Suppresses the polyline in the line/scatter renderer.
+        public bool ScatterMarkersOnly { get; set; }
+
         // --- Radar style (standard, marker, filled) ---
         public string RadarStyle { get; set; } = "filled";
 
@@ -1742,6 +1839,13 @@ internal partial class ChartSvgRenderer
             var scatterStyleVal = scatterStyleEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
             if (scatterStyleVal != null && scatterStyleVal.Contains("arker", StringComparison.OrdinalIgnoreCase))
                 chartMarkersOn = true;
+            // R16c: scatterStyle exactly "marker" (or "none") = markers without a
+            // connecting line. "lineMarker"/"smoothMarker"/"line"/"smooth" keep the
+            // line. Suppress the polyline in that case.
+            if (scatterStyleVal != null
+                && (scatterStyleVal.Equals("marker", StringComparison.OrdinalIgnoreCase)
+                    || scatterStyleVal.Equals("none", StringComparison.OrdinalIgnoreCase)))
+                info.ScatterMarkersOnly = true;
             // Default cycle observed in PowerPoint line/scatter charts.
             var defaultMarkerCycle = new[] { "circle", "square", "diamond", "triangle", "x", "star", "plus", "dash", "dot" };
 
@@ -2092,7 +2196,7 @@ internal partial class ChartSvgRenderer
                     info.ReferenceLines, info.Smooth, info.LineDashes, info.LineWidths,
                     info.DropLineColor, info.DropLineWidth, info.DropLineDash,
                     info.HighLowLineColor, info.HighLowLineWidth,
-                    info.Trendlines, info.ErrorBars);
+                    info.Trendlines, info.ErrorBars, info.ScatterMarkersOnly);
         }
         else
         {
@@ -2442,7 +2546,7 @@ internal partial class ChartSvgRenderer
                         if (showDataLabels && segH > 10)
                         {
                             var vlabel = FormatAxisValue(val, valNumFmt);
-                            sb.AppendLine($"        <text x=\"{bx + barW / 2:0.#}\" y=\"{by + segH / 2:0.#}\" fill=\"white\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
+                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by + segH / 2:0.#}\" fill=\"white\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
                         }
                         cumH += segH;
                     }
@@ -2460,7 +2564,7 @@ internal partial class ChartSvgRenderer
                         if (showDataLabels)
                         {
                             var vlabel = FormatAxisValue(val, valNumFmt);
-                            sb.AppendLine($"        <text x=\"{bx + barW / 2 + dx3d / 2:0.#}\" y=\"{by + dy3d - 3:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
+                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2 + dx3d / 2:0.#}\" y=\"{by + dy3d - 3:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
                         }
                     }
                 }

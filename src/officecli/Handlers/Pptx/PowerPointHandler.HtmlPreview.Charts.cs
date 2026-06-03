@@ -129,6 +129,11 @@ public partial class PowerPointHandler
 
         renderer.RenderLegendHtml(sb, info, chartTextColor);
 
+        // R16a: render the data table grid when dataTable=true, mirroring the
+        // Excel chart path (ExcelHandler.HtmlPreview.Charts.cs). The PPTX path
+        // previously omitted this call, so dataTable=true charts showed no grid.
+        renderer.RenderDataTableHtml(sb, info);
+
         sb.AppendLine("    </div>");
     }
 }

@@ -667,7 +667,18 @@ public partial class PowerPointHandler
                         deferredProps[dk] = dv;
                 }
                 if (deferredProps.Count > 0)
-                    ChartHelper.SetChartProperties(chartPart, deferredProps);
+                {
+                    // R19: a deferred key the Setter rejects (e.g. view3d on a 2D
+                    // chart) was read into deferredProps via TryGetValue — so the
+                    // tracker counted it "consumed" and it never surfaced as
+                    // unsupported_property. Capture the Setter's reject list and
+                    // force those keys back into the unsupported set so the Add
+                    // path warns, matching Set's behavior.
+                    var deferredUnsupported = ChartHelper.SetChartProperties(chartPart, deferredProps);
+                    if (deferredUnsupported.Count > 0
+                        && properties is OfficeCli.Core.TrackingPropertyDictionary trackChart)
+                        trackChart.MarkUnsupported(deferredUnsupported);
+                }
 
                 var chartGf = BuildChartGraphicFrame(chartSlidePart, chartPart, chartId, chartName,
                     chartX, chartY, chartCx, chartCy);
