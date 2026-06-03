@@ -187,7 +187,7 @@
       "description": "run-level bold. On Add, applied to the implicit run created by 'text'. On Set, applied to all runs in the paragraph and to the paragraph-mark run properties so subsequent runs inherit.",
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop bold=true --prop text=\"Hi\""
       ],
@@ -198,7 +198,7 @@
       "description": "run-level italic. Same scope as 'bold'.",
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop italic=true --prop text=\"Hi\""
       ],
@@ -223,7 +223,7 @@
       ],
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop size=14 --prop text=\"Hi\"",
         "--prop size=10.5pt --prop text=\"Hi\""
@@ -235,7 +235,7 @@
       "description": "run-level text color. Accepts #RRGGBB, RRGGBB, named colors (e.g. red), rgb(r,g,b).",
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop color=red --prop text=\"Hi\"",
         "--prop color=#FF0000 --prop text=\"Hi\""
@@ -247,7 +247,7 @@
       "description": "run-level underline. Accepts 'true'/'false' or an underline style (single, double, thick, dotted, dash, wavy, etc.).",
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop underline=true --prop text=\"Hi\"",
         "--prop underline=double --prop text=\"Hi\""
@@ -264,7 +264,7 @@
       ],
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop underline=single --prop underline.color=#FF0000"
       ],
@@ -278,7 +278,7 @@
       ],
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop strike=true --prop text=\"Hi\""
       ],
@@ -289,7 +289,7 @@
       "description": "run-level highlight color (w:highlight values: yellow, green, cyan, magenta, blue, red, darkBlue, darkCyan, darkGreen, darkMagenta, darkRed, darkYellow, darkGray, lightGray, black, white, none).",
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop highlight=yellow --prop text=\"Hi\""
       ],
@@ -694,7 +694,7 @@
       ],
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop keepNext=true"
       ],
@@ -710,7 +710,7 @@
       ],
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop keepLines=true"
       ],
@@ -725,7 +725,7 @@
       ],
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop pageBreakBefore=true",
         "--prop break=newPage"
@@ -740,7 +740,7 @@
       ],
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop widowControl=true"
       ],
@@ -754,7 +754,7 @@
       ],
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop wordWrap=false"
       ],
@@ -967,7 +967,7 @@
       "type": "string",
       "description": "shading pattern value (decomposed from `shd`). Add/Set use `shd`.",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "shading pattern token",
       "enforcement": "report"
@@ -976,7 +976,7 @@
       "type": "string",
       "description": "shading fill color hex (decomposed from `shd`).",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "#RRGGBB",
       "enforcement": "report"
@@ -985,7 +985,7 @@
       "type": "string",
       "description": "shading foreground color hex.",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "#RRGGBB",
       "enforcement": "report"
@@ -1089,7 +1089,7 @@
     "firstLineChars": {
       "type": "number",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "description": "first-line indent in 1/100 character units (CT_Ind @firstLineChars). Word's chars-relative variant of firstLineIndent.",
       "readback": "integer 1/100-char units",
@@ -1098,7 +1098,7 @@
     "hangingChars": {
       "type": "number",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "description": "hanging indent in 1/100 character units (CT_Ind @hangingChars). Word's chars-relative variant of hangingIndent.",
       "readback": "integer 1/100-char units",
@@ -1108,7 +1108,7 @@
       "type": "bool",
       "description": "paragraph-mark run property — bold flag on the ¶ glyph (w:pPr/w:rPr/w:b). Distinct from per-run bold; affects how the mark itself renders and is inherited by appended runs without their own bold setting.",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "true|false",
       "enforcement": "report"
@@ -1117,7 +1117,7 @@
       "type": "bool",
       "description": "paragraph-mark run italic (w:pPr/w:rPr/w:i).",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "true|false",
       "enforcement": "report"
@@ -1126,7 +1126,7 @@
       "type": "bool",
       "description": "paragraph-mark run strike (w:pPr/w:rPr/w:strike).",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "true|false",
       "enforcement": "report"
@@ -1135,7 +1135,7 @@
       "type": "string",
       "description": "paragraph-mark run underline style (w:pPr/w:rPr/w:u @val).",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "underline style enum (single, double, dotted, …)",
       "enforcement": "report"
@@ -1144,7 +1144,7 @@
       "type": "length",
       "description": "paragraph-mark run font size (w:pPr/w:rPr/w:sz, half-points internally).",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "unit-qualified pt (e.g. 11pt)",
       "enforcement": "report"
@@ -1153,7 +1153,7 @@
       "type": "color",
       "description": "paragraph-mark run color (w:pPr/w:rPr/w:color). Returns scheme color name for theme refs, or #-prefixed hex.",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "scheme color name or #RRGGBB",
       "enforcement": "report"
@@ -1162,7 +1162,7 @@
       "type": "string",
       "description": "paragraph-mark run highlight color (w:pPr/w:rPr/w:highlight @val).",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "highlight color enum",
       "enforcement": "report"
@@ -1171,7 +1171,7 @@
       "type": "string",
       "description": "paragraph-mark run Ascii font (w:pPr/w:rPr/w:rFonts @ascii).",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "font name",
       "enforcement": "report"
@@ -1180,7 +1180,7 @@
       "type": "string",
       "description": "paragraph-mark run EastAsia font (w:pPr/w:rPr/w:rFonts @eastAsia).",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "font name",
       "enforcement": "report"
@@ -1189,7 +1189,7 @@
       "type": "string",
       "description": "paragraph-mark run ComplexScript font (w:pPr/w:rPr/w:rFonts @cs).",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "readback": "font name",
       "enforcement": "report"
