@@ -1,10 +1,10 @@
-# Morph PPT Transition (Office 2016+)
+# Morph Transition (Office 2016+)
 
-Three files work together:
+This demo consists of three files that work together:
 
-- **transitions-morph.sh** — Build script.
-- **transitions-morph.pptx** — 4-slide deck.
-- **transitions-morph.md** — This file.
+- **transitions-morph.sh** — Shell script that builds a 4-slide deck demonstrating all three morph granularities (byobject, byword, bychar) using a named `morphBall` ellipse that tweens position and size across slides.
+- **transitions-morph.pptx** — The generated 4-slide deck.
+- **transitions-morph.md** — This file. Documents morph pairing, the three granularity options, and backwards compatibility.
 
 ## Regenerate
 
@@ -14,60 +14,148 @@ bash transitions-morph.sh
 # → transitions-morph.pptx
 ```
 
-## What Morph does
+## Slides
 
-Unlike every other transition (which animates the *replacement* of one
-slide by the next), Morph **tweens** content between adjacent slides
-that share named objects. A shape with the same `name=` on slide N and
-slide N+1, but with different x/y/width/height/rotation/fill, smoothly
-interpolates from the slide-N position to the slide-N+1 position when
-the transition plays.
+### Slide 1 — Starting state (no transition)
 
-## Three granularities
+The entry point. A named yellow `morphBall` ellipse is placed at bottom-left, small.
 
 ```bash
-officecli set deck.pptx /slide[N] --prop transition=morph             # default: byobject
-officecli set deck.pptx /slide[N] --prop transition=morph-byword
-officecli set deck.pptx /slide[N] --prop transition=morph-bychar
+officecli add transitions-morph.pptx / --type slide
+
+# Full-bleed dark background
+officecli add transitions-morph.pptx '/slide[1]' --type shape \
+  --prop x=0 --prop y=0 --prop width=33.87cm --prop height=19.05cm \
+  --prop fill=1F3864
+
+# Title label
+officecli add transitions-morph.pptx '/slide[1]' --type shape \
+  --prop text="Morph" --prop size=72 --prop bold=true --prop color=FFFFFF \
+  --prop align=center \
+  --prop x=2cm --prop y=7cm --prop width=29.87cm --prop height=4cm
+
+# Named morph target — small circle at bottom-left
+# name= is the pairing key: same name on slides 1-4 → PowerPoint tweens it
+officecli add transitions-morph.pptx '/slide[1]' --type shape \
+  --prop shape=ellipse --prop fill=FFC000 --prop name=morphBall \
+  --prop x=2cm --prop y=14cm --prop width=3cm --prop height=3cm
 ```
 
-| Option | Tweens at the level of… |
-|---|---|
-| `byobject` (default) | Whole shape pairs (matched by name/id) |
-| `byword` | Whole words within text bodies |
-| `bychar` | Individual characters within text bodies |
+**Features:** `name=morphBall` (morph pairing key), `shape=ellipse`, `fill=FFC000`
 
-`object`, `word`, `char`, `character` are accepted input aliases;
-`Get` returns the canonical `byObject` / `byWord` / `byChar` form.
+### Slide 2 — morph (default = byobject)
 
-## How shape pairing works
-
-In this trio the script creates a shape `name=morphBall` on every
-slide. Same name → PowerPoint pairs them across slides and animates
-the geometry change as continuous motion. Without matching names,
-shapes are treated as independent and fade in/out instead of tweening.
+Ball grows and moves to center. The shape `name=morphBall` on both slides triggers Morph to tween the geometry.
 
 ```bash
-# Slide 1 — small yellow ball, bottom-left
-officecli add deck.pptx /slide[1] --type shape \
-    --prop shape=ellipse --prop name=morphBall \
-    --prop x=2cm --prop y=14cm --prop width=3cm --prop height=3cm
+officecli add transitions-morph.pptx / --type slide
+officecli set transitions-morph.pptx '/slide[2]' --prop transition=morph
 
-# Slide 2 — same name, larger and centered → ball grows and moves
+officecli add transitions-morph.pptx '/slide[2]' --type shape \
+  --prop x=0 --prop y=0 --prop width=33.87cm --prop height=19.05cm \
+  --prop fill=2E5C8A
+officecli add transitions-morph.pptx '/slide[2]' --type shape \
+  --prop text="morph (byobject — default)" --prop size=44 --prop bold=true \
+  --prop color=FFFFFF --prop align=center \
+  --prop x=2cm --prop y=2cm --prop width=29.87cm --prop height=3cm
+
+# Same name, larger and centered → ball grows + moves via morph
+officecli add transitions-morph.pptx '/slide[2]' --type shape \
+  --prop shape=ellipse --prop fill=FFC000 --prop name=morphBall \
+  --prop x=15cm --prop y=10cm --prop width=6cm --prop height=6cm
+```
+
+**Features:** `transition=morph` (default = byobject)
+
+### Slide 3 — morph-byword
+
+Text bodies are recomposed word-by-word.
+
+```bash
+officecli add transitions-morph.pptx / --type slide
+officecli set transitions-morph.pptx '/slide[3]' --prop transition=morph-byword
+
+officecli add transitions-morph.pptx '/slide[3]' --type shape \
+  --prop x=0 --prop y=0 --prop width=33.87cm --prop height=19.05cm \
+  --prop fill=4F7C3A
+officecli add transitions-morph.pptx '/slide[3]' --type shape \
+  --prop text="morph byword tweens words" --prop size=44 --prop bold=true \
+  --prop color=FFFFFF --prop align=center \
+  --prop x=2cm --prop y=2cm --prop width=29.87cm --prop height=3cm
+
+# Ball continues moving — now at right, small again
+officecli add transitions-morph.pptx '/slide[3]' --type shape \
+  --prop shape=ellipse --prop fill=FFC000 --prop name=morphBall \
+  --prop x=27cm --prop y=14cm --prop width=3cm --prop height=3cm
+```
+
+**Features:** `transition=morph-byword`
+
+### Slide 4 — morph-bychar
+
+Text bodies are recomposed character-by-character.
+
+```bash
+officecli add transitions-morph.pptx / --type slide
+officecli set transitions-morph.pptx '/slide[4]' --prop transition=morph-bychar
+
+officecli add transitions-morph.pptx '/slide[4]' --type shape \
+  --prop x=0 --prop y=0 --prop width=33.87cm --prop height=19.05cm \
+  --prop fill=8A5A2B
+officecli add transitions-morph.pptx '/slide[4]' --type shape \
+  --prop text="bychar tweens letters" --prop size=44 --prop bold=true \
+  --prop color=FFFFFF --prop align=center \
+  --prop x=2cm --prop y=2cm --prop width=29.87cm --prop height=3cm
+
+# Ball at center, medium size
+officecli add transitions-morph.pptx '/slide[4]' --type shape \
+  --prop shape=ellipse --prop fill=FFC000 --prop name=morphBall \
+  --prop x=14cm --prop y=14cm --prop width=4cm --prop height=4cm
+```
+
+**Features:** `transition=morph-bychar`
+
+## Complete Feature Coverage
+
+| Option | Syntax | Tweens at the level of |
+|--------|--------|------------------------|
+| byobject (default) | `transition=morph` | Whole shape pairs (matched by name) |
+| byword | `transition=morph-byword` | Whole words within text bodies |
+| bychar | `transition=morph-bychar` | Individual characters within text bodies |
+
+Input aliases accepted: `object`/`word`/`char`/`character`. `get` returns canonical `byObject`/`byWord`/`byChar`.
+
+## How Shape Pairing Works
+
+Same `name=` on adjacent slides → PowerPoint pairs the shapes and tweens geometry. Without matching names, shapes fade in/out independently.
+
+```bash
+# Shape on slide N: small, bottom-left
+officecli add deck.pptx /slide[1] --type shape \
+  --prop shape=ellipse --prop name=morphBall \
+  --prop x=2cm --prop y=14cm --prop width=3cm --prop height=3cm
+
+# Shape on slide N+1: larger, centered → morph animates the change
 officecli set deck.pptx /slide[2] --prop transition=morph
 officecli add deck.pptx /slide[2] --type shape \
-    --prop shape=ellipse --prop name=morphBall \
-    --prop x=15cm --prop y=10cm --prop width=6cm --prop height=6cm
+  --prop shape=ellipse --prop name=morphBall \
+  --prop x=15cm --prop y=10cm --prop width=6cm --prop height=6cm
 ```
 
-## Backwards compatibility
+## Backwards Compatibility
 
-officecli writes morph with an inline fade fallback baked in. Older
-PowerPoint (pre-2016) plays the fallback fade — the deck remains
-openable everywhere.
+officecli writes morph with an inline fade fallback baked in. Pre-2016 PowerPoint plays the fallback fade — the deck remains openable everywhere.
 
-## See also
+## Inspect the Generated File
 
-- `examples/product_launch_morph.pptx` in the repo root — a full
-  product-launch deck built with morph as the primary motion.
-- [transitions-dynamic.md](transitions-dynamic.md) — Office 2010+ "Exciting" gallery (vortex / switch / flip / ...).
+```bash
+officecli query transitions-morph.pptx slide
+officecli get transitions-morph.pptx /slide[1]
+officecli get transitions-morph.pptx /slide[2]
+officecli get transitions-morph.pptx "/slide[2]/shape[3]"
+```
+
+## Related
+
+- `examples/product_launch_morph.pptx` — a full product-launch deck built with morph as the primary motion
+- [transitions-dynamic.md](transitions-dynamic.md) — Office 2010+ "Exciting" gallery

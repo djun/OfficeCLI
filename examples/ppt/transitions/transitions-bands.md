@@ -1,10 +1,10 @@
-# Band-Pattern PPT Transitions
+# Band-Pattern Transitions
 
-Three files work together:
+This demo consists of three files that work together:
 
-- **transitions-bands.sh** — Build script.
-- **transitions-bands.pptx** — 21-slide deck.
-- **transitions-bands.md** — This file.
+- **transitions-bands.sh** — Shell script that generates a 21-slide deck covering all band/strip orientation and split in/out combinations, plus alias demonstrations.
+- **transitions-bands.pptx** — The generated 21-slide deck.
+- **transitions-bands.md** — This file. Documents the orientation, corner-direction, and split orient×in/out matrix.
 
 ## Regenerate
 
@@ -14,38 +14,102 @@ bash transitions-bands.sh
 # → transitions-bands.pptx
 ```
 
-## Three pattern flavors
+## Slides
 
-### Orientation modifier (-horizontal / -vertical)
-
-```bash
-officecli set deck.pptx /slide[N] --prop transition=blinds-vertical
-officecli set deck.pptx /slide[N] --prop transition=checker-horizontal
-officecli set deck.pptx /slide[N] --prop transition=comb-vertical
-officecli set deck.pptx /slide[N] --prop transition=bars-horizontal
-```
-
-The default is `horizontal`; explicit writes round-trip as
-`blinds-horizontal` even when matching the default (the readback path
-preserves the explicit form, matching the wipe/push convention).
-
-### Corner direction (-leftup / -rightup / -leftdown / -rightdown)
+### Slide 1 — Cover (no transition)
 
 ```bash
-officecli set deck.pptx /slide[N] --prop transition=strips-leftup
-officecli set deck.pptx /slide[N] --prop transition=strips-rightdown   # default
+officecli add transitions-bands.pptx / --type slide
+officecli add transitions-bands.pptx /slide[1] --type shape \
+  --prop x=0 --prop y=0 --prop width=33.87cm --prop height=19.05cm \
+  --prop fill=1F3864
+officecli add transitions-bands.pptx /slide[1] --type shape \
+  --prop text="Band Transitions" --prop size=40 --prop bold=true \
+  --prop color=FFFFFF --prop align=center \
+  --prop x=2cm --prop y=7cm --prop width=29.87cm --prop height=4cm
 ```
 
-### Orient × in/out (split needs BOTH)
+### Slides 2–9 — Orientation modifier (-horizontal / -vertical)
+
+Eight slides: `blinds`, `checker`, `comb`, `bars` — each in both horizontal and vertical orientation.
 
 ```bash
-officecli set deck.pptx /slide[N] --prop transition=split-vertical-in
-officecli set deck.pptx /slide[N] --prop transition=split-horizontal-out
+for combo in blinds-horizontal blinds-vertical \
+             checker-horizontal checker-vertical \
+             comb-horizontal comb-vertical \
+             bars-horizontal bars-vertical; do
+  officecli add transitions-bands.pptx / --type slide
+  officecli add transitions-bands.pptx "/slide[N]" --type shape \
+    --prop x=0 --prop y=0 --prop width=33.87cm --prop height=19.05cm \
+    --prop fill=2E5C8A
+  officecli add transitions-bands.pptx "/slide[N]" --type shape \
+    --prop text="$combo" --prop size=40 --prop bold=true \
+    --prop color=FFFFFF --prop align=center \
+    --prop x=2cm --prop y=7cm --prop width=29.87cm --prop height=4cm
+  officecli set transitions-bands.pptx "/slide[N]" --prop transition="$combo"
+done
 ```
 
-`split-vertical` (orient without in/out) defaults `dir=in`, so it
-round-trips canonically as `split-vertical-in`. Bare `split` (no
-orientation given) reads back as plain `split`.
+The default orientation is `horizontal`; explicit writes round-trip preserving the explicit form.
+
+**Features:** `transition=blinds-horizontal`, `blinds-vertical`, `checker-horizontal`, `checker-vertical`, `comb-horizontal`, `comb-vertical`, `bars-horizontal`, `bars-vertical`
+
+### Slides 10–13 — Corner direction for strips (-leftup / -rightup / -leftdown / -rightdown)
+
+Diagonal strip reveal from a specified corner.
+
+```bash
+for d in leftup rightup leftdown rightdown; do
+  officecli set transitions-bands.pptx "/slide[N]" --prop transition="strips-$d"
+done
+```
+
+**Features:** `transition=strips-leftup`, `strips-rightup`, `strips-leftdown`, `strips-rightdown`
+
+### Slides 14–17 — Split orient × in/out matrix
+
+`split` requires both orientation and direction to be specified.
+
+```bash
+for orient in horizontal vertical; do
+  for io in in out; do
+    officecli set transitions-bands.pptx "/slide[N]" --prop transition="split-$orient-$io"
+  done
+done
+```
+
+`split-vertical` (orient without in/out) defaults `dir=in` and round-trips as `split-vertical-in`. Bare `split` reads back as plain `split`.
+
+**Features:** `transition=split-horizontal-in`, `split-horizontal-out`, `split-vertical-in`, `split-vertical-out`
+
+### Slides 18–21 — Alias demonstrations
+
+These four slides show that alias tokens produce identical OOXML as their canonical counterparts.
+
+```bash
+officecli set transitions-bands.pptx "/slide[18]" --prop transition=venetian-vertical
+# → canonical readback: blinds-vertical
+
+officecli set transitions-bands.pptx "/slide[19]" --prop transition=checkerboard-vertical
+# → canonical readback: checker-vertical
+
+officecli set transitions-bands.pptx "/slide[20]" --prop transition=randombar-vertical
+# → canonical readback: bars-vertical
+
+officecli set transitions-bands.pptx "/slide[21]" --prop transition=diagonal-leftdown
+# → canonical readback: strips-leftdown
+```
+
+**Features:** Aliases: `venetian` → `blinds`, `checkerboard` → `checker`, `randombar` → `bars`, `diagonal` → `strips`
+
+## Complete Feature Coverage
+
+| Token family | Orientation/direction modifier | Total |
+|--------------|-------------------------------|-------|
+| `blinds`, `checker`, `comb`, `bars` | `-horizontal` / `-vertical` | 8 |
+| `strips` | `-leftup`, `-rightup`, `-leftdown`, `-rightdown` | 4 |
+| `split` | `-horizontal-in/out`, `-vertical-in/out` | 4 |
+| Aliases | `venetian`, `checkerboard`, `randombar`, `diagonal` | 4 demo |
 
 ## Aliases (input only, canonicalize on readback)
 
@@ -56,10 +120,16 @@ orientation given) reads back as plain `split`.
 | `randombar` | `bars` |
 | `diagonal` | `strips` |
 
-Pick whichever spelling reads best in your script; both produce the
-same transition.
+## Inspect the Generated File
+
+```bash
+officecli query transitions-bands.pptx slide
+officecli get transitions-bands.pptx /slide[2]
+officecli get transitions-bands.pptx /slide[14]
+officecli get transitions-bands.pptx /slide[18]
+```
 
 ## Related
 
-- [transitions-shapes.md](transitions-shapes.md) — circle/diamond/wheel (the non-banded geometric family).
-- [transitions-directional.md](transitions-directional.md) — push/cover/wipe (cardinal-direction transitions).
+- [transitions-shapes.md](transitions-shapes.md) — circle/diamond/wheel (non-banded geometric family)
+- [transitions-directional.md](transitions-directional.md) — push/cover/wipe (cardinal-direction transitions)

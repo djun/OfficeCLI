@@ -1,147 +1,227 @@
-# PPT Table Rows & Columns
+# PPT Table Rows and Columns
 
-Three files work together:
+This demo consists of three files that work together:
 
-- **tables-rows-cols.sh** — Build script.
-- **tables-rows-cols.pptx** — 4-slide deck.
-- **tables-rows-cols.md** — This file.
-
-Covers the `row` and `column` child elements of `table`, which the other
-`tables-*` examples leave as one-line static `rows`/`cols` props.
+- **tables-rows-cols.sh** — Shell script that calls `officecli` commands to generate the deck.
+- **tables-rows-cols.pptx** — The generated 4-slide deck (grow a table, per-row/col sizing, uniform rowHeight, cell merging).
+- **tables-rows-cols.md** — This file. Maps each slide to the features it demonstrates.
 
 ## Regenerate
 
 ```bash
 cd examples/ppt
-bash tables-rows-cols.sh
-# → tables-rows-cols.pptx
+bash tables/tables-rows-cols.sh
+# → tables/tables-rows-cols.pptx
 ```
 
 ## Slides
 
-### Slide 1 — Grow an existing table (theme vs per-cell stamp)
+### Slide 1 — Grow a Table (add row / add column)
 
-This slide shows **two tables side by side** that are populated identically
-but colored two different ways — the contrast is the point of the slide.
+Two side-by-side tables start small and grow via `--type row` and `--type column`. The left table uses `style=medium2` (theme auto-inherits new cells); the right uses `headerFill/bodyFill` (per-cell stamp — new cells need manual fill).
 
 ```bash
-# Append a row. Inherits column count; seed cells via c{N}=value.
-officecli add file.pptx /slide[1]/table[1] --type row \
-  --prop c1=Bob --prop c2=95 --prop c3=110
+officecli create tables-rows-cols.pptx
+officecli open tables-rows-cols.pptx
+officecli add tables-rows-cols.pptx /presentation/slides --type slide
 
-# Append a column. Inserts a cell in EVERY existing row.
-officecli add file.pptx /slide[1]/table[1] --type column \
-  --prop width=2cm --prop text="Q3"
+# === LEFT: Table A — style=medium2 (auto-inherits new rows/columns) ===
+officecli add tables-rows-cols.pptx '/slide[1]' --type table \
+  --prop x=0.5in --prop y=1.5in --prop width=2in --prop height=1.5in \
+  --prop style=medium2 --prop firstRow=true --prop bandedRows=true --prop lastCol=true \
+  --prop data="Name,H1;Alice,220"
+
+# Append rows — theme styling inherits automatically
+officecli add tables-rows-cols.pptx '/slide[1]/table[1]' --type row \
+  --prop c1=Bob --prop c2=205
+officecli add tables-rows-cols.pptx '/slide[1]/table[1]' --type row \
+  --prop c1=Carol --prop c2=275
+
+# Append columns — text= seeds the header cell
+officecli add tables-rows-cols.pptx '/slide[1]/table[1]' --type column \
+  --prop width=1in --prop text="H2"
+officecli add tables-rows-cols.pptx '/slide[1]/table[1]' --type column \
+  --prop width=1in --prop text="Total"
+
+# Fill in body cells for the new columns
+officecli set tables-rows-cols.pptx '/slide[1]/table[1]/tr[2]/tc[3]' --prop text="245"
+officecli set tables-rows-cols.pptx '/slide[1]/table[1]/tr[3]/tc[3]' --prop text="225"
+officecli set tables-rows-cols.pptx '/slide[1]/table[1]/tr[4]/tc[3]' --prop text="335"
+officecli set tables-rows-cols.pptx '/slide[1]/table[1]/tr[2]/tc[4]' --prop text="465" --prop bold=true
+officecli set tables-rows-cols.pptx '/slide[1]/table[1]/tr[3]/tc[4]' --prop text="430" --prop bold=true
+officecli set tables-rows-cols.pptx '/slide[1]/table[1]/tr[4]/tc[4]' --prop text="610" --prop bold=true
+
+# === RIGHT: Table B — headerFill/bodyFill (per-cell stamp; must top-up manually) ===
+officecli add tables-rows-cols.pptx '/slide[1]' --type table \
+  --prop x=7in --prop y=1.5in --prop width=2in --prop height=1.5in \
+  --prop headerFill=4472C4 --prop bodyFill=DEEAF6 \
+  --prop data="Name,H1;Alice,220"
+
+officecli add tables-rows-cols.pptx '/slide[1]/table[2]' --type row \
+  --prop c1=Bob --prop c2=205
+officecli add tables-rows-cols.pptx '/slide[1]/table[2]' --type row \
+  --prop c1=Carol --prop c2=275
+officecli add tables-rows-cols.pptx '/slide[1]/table[2]' --type column \
+  --prop width=1in --prop text="H2"
+officecli add tables-rows-cols.pptx '/slide[1]/table[2]' --type column \
+  --prop width=1in --prop text="Total"
+
+# Must manually stamp fill on all new cells — headerFill/bodyFill is a one-shot
+HDR=4472C4; BODY=DEEAF6; SUM=B4C7E7
+officecli set tables-rows-cols.pptx '/slide[1]/table[2]/tr[1]/tc[3]' \
+  --prop fill=$HDR --prop color=FFFFFF --prop bold=true
+for r in 2 3 4; do
+  officecli set tables-rows-cols.pptx "/slide[1]/table[2]/tr[$r]/tc[3]" --prop fill=$BODY
+done
+officecli set tables-rows-cols.pptx '/slide[1]/table[2]/tr[1]/tc[4]' \
+  --prop fill=$HDR --prop color=FFFFFF --prop bold=true
+for r in 2 3 4; do
+  officecli set tables-rows-cols.pptx "/slide[1]/table[2]/tr[$r]/tc[4]" \
+    --prop fill=$SUM --prop bold=true
+done
 ```
 
-`text=` on `add column` seeds the same value into every cell of the new
-column (useful for adding a placeholder "—" column). Per-row body values
-go in via `set` on the newly created `tc[N]` cells.
+**Features:** `--type row` (appends a row; `c1=`, `c2=`, … seed cell text), `--type column` (appends a column; `text=` seeds the header cell, `width=` sets column width), style=medium2 auto-inherits new cells vs manual per-cell fill top-up
 
-### The two coloring models — pick one deliberately
+---
 
-PowerPoint tables (and Word tables, and Excel tables) have **two
-independent ways** to color cells. They behave differently when you
-later `add row` / `add column`:
+### Slide 2 — Per-Row Heights and Per-Column Widths
 
-| Model | How you write it | Stored as | Appended row/col follows? |
-|---|---|---|---|
-| **Theme (recommended for "auto-follow")** | `--prop style=medium2` (+ `firstRow`/`bandedRows`/…) | Table-level `<a:tableStyleId>` reference. Renderer paints all cells in range, including ones added later. | ✓ **Yes — automatic.** Same model as Excel Table styles. |
-| **Per-cell stamp** | `--prop headerFill=4472C4 --prop bodyFill=DEEAF6` *(or any later `set tc[N] fill=…`)* | `<a:solidFill>` fanned out onto **each existing cell** at that moment. | ✗ **No — never.** Per-cell fills are personal overrides; they don't spread. |
-
-This is not a bug or a gap — it's the OOXML model speaking through
-officecli. The same separation exists for `<a:tableStyleId>` vs cell
-`<a:solidFill>` in PPT, `<w:tblStyle>` vs cell `<w:shd>` in Word, and
-`<x:tableStyleInfo>` vs cell-level fills in Excel.
-
-**Rule of thumb:**
-
-- Want appended rows/columns to look the same as the original? → use a
-  **theme style** (`style=medium2|light1|dark1|…`).
-- Need a specific custom color that's not in any theme? → use
-  `headerFill`/`bodyFill` (or per-cell `fill=`), and accept that you'll
-  manually fill new cells after `add row`/`add column`. Table B on
-  slide 1 of the demo deck shows exactly this top-up:
-
-  ```bash
-  HDR=4472C4; BODY=DEEAF6
-  # Total header added via 'add column' — needs headerFill manually
-  officecli set file.pptx /slide[1]/table[2]/tr[1]/tc[4] \
-    --prop fill=$HDR --prop color=FFFFFF --prop bold=true
-
-  # Newly appended Bob/Carol rows — need bodyFill on each cell
-  for c in 1 2 3 4; do
-    officecli set file.pptx /slide[1]/table[2]/tr[3]/tc[$c] --prop fill=$BODY
-    officecli set file.pptx /slide[1]/table[2]/tr[4]/tc[$c] --prop fill=$BODY
-  done
-  ```
-
-### Slide 2 — Per-row height + per-column width
-
-After a table is created, each row and column can have its own size:
+Individual rows and columns resized after table creation using `set /tr[N]` and `set /col[N]`.
 
 ```bash
-# Custom column widths (must sum to roughly the table width)
-officecli set file.pptx /slide[2]/table[1]/col[1] --prop width=2in
-officecli set file.pptx /slide[2]/table[1]/col[2] --prop width=1.5in
-officecli set file.pptx /slide[2]/table[1]/col[3] --prop width=7in
-officecli set file.pptx /slide[2]/table[1]/col[4] --prop width=1.5in
+officecli add tables-rows-cols.pptx /presentation/slides --type slide
 
-# Custom row heights — header thin, body increasing
-officecli set file.pptx /slide[2]/table[1]/tr[1] --prop height=0.5in
-officecli set file.pptx /slide[2]/table[1]/tr[2] --prop height=0.6in
-officecli set file.pptx /slide[2]/table[1]/tr[3] --prop height=1in
-officecli set file.pptx /slide[2]/table[1]/tr[4] --prop height=1.5in
+officecli add tables-rows-cols.pptx '/slide[2]' --type table \
+  --prop x=0.5in --prop y=1.2in --prop width=12in --prop height=4in \
+  --prop rows=4 --prop cols=4 --prop headerFill=2E75B6
+
+# Set per-column widths (total ~12in)
+officecli set tables-rows-cols.pptx '/slide[2]/table[1]/col[1]' --prop width=2in
+officecli set tables-rows-cols.pptx '/slide[2]/table[1]/col[2]' --prop width=1.5in
+officecli set tables-rows-cols.pptx '/slide[2]/table[1]/col[3]' --prop width=7in
+officecli set tables-rows-cols.pptx '/slide[2]/table[1]/col[4]' --prop width=1.5in
+
+# Set per-row heights
+officecli set tables-rows-cols.pptx '/slide[2]/table[1]/tr[1]' --prop height=0.5in
+officecli set tables-rows-cols.pptx '/slide[2]/table[1]/tr[2]' --prop height=0.6in
+officecli set tables-rows-cols.pptx '/slide[2]/table[1]/tr[3]' --prop height=1in
+officecli set tables-rows-cols.pptx '/slide[2]/table[1]/tr[4]' --prop height=1.5in
+
+# Fill in cells (abbreviated)
+officecli set tables-rows-cols.pptx '/slide[2]/table[1]/tr[1]/tc[1]' \
+  --prop text="Field" --prop bold=true --prop color=FFFFFF
+officecli set tables-rows-cols.pptx '/slide[2]/table[1]/tr[2]/tc[3]' \
+  --prop text="Standard row height (0.6in)"
+officecli set tables-rows-cols.pptx '/slide[2]/table[1]/tr[3]/tc[3]' \
+  --prop text="Taller row (1in) for emphasis"
+officecli set tables-rows-cols.pptx '/slide[2]/table[1]/tr[4]/tc[3]' \
+  --prop text="Tallest row (1.5in) — multi-line content"
 ```
 
-### Slide 3 — Uniform `rowHeight` (table-level)
+**Features:** `set /table[N]/col[C]` with `width=` (per-column width resize, in/cm/pt), `set /table[N]/tr[R]` with `height=` (per-row height resize, in/cm/pt)
 
-When every row should be the same height, set `rowHeight` once at
-`add table` time instead of running `set tr[N] height=` N times:
+---
+
+### Slide 3 — Uniform rowHeight (table-level)
+
+Setting `rowHeight=` at table creation time stamps every row at once — no per-row set commands needed.
 
 ```bash
-officecli add file.pptx /slide[3] --type table \
+officecli add tables-rows-cols.pptx /presentation/slides --type slide
+
+# rowHeight= at add-table time → every row gets this height
+officecli add tables-rows-cols.pptx '/slide[3]' --type table \
+  --prop x=0.5in --prop y=1.2in --prop width=12in \
   --prop rows=5 --prop cols=3 --prop rowHeight=0.8in \
-  --prop data="Step,Action,Result;1,Init,OK;..."
+  --prop headerFill=1F4E79 --prop bodyFill=F2F2F2 \
+  --prop data="Step,Action,Result;1,Init,OK;2,Process,OK;3,Verify,OK;4,Commit,OK"
 ```
 
-### Slide 4 — Cell merging: `gridSpan` (horizontal) + `merge.down` (vertical)
+**Features:** `rowHeight` (uniform; in/cm/pt — stamps all rows at creation time; equivalent to calling `set /tr[N] --prop height=` on every row)
 
-OOXML fixes a table's column count at `<a:tblGrid>` and row count at
-`<a:tr>` — no "narrower row" or "shorter column" exists. Visual merging
-is done in-place on the full grid via `gridSpan` (horizontal) or
-`merge.down` (vertical, wraps `rowSpan` + `vMerge` continuation cells).
+---
 
-**Top table — `gridSpan=N` (full-width footnote):**
+### Slide 4 — Cell Merging (gridSpan horizontal + merge.down vertical)
+
+Two tables demonstrating both axes of merging in OOXML tables.
 
 ```bash
-# Append a normal 4-cell row, then horizontally merge tc[1] across all 4 cols.
-officecli add file.pptx /slide[4]/table[1] --type row \
+officecli add tables-rows-cols.pptx /presentation/slides --type slide
+
+# === TOP TABLE: gridSpan=N — full-width footnote row ===
+officecli add tables-rows-cols.pptx '/slide[4]' --type table \
+  --prop x=0.5in --prop y=1.5in --prop width=12in --prop height=1.5in \
+  --prop headerFill=2E75B6 \
+  --prop data="Q1,Q2,Q3,Q4;100,120,135,150"
+
+# Append a normal row, then merge all 4 cells via gridSpan on tc[1]
+officecli add tables-rows-cols.pptx '/slide[4]/table[1]' --type row \
   --prop c1="Footnote: figures in thousands USD, unaudited."
-officecli set file.pptx /slide[4]/table[1]/tr[3]/tc[1] \
+officecli set tables-rows-cols.pptx '/slide[4]/table[1]/tr[3]/tc[1]' \
   --prop gridSpan=4 --prop fill=F2F2F2 --prop bold=true
+
+# === BOTTOM TABLE: merge.down=N — grouped row labels ===
+# merge.down=N makes a cell span N+1 rows total (anchor + N continuation rows).
+officecli add tables-rows-cols.pptx '/slide[4]' --type table \
+  --prop x=0.5in --prop y=3.8in --prop width=12in --prop height=3in \
+  --prop headerFill=2E75B6 --prop rowHeight=0.5in \
+  --prop data="Region,Month,Sales,Notes;North,Jan,120,;North,Feb,135,;North,Mar,142,;South,Jan,98,;South,Feb,110,"
+
+# "North" label spans rows 2..4 (merge.down=2 = anchor row + 2 continuations)
+officecli set tables-rows-cols.pptx '/slide[4]/table[2]/tr[2]/tc[1]' \
+  --prop merge.down=2 --prop bold=true --prop fill=DEEAF6 --prop valign=middle
+
+# "South" label spans rows 5..6 (merge.down=1 = anchor + 1 continuation)
+officecli set tables-rows-cols.pptx '/slide[4]/table[2]/tr[5]/tc[1]' \
+  --prop merge.down=1 --prop bold=true --prop fill=DEEAF6 --prop valign=middle
+
+officecli close tables-rows-cols.pptx
+officecli validate tables-rows-cols.pptx
 ```
 
-`gridSpan=N` on `tc[1]` flags the next N-1 cells as `hMerge=true` — they
-keep their `tc[N]` slots but render as part of the wide cell. Don't set
-text on the continuation cells.
+**Features:** `gridSpan=N` (horizontal merge — anchor spans N columns; continuation cells skipped), `merge.down=N` (vertical merge — anchor spans N+1 rows total via OOXML `rowSpan` + `vMerge`), `valign=middle` (center text vertically in merged cell)
 
-**Bottom table — `merge.down=N` (grouped row labels):**
+---
+
+## Complete Feature Coverage
+
+| Feature | Slide |
+|---------|-------|
+| **--type row:** append a row to an existing table | 1 |
+| **c1= c2= … cN=:** seed text for appended row cells | 1 |
+| **--type column:** append a column to an existing table | 1 |
+| **column text=:** seed header cell of appended column | 1 |
+| **column width=:** set width of appended column | 1 |
+| **style=medium2 auto-inherit:** theme applies to new rows/cols | 1 |
+| **Manual fill top-up:** headerFill/bodyFill is one-shot at creation | 1 |
+| **set /col[C] width=:** resize individual column width | 2 |
+| **set /tr[R] height=:** resize individual row height | 2 |
+| **rowHeight=:** uniform height for all rows at creation time | 3 |
+| **gridSpan=N:** horizontal cell merge | 4 |
+| **merge.down=N:** vertical cell merge (rowSpan + vMerge) | 4 |
+| **valign=middle:** center text in merged cell | 4 |
+
+## Inspect the Generated File
 
 ```bash
-# Merge "North" cell down 3 rows total (anchor + 2 continuations).
-officecli set file.pptx /slide[4]/table[2]/tr[2]/tc[1] \
-  --prop merge.down=2 --prop bold=true --prop fill=DEEAF6 --prop valign=middle
+# List tables on each slide
+officecli query tables-rows-cols.pptx '/slide[1]' table
+officecli query tables-rows-cols.pptx '/slide[4]' table
+
+# Compare the two table styles after grow on slide 1
+officecli get tables-rows-cols.pptx '/slide[1]/table[1]'
+officecli get tables-rows-cols.pptx '/slide[1]/table[2]'
+
+# Check per-column widths on slide 2
+officecli get tables-rows-cols.pptx '/slide[2]/table[1]/col[3]'
+
+# Check per-row heights on slide 2
+officecli get tables-rows-cols.pptx '/slide[2]/table[1]/tr[4]'
+
+# Verify gridSpan on the footnote cell (slide 4 top table)
+officecli get tables-rows-cols.pptx '/slide[4]/table[1]/tr[3]/tc[1]'
+
+# Verify merge.down on "North" grouped label (slide 4 bottom table)
+officecli get tables-rows-cols.pptx '/slide[4]/table[2]/tr[2]/tc[1]'
 ```
-
-`merge.down=N` sets `rowSpan=N+1` on the anchor cell and `vMerge=true`
-on the N continuation cells directly below. Useful for grouped row
-labels (region/category bands).
-
-**Rule of thumb:** for full-width headers / footnotes / totals, use
-`gridSpan` on a normal row. For grouped row labels spanning vertically,
-use `merge.down`.
-
-**Features:** `add row`, `add column`, `set row.height`, `set col.width`,
-table-level `rowHeight`, `c{N}=value` cell seeding, column `text=` seed,
-`gridSpan` (horizontal merge), `merge.down` (vertical merge).
