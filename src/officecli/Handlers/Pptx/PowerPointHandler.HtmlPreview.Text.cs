@@ -291,15 +291,22 @@ public partial class PowerPointHandler
         if (!string.IsNullOrEmpty(resolvedRunFont))
             styles.Add(CssFontFamilyWithFallback(resolvedRunFont));
 
+        // Size — use explicit run size, fall back to inherited placeholder
+        // default, else the real-PowerPoint plain-textbox default of 18pt.
+        // Decided independently of whether an <a:rPr> element exists: a plain
+        // textbox created with no run properties (rp == null) still gets the
+        // 18pt default so the browser doesn't fall back to its ~12pt default.
+        // Placeholders keep their layout/master size via defaultFontSizeHundredths.
+        // Bug #8(B): multiply by the textbody's normAutofit fontScale (1.0 = none).
+        if (rp?.FontSize?.HasValue == true)
+            styles.Add($"font-size:{rp.FontSize.Value / 100.0 * fontScale:0.##}pt");
+        else if (defaultFontSizeHundredths.HasValue)
+            styles.Add($"font-size:{defaultFontSizeHundredths.Value / 100.0 * fontScale:0.##}pt");
+        else
+            styles.Add($"font-size:{18 * fontScale:0.##}pt");
+
         if (rp != null)
         {
-
-            // Size — use explicit run size, fall back to placeholder default.
-            // Bug #8(B): multiply by the textbody's normAutofit fontScale (1.0 = none).
-            if (rp.FontSize?.HasValue == true)
-                styles.Add($"font-size:{rp.FontSize.Value / 100.0 * fontScale:0.##}pt");
-            else if (defaultFontSizeHundredths.HasValue)
-                styles.Add($"font-size:{defaultFontSizeHundredths.Value / 100.0 * fontScale:0.##}pt");
 
             // Bold
             if (rp.Bold?.Value == true)

@@ -269,21 +269,21 @@ public partial class PowerPointHandler
                     var (pLsInternal, pLsIsPercent) = SpacingConverter.ParsePptLineSpacing(pLsVal);
                     pProps.RemoveAllChildren<Drawing.LineSpacing>();
                     if (pLsIsPercent)
-                        pProps.AppendChild(new Drawing.LineSpacing(
+                        InsertPPrChild(pProps, new Drawing.LineSpacing(
                             new Drawing.SpacingPercent { Val = pLsInternal }));
                     else
-                        pProps.AppendChild(new Drawing.LineSpacing(
+                        InsertPPrChild(pProps, new Drawing.LineSpacing(
                             new Drawing.SpacingPoints { Val = pLsInternal }));
                 }
                 if (properties.TryGetValue("spaceBefore", out var pSbVal) || properties.TryGetValue("spacebefore", out pSbVal))
                 {
                     pProps.RemoveAllChildren<Drawing.SpaceBefore>();
-                    pProps.AppendChild(new Drawing.SpaceBefore(new Drawing.SpacingPoints { Val = SpacingConverter.ParsePptSpacing(pSbVal) }));
+                    InsertPPrChild(pProps, new Drawing.SpaceBefore(new Drawing.SpacingPoints { Val = SpacingConverter.ParsePptSpacing(pSbVal) }));
                 }
                 if (properties.TryGetValue("spaceAfter", out var pSaVal) || properties.TryGetValue("spaceafter", out pSaVal))
                 {
                     pProps.RemoveAllChildren<Drawing.SpaceAfter>();
-                    pProps.AppendChild(new Drawing.SpaceAfter(new Drawing.SpacingPoints { Val = SpacingConverter.ParsePptSpacing(pSaVal) }));
+                    InsertPPrChild(pProps, new Drawing.SpaceAfter(new Drawing.SpacingPoints { Val = SpacingConverter.ParsePptSpacing(pSaVal) }));
                 }
                 // R65 bt-2: <a:tabLst>/<a:tab pos algn/> — accept the compact
                 // compound form emitted by NodeBuilder so dump→replay restores
