@@ -34,11 +34,15 @@ bash run-showcase.sh
 | Run shading / hidden | `shading`, `vanish`, `noproof` |
 | w14 text effects | `textFill`, `textOutline`, `w14glow`, `w14reflection`, `w14shadow` |
 | Border / kerning / layout | `bdr` (text border), `kern` (kerning), `eastAsianLayout.vert`/`.combine`, `rStyle` (character style) |
+| Emphasis & visibility | `em` (着重号 dot/underDot/circle), `effect` (legacy animation), `webHidden`, `fitText` |
 
 This trio exercises the full settable run property surface — the 43
 schema-declared run keys **plus** handler-supported keys that the schema does
 not yet enumerate (`kern`, `bdr`, `eastAsianLayout.*`, run-level `rStyle`,
-`position`, `underline.color`). All of them round-trip through `add` → `get`.
+`position`, `underline.color`), **plus** long-tail OOXML run children handled
+by the generic typed-attribute fallback (`em`, `effect`, `webHidden`,
+`fitText`, `snapToGrid`, `specVanish`). All of them round-trip through
+`add` → `get`.
 
 ## Mixed runs (super/subscript)
 

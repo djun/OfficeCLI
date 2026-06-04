@@ -34,11 +34,17 @@ bash paragraph-showcase.sh
 | Shading variants | `shd`, `shading.val`, `shading.fill`, `shading.color` |
 | Tab stops | `tabs` |
 | Text frame | `framePr.w/.h/.wrap/.hAnchor/.vAnchor/.hSpace/.vSpace` (floating frame / drop-cap) |
+| Paragraph borders | `border=single` / `border=style;size;color` (whole-box `pBdr`) |
+| Vertical text alignment | `textAlignment=top\|center\|baseline\|bottom` |
+| EastAsian typography | `kinsoku`, `autoSpaceDE`, `autoSpaceDN`, `overflowPunct`, `topLinePunct` |
+| Line / indent flags | `suppressLineNumbers`, `suppressAutoHyphens`, `mirrorIndents`, `adjustRightInd`, `snapToGrid` |
 | List numbering | `listStyle`, `start`, `numId`, `numLevel` |
 
 This trio exercises the full settable paragraph property surface — the 60
 schema-declared paragraph keys **plus** the handler-supported `framePr.*` text
-frame, which the schema does not yet enumerate. All of them round-trip through
+frame, **plus** long-tail OOXML pPr children handled by the generic
+typed-attribute fallback (`pBdr` borders, `textAlignment`, the EastAsian
+typography toggles, and the line/indent flags). All of them round-trip through
 `add` → `get`.
 
 ## Two kinds of "bold" on a paragraph

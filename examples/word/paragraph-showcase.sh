@@ -118,6 +118,29 @@ officecli add "$DOCX" /body --type paragraph --prop "text=Framed paragraph — f
     --prop framePr.hAnchor=margin --prop framePr.vAnchor=text \
     --prop framePr.hSpace=180 --prop framePr.vSpace=180
 
+# --- paragraph borders (pBdr) ---
+# Whole-box forms only (`border=...`); per-side `border.top=` works but the
+# handler reports it as an unsupported prop, so the trio sticks to the box form.
+heading "Paragraph borders (pBdr)"
+officecli add "$DOCX" /body --type paragraph --prop "text=Box border, all sides (single)" --prop border=single
+officecli add "$DOCX" /body --type paragraph --prop "text=Red 1pt box (style;size;color)" --prop "border=single;8;FF0000"
+
+# --- vertical text alignment within the line ---
+heading "Vertical text alignment"
+officecli add "$DOCX" /body --type paragraph --prop "text=textAlignment=center (glyphs centered on the line box)" --prop textAlignment=center
+officecli add "$DOCX" /body --type paragraph --prop "text=textAlignment=top" --prop textAlignment=top
+
+# --- EastAsian typography toggles (handled via the generic fallback) ---
+heading "EastAsian typography"
+officecli add "$DOCX" /body --type paragraph --prop "text=kinsoku off — permit breaks at forbidden CJK chars" --prop kinsoku=false
+officecli add "$DOCX" /body --type paragraph --prop "text=autoSpace off — no auto gap between CJK and Latin/digits" --prop autoSpaceDE=false --prop autoSpaceDN=false
+officecli add "$DOCX" /body --type paragraph --prop "text=overflowPunct + topLinePunct on" --prop overflowPunct=true --prop topLinePunct=true
+
+# --- line / hyphenation / indent flags ---
+heading "Line & indent flags"
+officecli add "$DOCX" /body --type paragraph --prop "text=suppressLineNumbers + suppressAutoHyphens" --prop suppressLineNumbers=true --prop suppressAutoHyphens=true
+officecli add "$DOCX" /body --type paragraph --prop "text=mirrorIndents on, adjustRightInd off, snapToGrid off" --prop mirrorIndents=true --prop adjustRightInd=false --prop snapToGrid=false
+
 # --- list numbering (auto-created via listStyle; numId/numLevel reference it) ---
 heading "List numbering"
 officecli add "$DOCX" /body --type paragraph --prop "text=Bulleted item" --prop listStyle=bullet

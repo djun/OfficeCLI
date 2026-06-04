@@ -126,5 +126,17 @@ officecli add "$DOCX" "/body/p[last()]" --type run --prop "text=  red 0.5pt" --p
 officecli add "$DOCX" /body --type paragraph --prop "text=Run character style: "
 officecli add "$DOCX" "/body/p[last()]" --type run --prop "text=Emphasis" --prop rStyle=Emphasis
 
+# --- emphasis mark + legacy / visibility effects ---
+# These run keys are handled by the generic typed-attribute fallback (no
+# curated case in the handler) but still round-trip through add/set/get.
+# em = 着重号 (East-Asian emphasis dots): dot=above, underDot=below, circle.
+heading "Emphasis mark & visibility effects"
+officecli add "$DOCX" /body --type paragraph --prop "text=着重号 dots above (em=dot)" --prop em=dot
+officecli add "$DOCX" /body --type paragraph --prop "text=着重号 dots below (em=underDot)" --prop em=underDot
+officecli add "$DOCX" /body --type paragraph --prop "text=Circle emphasis (em=circle)" --prop em=circle
+officecli add "$DOCX" /body --type paragraph --prop "text=Legacy text animation (effect=blinkBackground)" --prop effect=blinkBackground
+officecli add "$DOCX" /body --type paragraph --prop "text=Hidden in web layout (webHidden)" --prop webHidden=true
+officecli add "$DOCX" /body --type paragraph --prop "text=Fit run to 1 inch (fitText=1440 twips)" --prop fitText=1440
+
 officecli validate "$DOCX"
 echo "Created: $DOCX"
