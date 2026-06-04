@@ -327,6 +327,12 @@ public partial class ExcelHandler
             }
         }
 
+        // Extend maxCol to cover columns that carry an explicit <col> width but no
+        // cell data. Excel renders those columns (the user sized them on purpose),
+        // and they are valid spill targets for a long text cell to their left.
+        foreach (var widthCol in colWidths.Keys)
+            if (widthCol > maxCol) maxCol = widthCol;
+
         // R12a: extend maxRow/maxCol to cover sparkline host cells (which often
         // have no CellValue and would otherwise be cropped out of the grid).
         foreach (var hostRef in sparklineMap.Keys)
@@ -433,33 +439,12 @@ public partial class ExcelHandler
             if (widthPx <= 0) hiddenCols.Add(colIdx);
         }
 
-        // Auto-fit columns without explicit OOXML widths: scan cell content and
-        // compute a width from the longest text in each column. Uses a simple
-        // char-width heuristic (CJK ≈ 1.8 char units, ASCII ≈ 1) converted to
-        // pt via the same chars × 7.0017 × 0.75 formula as explicit widths.
-        // Only columns that have NO entry in colWidths are auto-fitted; columns
-        // with explicit widths (including 0 = hidden) are left as-is.
-        for (int c = 1; c <= maxCol; c++)
-        {
-            if (colWidths.ContainsKey(c)) continue;
-            double maxChars = 0;
-            for (int r = 1; r <= maxRow; r++)
-            {
-                if (!cellMap.TryGetValue((r, c), out var cell)) continue;
-                var text = GetCellDisplayValue(cell);
-                if (string.IsNullOrEmpty(text)) continue;
-                double chars = 0;
-                foreach (var ch in text)
-                    chars += ch > 0x2E7F ? 2.2 : 1.0; // CJK / fullwidth → ~2.2 char units
-                if (chars > maxChars) maxChars = chars;
-            }
-            if (maxChars > 0)
-            {
-                // Add 2 char padding, cap at 60 chars to avoid extreme widths
-                maxChars = Math.Min(maxChars + 2, 60);
-                colWidths[c] = maxChars * 7.0017 * 0.75;
-            }
-        }
+        // Columns without an explicit OOXML <col> width fall through to
+        // defaultColWidthPt (Excel's default ~8.43 chars ≈ 44pt). We do NOT
+        // auto-fit to content width: real Excel keeps the default column width
+        // and lets long text spill into empty right-neighbour cells (see the
+        // spill handling in the cell render below). Auto-fitting would grow the
+        // column to hold the text, defeating both Excel fidelity and spill.
 
         // Build chart lookup: fromRow → chart info for inline insertion
         var chartAtRow = new Dictionary<int, (int toRow, int fromCol, int toCol, string html)>();
@@ -532,7 +517,7 @@ public partial class ExcelHandler
         var ctx = new SheetRenderContext(sheetName, sheetIdx, cellMap, maxRow, maxCol,
             rowHeights, hiddenRows, hiddenCols, mergeMap, frozenRows, frozenCols,
             frozenLeftOffsets, frozenTopOffsets, cfMap, dataBarMap, iconSetMap, sparklineMap,
-            stylesheet, evaluator, defaultColWidthPt, defaultRowHeightPt);
+            stylesheet, evaluator, defaultColWidthPt, defaultRowHeightPt, colWidths);
         RenderTbody(sb, ctx);
         sb.AppendLine("</table>");
 
@@ -611,7 +596,8 @@ public partial class ExcelHandler
         Stylesheet? Stylesheet,
         Core.FormulaEvaluator? Evaluator,
         double DefaultColWidthPt,
-        double DefaultRowHeightPt);
+        double DefaultRowHeightPt,
+        Dictionary<int, double> ColWidths);
 
     // CONSISTENCY(excel-virt): Private ExcelHandler.HtmlPreview.Virt.cs implements
     // OnRenderTbody to emit virtualised rows (JSON data + empty tbody) and sets
@@ -713,10 +699,87 @@ public partial class ExcelHandler
                 content = WrapVerticalAlign(content, GetCellVerticalAlign(cell, ctx.Stylesheet), richHtml);
                 if (ctx.SparklineMap.TryGetValue(cellRef, out var spkSvg)) content = spkSvg + content;
                 var diagSvg = TryBuildCellDiagonalSvg(cell, ctx.Stylesheet) ?? "";
-                rowSb.Append($"<td data-path=\"/{HtmlEncode(ctx.SheetName)}/{cellRef}\"{GetFormulaAttr(cell)}{style}>{diagSvg}{content}</td>");
+                // Text-spill emulation (Excel-fidelity): a non-wrapped left/general
+                // aligned text cell with empty right-neighbours paints its overflow
+                // across those neighbours, clipping at the first occupied cell. The
+                // <td> stays 1 column wide (preserving borders/gridlines/merges); the
+                // text lives in an inline span that overflows visibly up to the summed
+                // empty-neighbour width.
+                var spillWidth = GetSpillWidthPt(ctx, cell, value, r, c);
+                string spillClass = "";
+                if (spillWidth > 0)
+                {
+                    spillClass = " class=\"spill\"";
+                    content = $"<span class=\"spill-text\" style=\"max-width:{spillWidth:0.##}pt\">{content}</span>";
+                }
+                rowSb.Append($"<td data-path=\"/{HtmlEncode(ctx.SheetName)}/{cellRef}\"{GetFormulaAttr(cell)}{spillClass}{style}>{diagSvg}{content}</td>");
             }
         }
         return rowSb.ToString();
+    }
+
+    // ==================== Text spill (Excel overflow into empty neighbours) ====================
+    //
+    // Real Excel renders a long text cell's overflow across adjacent empty cells to
+    // the right (for left/general alignment), clipping only at the first occupied
+    // right-neighbour or the sheet edge. Returns the EXTRA pt budget (own column NOT
+    // included — that is the td's normal width) the inline span may overflow into, or
+    // 0 when the cell must clip at its own boundary (number, wrapText, occupied
+    // neighbour, non-left alignment, etc.).
+    private double GetSpillWidthPt(SheetRenderContext ctx, Cell? cell, string value, int r, int c)
+    {
+        if (cell == null || string.IsNullOrEmpty(value)) return 0;
+
+        // (a) Must be text/general — NOT a number and NOT a numeric formula result.
+        // Excel right-aligns numbers and never spills them.
+        var dt = cell.DataType?.Value;
+        bool isText = dt == CellValues.SharedString || dt == CellValues.InlineString || dt == CellValues.String;
+        bool isBoolOrError = dt == CellValues.Boolean || dt == CellValues.Error;
+        // Formula or general number: if it has a CellValue and isn't a string type,
+        // treat as numeric (Excel does not spill numbers). Booleans/errors centre and
+        // also don't spill.
+        if (!isText || isBoolOrError) return 0;
+
+        // (b) Resolve alignment + wrapText from the cell's xf.
+        bool wrapText = false;
+        string? hAlign = null;
+        if (ctx.Stylesheet?.CellFormats != null)
+        {
+            var si = (int)(cell.StyleIndex?.Value ?? 0);
+            var xfs = ctx.Stylesheet.CellFormats.Elements<CellFormat>().ToList();
+            if (si >= 0 && si < xfs.Count)
+            {
+                var al = xfs[si].Alignment;
+                wrapText = al?.WrapText?.Value == true;
+                if (al?.Horizontal?.HasValue == true) hAlign = al.Horizontal.InnerText;
+            }
+        }
+        if (wrapText) return 0; // wrapped cells clip/wrap, never spill
+
+        // (c) Only left/general aligned text spills to the right (the common case).
+        // right/center/justify/fill keep clipping (handled as follow-up).
+        if (hAlign != null && hAlign != "left" && hAlign != "general" && hAlign != "fill")
+            return 0;
+
+        // (d) Sum widths of the run of EMPTY right-neighbours, stopping at the first
+        // occupied cell, a merged region, a hidden column, or the sheet edge.
+        double extra = 0;
+        for (int nc = c + 1; nc <= ctx.MaxCol; nc++)
+        {
+            if (ctx.HiddenCols.Contains(nc)) break;
+            var neighbourRef = $"{IndexToColumnName(nc)}{r}";
+            if (ctx.MergeMap.ContainsKey(neighbourRef)) break;
+            bool occupied = ctx.CellMap.TryGetValue((r, nc), out var ncell)
+                            && ncell != null
+                            && !string.IsNullOrEmpty(GetCellDisplayValue(ncell));
+            if (occupied) break;
+            extra += ctx.ColWidths.TryGetValue(nc, out var w) ? w : ctx.DefaultColWidthPt;
+        }
+        if (extra <= 0) return 0;
+
+        // Own column width + the empty-neighbour run = the span's max overflow budget.
+        double ownWidth = ctx.ColWidths.TryGetValue(c, out var ow) ? ow : ctx.DefaultColWidthPt;
+        return ownWidth + extra;
     }
 
     // CONSISTENCY(excel-virt): Private ExcelHandler.HtmlPreview.Virt.cs implements
@@ -2718,6 +2781,20 @@ public partial class ExcelHandler
             vertical-align: bottom;
             max-width: 500px;
             word-break: break-all; /* CJK text wrapping support */
+        }
+        /* Text spill: a left/general text cell with empty right-neighbours paints
+           its overflow across them (Excel fidelity). The td stays 1 column wide so
+           borders/gridlines/merges are unaffected; overflow:visible lets the inner
+           span bleed into the (empty) neighbour cells. The span clips at max-width =
+           own width + summed empty-neighbour widths, stopping before the first
+           occupied cell — matching real Excel. */
+        td.spill { overflow: visible; }
+        td.spill .spill-text {
+            display: inline-block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: clip;
+            vertical-align: bottom;
         }
         tbody tr:first-child td { box-shadow: inset -1px -1px 0 #e0e0e0, inset 0 1px 0 #e0e0e0; }
         tr td:first-of-type { box-shadow: inset -1px -1px 0 #e0e0e0, inset 1px 0 0 #e0e0e0; }
