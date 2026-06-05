@@ -780,12 +780,23 @@ public partial class ExcelHandler
                 // <td> stays 1 column wide (preserving borders/gridlines/merges); the
                 // text lives in an inline span that overflows visibly up to the summed
                 // empty-neighbour width.
-                var spillWidth = GetSpillWidthPt(ctx, cell, value, r, c);
+                // Shrink-to-fit (Excel-fidelity): a shrinkToFit cell with overflowing
+                // text compresses the font so the WHOLE string fits — it never spills
+                // and never truncates. Branch before the spill/ellipsis logic.
                 string spillClass = "";
-                if (spillWidth > 0)
+                var shrinkPt = GetShrinkToFitFontPt(ctx, cell, value, c);
+                if (shrinkPt > 0)
                 {
-                    spillClass = " class=\"spill\"";
-                    content = $"<span class=\"spill-text\" style=\"max-width:{spillWidth:0.##}pt\">{content}</span>";
+                    content = $"<span class=\"shrink-fit\" style=\"font-size:{shrinkPt:0.##}pt;white-space:nowrap\">{content}</span>";
+                }
+                else
+                {
+                    var spillWidth = GetSpillWidthPt(ctx, cell, value, r, c);
+                    if (spillWidth > 0)
+                    {
+                        spillClass = " class=\"spill\"";
+                        content = $"<span class=\"spill-text\" style=\"max-width:{spillWidth:0.##}pt\">{content}</span>";
+                    }
                 }
                 if (ctx.AutoFilterCells.Contains(cellRef)) content += AutoFilterIndicatorHtml;
                 rowSb.Append($"<td data-path=\"/{HtmlEncode(ctx.SheetName)}/{cellRef}\"{GetFormulaAttr(cell)}{spillClass}{style}>{diagSvg}{content}</td>");
@@ -892,6 +903,45 @@ public partial class ExcelHandler
         // Own column width + the empty-neighbour run = the span's max overflow budget.
         double ownWidth = ctx.ColWidths.TryGetValue(c, out var ow) ? ow : ctx.DefaultColWidthPt;
         return ownWidth + extra;
+    }
+
+    // ==================== Shrink-to-fit (Excel font compression) ====================
+    //
+    // A cell with shrinkToFit alignment whose text overflows the column is rendered
+    // by Excel with the font SHRUNK so the WHOLE string fits — never truncated. We
+    // approximate the shrink: estimate text width = chars × fontPt × 0.62 (the same
+    // glyph-advance model as the spill heuristic), then scale = colWidthPt / textWidth
+    // (clamped to ≤1 and a sane floor). Returns the reduced font-size in pt, or 0 when
+    // the cell isn't shrinkToFit or already fits (no shrink needed).
+    private double GetShrinkToFitFontPt(SheetRenderContext ctx, Cell? cell, string value, int c)
+    {
+        if (cell == null || string.IsNullOrEmpty(value)) return 0;
+        if (ctx.Stylesheet?.CellFormats == null) return 0;
+
+        var si = (int)(cell.StyleIndex?.Value ?? 0);
+        var xfs = ctx.Stylesheet.CellFormats.Elements<CellFormat>().ToList();
+        if (si < 0 || si >= xfs.Count) return 0;
+        var xf = xfs[si];
+        if (xf.Alignment?.ShrinkToFit?.Value != true) return 0;
+        if (xf.Alignment?.WrapText?.Value == true) return 0; // wrap takes precedence
+
+        // Base font size for this cell.
+        double basePt = 11.0;
+        var fontId = xf.FontId?.Value ?? 0;
+        if (ctx.Stylesheet.Fonts != null && fontId < (uint)ctx.Stylesheet.Fonts.Elements<Font>().Count())
+            basePt = ctx.Stylesheet.Fonts.Elements<Font>().ElementAt((int)fontId).FontSize?.Val?.Value ?? 11.0;
+
+        double colWidthPt = ctx.ColWidths.TryGetValue(c, out var w) ? w : ctx.DefaultColWidthPt;
+        if (colWidthPt <= 0) return 0;
+
+        // Estimated text width at the base font, minus a little cell padding (~3pt).
+        double textWidthPt = value.Length * basePt * 0.62;
+        double avail = Math.Max(colWidthPt - 3.0, 1.0);
+        if (textWidthPt <= avail) return 0; // already fits — no shrink
+
+        double scale = avail / textWidthPt;
+        double shrunk = basePt * scale;
+        return Math.Max(shrunk, 3.0); // floor so it stays legible
     }
 
     // CONSISTENCY(excel-virt): Private ExcelHandler.HtmlPreview.Virt.cs implements
@@ -2920,6 +2970,43 @@ public partial class ExcelHandler
         // Fraction formats: "# ?/?", "# ??/??", "?/?" etc.
         // Denominator-digit count = number of '?' after the slash → max denominator
         // (1→9, 2→99, 3→999). Find the best rational approximation within that limit.
+        // Fixed-denominator fraction: a literal integer denominator after the
+        // slash (e.g. "# ?/8", "# ??/16", "?/100"). Round the fractional part to
+        // the nearest numerator/N and show numerator/N (numerator NOT reduced).
+        // The whole-part token before the space ('#'/'0') governs the integer split.
+        var fixedFracMatch = System.Text.RegularExpressions.Regex.Match(
+            fmtCode, @"(?:^|\s)([#0]*)\s*[?#]*\s*/\s*(\d+)\s*$");
+        if (fixedFracMatch.Success)
+        {
+            int fixedDen = int.Parse(fixedFracMatch.Groups[2].Value);
+            if (fixedDen >= 1)
+            {
+                bool hasWholePart = fmtCode.TrimStart().Contains(' ');
+                bool fneg = value < 0;
+                double fabs = Math.Abs(value);
+                long fwhole = (long)Math.Floor(fabs);
+                double ffrac = fabs - fwhole;
+                long num = (long)Math.Round(ffrac * fixedDen);
+                if (num == fixedDen) { fwhole += 1; num = 0; }
+                if (!hasWholePart)
+                {
+                    // No integer split: fold the whole part into the numerator.
+                    num += fwhole * fixedDen;
+                    fwhole = 0;
+                }
+
+                var fsb = new StringBuilder();
+                if (fneg) fsb.Append('-');
+                if (num == 0)
+                    fsb.Append(fwhole.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                else if (!hasWholePart || fwhole == 0)
+                    fsb.Append($"{num}/{fixedDen}");
+                else
+                    fsb.Append($"{fwhole} {num}/{fixedDen}");
+                return fsb.ToString();
+            }
+        }
+
         var fracMatch = System.Text.RegularExpressions.Regex.Match(fmtCode, @"\?+\s*/\s*(\?+)");
         if (fracMatch.Success)
         {
@@ -3393,6 +3480,15 @@ public partial class ExcelHandler
             overflow: hidden;
             text-overflow: clip;
             vertical-align: bottom;
+        }
+        /* Shrink-to-fit: the font is compressed (inline font-size) so the whole
+           string fits the column. Keep it inline-block + clip (never ellipsis) so
+           the full text shows; the td's ellipsis rule must not re-truncate it. */
+        .shrink-fit {
+            display: inline-block;
+            white-space: nowrap;
+            text-overflow: clip;
+            overflow: visible;
         }
         table:not(.no-grid) tbody tr:first-child td { box-shadow: inset -1px -1px 0 #e0e0e0, inset 0 1px 0 #e0e0e0; }
         table:not(.no-grid) tr td:first-of-type { box-shadow: inset -1px -1px 0 #e0e0e0, inset 1px 0 0 #e0e0e0; }
