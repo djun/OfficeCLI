@@ -340,7 +340,17 @@ public partial class WordHandler
 
         // Paragraph-level RTL (w:bidi) — flips the paragraph direction
         if (pProps.BiDi != null && (pProps.BiDi.Val == null || pProps.BiDi.Val.Value))
+        {
             parts.Add("direction:rtl");
+            // Word right-aligns an RTL paragraph that has no explicit jc
+            // (start edge = right). The preview's global `p{text-align:left}`
+            // rule otherwise forces it left, so emit text-align:right when no
+            // explicit alignment was resolved above. Paragraphs with an
+            // explicit jc (center/right/justify) already added text-align and
+            // must not be overridden.
+            if (jc == null)
+                parts.Add("text-align:right");
+        }
 
         // Drop cap detection — used to suppress text-indent
         var framePrForIndent = pProps.GetFirstChild<FrameProperties>();

@@ -517,6 +517,37 @@ public partial class WordHandler
         headerTemplate = pageNumPattern.Replace(headerTemplate,
             "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
         sb.AppendLine("  var htpl=" + JsStringLiteral(headerTemplate) + ";");
+        // Even-page header/footer continuation templates. When the document
+        // has evenAndOddHeaders enabled AND section 0 defines an even-type
+        // header/footer part, JS-created continuation pages whose final page
+        // number is even must clone the EVEN template instead of the odd
+        // (htpl/ftpl) one — mirroring the server-side PickHeaderFooter parity
+        // logic for the first server-rendered page. Emitted as empty strings
+        // otherwise so the JS picker transparently falls back to htpl/ftpl.
+        string evenHeaderTemplate = "", evenFooterTemplate = "";
+        if (evenAndOddGlobal)
+        {
+            if (sectionHeaders.TryGetValue(0, out var ehb) && ehb.Even != null)
+            {
+                var t = pageNumPattern.Replace(ehb.Even,
+                    "$1<span class=\"page-num-field\"><!--PAGE_NUM--></span>$2", 1);
+                evenHeaderTemplate = pageNumPattern.Replace(t,
+                    "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
+            }
+            if (sectionFooters.TryGetValue(0, out var efb) && efb.Even != null)
+            {
+                var t = pageNumPattern.Replace(efb.Even,
+                    "$1<span class=\"page-num-field\"><!--PAGE_NUM--></span>$2", 1);
+                evenFooterTemplate = pageNumPattern.Replace(t,
+                    "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
+            }
+        }
+        sb.AppendLine("  var etpl=" + JsStringLiteral(evenHeaderTemplate) + ";");
+        sb.AppendLine("  var eftpl=" + JsStringLiteral(evenFooterTemplate) + ";");
+        // Pick the header template for a 1-based page number: even pages use
+        // the even template when present, all others use the odd/default htpl.
+        sb.AppendLine("  function pickHtpl(n){return (etpl&&n%2===0)?etpl:htpl;}");
+        sb.AppendLine("  function pickFtpl(n){return (eftpl&&n%2===0)?eftpl:ftpl;}");
         sb.AppendLine(@"
   function paginate(){
     var pages=document.querySelectorAll('.page');
@@ -732,14 +763,15 @@ public partial class WordHandler
           for(var mi=segStart;mi<segEnd;mi++){
             nb.appendChild(movable[mi].el);
           }
-          if(htpl){
+          var _hT=pickHtpl(pi+s+2);
+          if(_hT){
             var nh=document.createElement('div');
-            nh.innerHTML=htpl.replace('<!--PAGE_NUM-->',(pi+s+2).toString());
+            nh.innerHTML=_hT.replace('<!--PAGE_NUM-->',(pi+s+2).toString());
             if(nh.firstChild)np.appendChild(nh.firstChild);
           }
           np.appendChild(nb);
           var nf=document.createElement('div');
-          nf.innerHTML=ftpl.replace('<!--PAGE_NUM-->',(pi+s+2).toString());
+          nf.innerHTML=pickFtpl(pi+s+2).replace('<!--PAGE_NUM-->',(pi+s+2).toString());
           if(nf.firstChild)np.appendChild(nf.firstChild);
           nw.appendChild(np);
           prevWrapper.after(nw);
@@ -764,14 +796,15 @@ public partial class WordHandler
         for(var mi=0;mi<toMove.length;mi++){
           nb.appendChild(toMove[mi]);
         }
-        if(htpl){
+        var _hT=pickHtpl(pi+2);
+        if(_hT){
           var nh=document.createElement('div');
-          nh.innerHTML=htpl.replace('<!--PAGE_NUM-->',(pi+2).toString());
+          nh.innerHTML=_hT.replace('<!--PAGE_NUM-->',(pi+2).toString());
           if(nh.firstChild)np.appendChild(nh.firstChild);
         }
         np.appendChild(nb);
         var nf=document.createElement('div');
-        nf.innerHTML=ftpl.replace('<!--PAGE_NUM-->',(pi+2).toString());
+        nf.innerHTML=pickFtpl(pi+2).replace('<!--PAGE_NUM-->',(pi+2).toString());
         if(nf.firstChild)np.appendChild(nf.firstChild);
         nw.appendChild(np);
         var parentWrapper=page.closest('.page-wrapper');
