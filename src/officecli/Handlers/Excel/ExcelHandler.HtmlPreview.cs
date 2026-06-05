@@ -21,6 +21,12 @@ public partial class ExcelHandler
         if (_excelThemeColors != null) return _excelThemeColors;
         var colorScheme = _doc.WorkbookPart?.ThemePart?.Theme?.ThemeElements?.ColorScheme;
         _excelThemeColors = Core.ThemeColorResolver.BuildColorMap(colorScheme);
+        // Blank workbooks (BlankDocCreator) carry no ThemePart, so the map is
+        // empty and theme-indexed colors (e.g. <color theme="4"/> = accent1)
+        // would render black. Real Excel falls back to the default Office theme;
+        // backfill any missing scheme name with the standard Office palette.
+        foreach (var (name, hex) in DefaultOfficeThemeColors)
+            if (!_excelThemeColors.ContainsKey(name)) _excelThemeColors[name] = hex;
         return _excelThemeColors;
     }
 
@@ -30,6 +36,17 @@ public partial class ExcelHandler
     /// </summary>
     private static readonly string[] ThemeIndexToName =
         ["lt1", "dk1", "lt2", "dk2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6"];
+
+    // Standard Office (default Excel) theme palette — used as a fallback when the
+    // workbook has no ThemePart (e.g. blank docs created by BlankDocCreator).
+    private static readonly Dictionary<string, string> DefaultOfficeThemeColors =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["dk1"] = "000000", ["lt1"] = "FFFFFF", ["dk2"] = "44546A", ["lt2"] = "E7E6E6",
+            ["accent1"] = "4472C4", ["accent2"] = "ED7D31", ["accent3"] = "A5A5A5",
+            ["accent4"] = "FFC000", ["accent5"] = "5B9BD5", ["accent6"] = "70AD47",
+            ["hlink"] = "0563C1", ["folHlink"] = "954F72",
+        };
 
     private string? ResolveThemeColor(uint themeIndex, double? tintValue = null)
     {
@@ -400,6 +417,20 @@ public partial class ExcelHandler
                 hiddenRows.Add(rowIdx);
         }
 
+        // Rotated-text rows auto-grow in real Excel so the vertical string is
+        // visible. The HTML <td> only carries transform:rotate, which keeps the
+        // glyph box at its un-rotated width — the row stays at default height and
+        // clips. Bump the row's min-height to the rotated text extent (approx
+        // text-length × font-size for ~90°), consistent with the spill/width
+        // estimation heuristics elsewhere in this renderer.
+        foreach (var ((r, _), cell) in cellMap)
+        {
+            var extent = EstimateRotatedCellHeightPt(cell, stylesheet, defaultFontPt);
+            if (extent <= 0) continue;
+            if (!rowHeights.TryGetValue(r, out var existing) || existing < extent)
+                rowHeights[r] = extent;
+        }
+
         // Compute cumulative top offsets for frozen rows (for sticky positioning)
         // Includes thead height (~24pt for column headers)
         var frozenTopOffsets = new Dictionary<int, double>();
@@ -730,6 +761,42 @@ public partial class ExcelHandler
     // included — that is the td's normal width) the inline span may overflow into, or
     // 0 when the cell must clip at its own boundary (number, wrapText, occupied
     // neighbour, non-left alignment, etc.).
+    // Estimate the row min-height (pt) a cell needs because its text is rotated to
+    // (near-)vertical. Real Excel auto-expands the row so the full string shows; the
+    // CSS transform:rotate alone does not. Returns 0 when the cell isn't (near-)
+    // vertically rotated or has no text. Approximation only — like the spill/width
+    // heuristics, the goal is "not clipped", matching Excel's auto-expand.
+    private double EstimateRotatedCellHeightPt(Cell? cell, Stylesheet? stylesheet, double defaultFontPt)
+    {
+        if (cell == null || stylesheet?.CellFormats == null) return 0;
+        var si = (int)(cell.StyleIndex?.Value ?? 0);
+        if (si >= stylesheet.CellFormats.Elements<CellFormat>().Count()) return 0;
+        var xf = stylesheet.CellFormats.Elements<CellFormat>().ElementAt(si);
+        var rot = xf.Alignment?.TextRotation?.Value;
+        // Only steep rotations (near-vertical) materially grow the row. Excel:
+        // 1–90 = CCW, 91–180 = CW, 255 = stacked vertical. Treat >=75° / 165–180 /
+        // 255 as vertical enough to need height.
+        bool vertical = rot.HasValue &&
+            (rot.Value == 255 || (rot.Value >= 75 && rot.Value <= 105) || rot.Value >= 165);
+        if (!vertical) return 0;
+
+        // Cell text length: shared-string / inline-string / raw value.
+        string text = GetFormattedCellValue(cell, stylesheet);
+        if (string.IsNullOrEmpty(text)) return 0;
+
+        // Font size for this cell.
+        double fontPt = defaultFontPt;
+        var fontId = xf.FontId?.Value ?? 0;
+        if (stylesheet.Fonts != null && fontId < (uint)stylesheet.Fonts.Elements<Font>().Count())
+            fontPt = stylesheet.Fonts.Elements<Font>().ElementAt((int)fontId).FontSize?.Val?.Value ?? defaultFontPt;
+
+        // Vertical text stacks glyphs along the column: extent ≈ chars × glyph advance.
+        // ~0.62em per glyph advance matches the spill width heuristic's char model;
+        // clamp so a single huge string doesn't blow up the layout.
+        var extent = text.Length * fontPt * 0.62 + fontPt;
+        return Math.Min(extent, 600.0);
+    }
+
     private double GetSpillWidthPt(SheetRenderContext ctx, Cell? cell, string value, int r, int c)
     {
         if (cell == null || string.IsNullOrEmpty(value)) return 0;
@@ -1966,7 +2033,17 @@ public partial class ExcelHandler
                 // Excel: 0-90 = counter-clockwise, 91-180 = clockwise (91=1°CW, 180=90°CW)
                 // Excel: 1-90 = CCW (CSS negative), 91-180 = CW (CSS positive, 91=1°, 180=90°)
                 int cssDeg = rot <= 90 ? -(int)rot : (int)rot - 90;
-                styles.Add($"transform:rotate({cssDeg}deg);white-space:nowrap");
+                // The td's default rule clips its content (overflow:hidden +
+                // text-overflow:ellipsis + max-width:500px) to the un-rotated column
+                // width, so after the rotate the string truncates ("Rotat…") even
+                // though the row was grown tall enough. Override those for rotated
+                // cells: keep the box at column width but let the rotated text run to
+                // its full length (vertically, within the expanded row height).
+                styles.Add($"transform:rotate({cssDeg}deg)");
+                styles.Add("white-space:nowrap");
+                styles.Add("overflow:visible");
+                styles.Add("text-overflow:clip");
+                styles.Add("max-width:none");
             }
         }
 
@@ -2391,6 +2468,11 @@ public partial class ExcelHandler
                 cleanFmt = cleanFmt.Replace(sym, "");
             }
         }
+        // Currency-symbol extraction can leave an EMPTY quote remnant ("") where a
+        // quoted symbol used to be (accounting "$"-prefixed sections). Drop those so
+        // the downstream paren / quoted-literal checks see the real leading token
+        // (e.g. "" ( #,##0.00 ) -> ( #,##0.00 )).
+        cleanFmt = cleanFmt.Replace("\"\"", "").Trim();
         // Handle quoted prefix/suffix: "USD "
         var quoteMatch = System.Text.RegularExpressions.Regex.Match(cleanFmt, "^\"([^\"]+)\"");
         if (quoteMatch.Success) { prefix += quoteMatch.Groups[1].Value; cleanFmt = cleanFmt[quoteMatch.Length..]; }
@@ -2501,6 +2583,13 @@ public partial class ExcelHandler
                 sb.Append($"{whole} {bestNum}/{bestDen}");
             return sb.ToString();
         }
+
+        // Digit-placeholder-only pattern (only '?' / spaces, no '0' or '#'). Excel's
+        // '?' shows a space for an insignificant digit, so a section like "??" formats
+        // any value (notably 0 in an accounting zero section) as blanks — no digits.
+        var phTrim = fmtCode.Trim();
+        if (phTrim.Length > 0 && phTrim.All(c => c == '?' || c == ' '))
+            return new string(' ', phTrim.Length);
 
         // Elapsed time format: [h]:mm:ss or [mm]:ss (total hours/minutes, can exceed 24/60)
         var elapsedMatch = System.Text.RegularExpressions.Regex.Match(fmtCode, @"\[(h+)\]:?(mm)?:?(ss)?");
