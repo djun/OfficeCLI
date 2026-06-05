@@ -498,9 +498,13 @@ public partial class WordHandler
     /// <summary>Load an image part by relationship ID and return as a base64 data URI.</summary>
     private string? LoadImageAsDataUri(string relId)
     {
-        var mainPart = _doc.MainDocumentPart;
-        if (mainPart == null) return null;
-        return HtmlPreviewHelper.PartToDataUri(mainPart, relId);
+        // Header/footer images store their ImagePart + relationship on the
+        // HeaderPart/FooterPart, not MainDocumentPart. Use the host part for
+        // the element currently being rendered when set; else fall back to
+        // the document part (body path).
+        var hostPart = _ctx.ImageHostPart ?? (DocumentFormat.OpenXml.Packaging.OpenXmlPart?)_doc.MainDocumentPart;
+        if (hostPart == null) return null;
+        return HtmlPreviewHelper.PartToDataUri(hostPart, relId);
     }
 
     // ==================== Group / Shape Rendering ====================

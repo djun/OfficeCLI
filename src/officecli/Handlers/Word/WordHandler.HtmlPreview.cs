@@ -34,6 +34,13 @@ public partial class WordHandler
         public bool FnRestartEachSection { get; set; }
         public Dictionary<int, string> FnLabels { get; } = new();
 
+        // Image-relationship host part for the element currently being
+        // rendered. Body content resolves r:embed against MainDocumentPart,
+        // but a header/footer image's ImagePart + rel live on the
+        // HeaderPart/FooterPart, so LoadImageAsDataUri must look there.
+        // null → fall back to MainDocumentPart (body path).
+        public DocumentFormat.OpenXml.Packaging.OpenXmlPart? ImageHostPart { get; set; }
+
         // CJK line-break tracking: accumulate character widths and insert <br> at Word-compatible positions
         public double LineWidthPt { get; set; }      // available width for current line
         public double LineAccumPt { get; set; }       // accumulated width on current line
@@ -1551,7 +1558,10 @@ public partial class WordHandler
                 if (hp.Header == null) continue;
                 if (!HeaderFooterHasContent(hp.Header)) continue;
                 sb.AppendLine($"<div class=\"{cssClass}\">");
+                var savedHost = _ctx.ImageHostPart;
+                _ctx.ImageHostPart = hp;
                 RenderHeaderFooterBody(sb, hp.Header);
+                _ctx.ImageHostPart = savedHost;
                 sb.AppendLine("</div>");
                 break;
             }
@@ -1565,7 +1575,10 @@ public partial class WordHandler
                 if (fp.Footer == null) continue;
                 if (!HeaderFooterHasContent(fp.Footer)) continue;
                 sb.AppendLine($"<div class=\"{cssClass}\">");
+                var savedHost = _ctx.ImageHostPart;
+                _ctx.ImageHostPart = fp;
                 RenderHeaderFooterBody(sb, fp.Footer);
+                _ctx.ImageHostPart = savedHost;
                 sb.AppendLine("</div>");
                 break;
             }
@@ -2350,7 +2363,10 @@ public partial class WordHandler
                     {
                         var sb = new StringBuilder();
                         sb.Append("<div class=\"doc-header\">");
+                        var savedHost = _ctx.ImageHostPart;
+                        _ctx.ImageHostPart = hp;
                         RenderHeaderFooterBody(sb, hp.Header);
+                        _ctx.ImageHostPart = savedHost;
                         sb.Append("</div>");
                         html = sb.ToString();
                     }
@@ -2359,7 +2375,10 @@ public partial class WordHandler
                     {
                         var sb = new StringBuilder();
                         sb.Append("<div class=\"doc-footer\">");
+                        var savedHost = _ctx.ImageHostPart;
+                        _ctx.ImageHostPart = fp;
                         RenderHeaderFooterBody(sb, fp.Footer);
+                        _ctx.ImageHostPart = savedHost;
                         sb.Append("</div>");
                         html = sb.ToString();
                     }
