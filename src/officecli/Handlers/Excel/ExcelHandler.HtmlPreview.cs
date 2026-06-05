@@ -2196,7 +2196,15 @@ public partial class ExcelHandler
                     style.Append($"font-family:'{fontName}';");
             }
             var text = HtmlEncode(run.Text?.Text ?? "");
-            sb.Append(style.Length > 0 ? $"<span style=\"{style}\">{text}</span>" : $"<span>{text}</span>");
+            var span = style.Length > 0 ? $"<span style=\"{style}\">{text}</span>" : $"<span>{text}</span>";
+            // Mirror the cell-level vertical-align path (GetCellVerticalAlign /
+            // WrapVerticalAlign): wrap in semantic <sup>/<sub> which gives both
+            // the baseline shift and the ~0.83em size reduction, while the inner
+            // <span> keeps the run's font/color.
+            var vAlign = rPr?.GetFirstChild<VerticalTextAlignment>()?.Val?.Value;
+            if (vAlign == VerticalAlignmentRunValues.Superscript) span = $"<sup>{span}</sup>";
+            else if (vAlign == VerticalAlignmentRunValues.Subscript) span = $"<sub>{span}</sub>";
+            sb.Append(span);
         }
         return sb.ToString();
     }
