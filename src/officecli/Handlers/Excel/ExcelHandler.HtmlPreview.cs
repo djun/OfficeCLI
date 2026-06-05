@@ -1547,6 +1547,46 @@ public partial class ExcelHandler
             return bottom ? cellValue <= threshold : cellValue >= threshold;
         }
 
+        if (ruleType == ConditionalFormatValues.AboveAverage && cellValue.HasValue)
+        {
+            // Color cells above (or below) the numeric average of the rule's range.
+            // The aboveAverage attribute defaults to true (omitted == above);
+            // stdDev shifts the threshold by N standard deviations; equalAverage
+            // includes values equal to the threshold.
+            var nums = CollectCfRangeNumbers(rule, sheetData);
+            if (nums.Count == 0) return false;
+            var avg = nums.Average();
+            var above = rule.AboveAverage?.Value ?? true;
+            var equal = rule.EqualAverage?.Value ?? false;
+            var threshold = avg;
+            if (rule.StdDev?.Value is int sd && sd != 0)
+            {
+                var variance = nums.Select(n => (n - avg) * (n - avg)).Sum() / nums.Count;
+                var stdDev = Math.Sqrt(variance);
+                threshold = above ? avg + sd * stdDev : avg - sd * stdDev;
+            }
+            if (above) return equal ? cellValue >= threshold : cellValue > threshold;
+            return equal ? cellValue <= threshold : cellValue < threshold;
+        }
+
+        if (ruleType == ConditionalFormatValues.ContainsText
+            || ruleType == ConditionalFormatValues.NotContainsText
+            || ruleType == ConditionalFormatValues.BeginsWith
+            || ruleType == ConditionalFormatValues.EndsWith)
+        {
+            // Text-operator rules: compare the cell's displayed text against the
+            // rule's <text> attribute. Case-insensitive, matching Excel.
+            var needle = rule.Text?.Value ?? "";
+            if (needle.Length == 0) return false;
+            var hay = cell != null ? GetCellDisplayValue(cell) : "";
+            var cmp = StringComparison.OrdinalIgnoreCase;
+            if (ruleType == ConditionalFormatValues.ContainsText) return hay.Contains(needle, cmp);
+            if (ruleType == ConditionalFormatValues.NotContainsText) return !hay.Contains(needle, cmp);
+            if (ruleType == ConditionalFormatValues.BeginsWith) return hay.StartsWith(needle, cmp);
+            if (ruleType == ConditionalFormatValues.EndsWith) return hay.EndsWith(needle, cmp);
+            return false;
+        }
+
         if (ruleType == ConditionalFormatValues.DuplicateValues || ruleType == ConditionalFormatValues.UniqueValues)
         {
             // Color cells whose value appears more than once (duplicateValues)
@@ -2276,7 +2316,18 @@ public partial class ExcelHandler
             cell.DataType?.Value == CellValues.InlineString ||
             cell.DataType?.Value == CellValues.String ||
             cell.DataType?.Value == CellValues.Error)
+        {
+            // Text-format codes (containing the '@' placeholder) wrap the cell text
+            // with quoted literals, e.g. "Hello, "@ → "Hello, World". Excel applies
+            // the @-section of the format only to text values.
+            if (cell.DataType?.Value != CellValues.Error)
+            {
+                var textFmt = ResolveCellFormatCode(cell, stylesheet);
+                if (textFmt != null && ContainsCharOutsideQuotes(textFmt, '@'))
+                    return ApplyTextFormat(rawValue, textFmt);
+            }
             return rawValue;
+        }
 
         if (!double.TryParse(rawValue, System.Globalization.NumberStyles.Any,
                 System.Globalization.CultureInfo.InvariantCulture, out var numVal))
@@ -2539,6 +2590,45 @@ public partial class ExcelHandler
         return GetNumberFormatColor(numVal, fmtCode);
     }
 
+    /// <summary>
+    /// Apply the text-format (@) section of a number-format code to a string
+    /// value. The '@' placeholder is replaced by the cell text; quoted literals
+    /// and escaped chars around it are emitted verbatim. Other format markers
+    /// ([$..], [Color], _x fill placeholders) are stripped. Multi-section codes
+    /// (pos;neg;zero;text) use the 4th (text) section when present.
+    /// </summary>
+    private static string ApplyTextFormat(string text, string fmtCode)
+    {
+        // The text section is the 4th in a multi-section code; if fewer sections
+        // exist, use whichever section actually carries the '@' placeholder.
+        if (fmtCode.Contains(';'))
+        {
+            var sections = fmtCode.Split(';');
+            var sec = sections.Length >= 4 ? sections[3]
+                : sections.FirstOrDefault(s => ContainsCharOutsideQuotes(s, '@'));
+            if (sec == null) return text;
+            fmtCode = sec;
+        }
+
+        // Strip non-literal markers that carry no displayable text.
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\[[^\]]*\]", "");
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"_.", "");
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\*.", "");
+
+        var sb = new StringBuilder();
+        bool inQuote = false;
+        for (int i = 0; i < fmtCode.Length; i++)
+        {
+            var ch = fmtCode[i];
+            if (ch == '"') { inQuote = !inQuote; continue; }
+            if (inQuote) { sb.Append(ch); continue; }
+            if (ch == '\\') { if (i + 1 < fmtCode.Length) sb.Append(fmtCode[++i]); continue; }
+            if (ch == '@') { sb.Append(text); continue; }
+            sb.Append(ch);
+        }
+        return sb.ToString();
+    }
+
     private static string ApplyNumberFormat(double value, string fmtCode)
     {
         // Handle multi-section format codes: positive;negative;zero
@@ -2610,8 +2700,22 @@ public partial class ExcelHandler
         // Strip [Color] markers: [Red], [Blue], [Green], [Color N], etc.
         fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\[(Red|Blue|Green|Yellow|White|Black|Cyan|Magenta|Color\s*\d+)\]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
 
-        // Strip [$...] locale/currency specifiers (e.g. [$-409], [$€-407], [$¥-411])
-        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\[\$[^\]]*\]", "").Trim();
+        // Strip [DBNumN] CJK-numeral modifiers cleanly (full numeral conversion is
+        // out of scope; render the plain number rather than mangled bracket text).
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\[DBNum\d+\]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+
+        // [$...] locale/currency specifiers. The [$<symbol>-<lcid>] form carries a
+        // currency symbol (the text before the '-', e.g. "USD", "€", "¥") that real
+        // Excel emits as a literal; preserve it as a quoted literal in place so the
+        // downstream prefix/suffix extraction picks it up. The bare [$-409] form
+        // (locale only, no symbol) is dropped entirely.
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\[\$([^\]]*)\]", m =>
+        {
+            var inner = m.Groups[1].Value;
+            var dash = inner.IndexOf('-');
+            var sym = dash >= 0 ? inner[..dash] : inner;
+            return string.IsNullOrEmpty(sym) ? "" : "\"" + sym + "\"";
+        }).Trim();
 
         // Strip Excel numfmt special characters:
         // _X = space placeholder, *X = fill character, \X = literal character escape
@@ -2663,9 +2767,11 @@ public partial class ExcelHandler
         // the downstream paren / quoted-literal checks see the real leading token
         // (e.g. "" ( #,##0.00 ) -> ( #,##0.00 )).
         cleanFmt = cleanFmt.Replace("\"\"", "").Trim();
-        // Handle quoted prefix/suffix: "USD "
-        var quoteMatch = System.Text.RegularExpressions.Regex.Match(cleanFmt, "^\"([^\"]+)\"");
-        if (quoteMatch.Success) { prefix += quoteMatch.Groups[1].Value; cleanFmt = cleanFmt[quoteMatch.Length..]; }
+        // Handle quoted prefix/suffix: "USD ". A literal space immediately after a
+        // quoted prefix (e.g. [$USD-409] #,##0.00 → "USD" #,##0.00) is part of the
+        // displayed prefix and must survive the later cleanFmt.Trim().
+        var quoteMatch = System.Text.RegularExpressions.Regex.Match(cleanFmt, "^\"([^\"]+)\"( *)");
+        if (quoteMatch.Success) { prefix += quoteMatch.Groups[1].Value + quoteMatch.Groups[2].Value; cleanFmt = cleanFmt[quoteMatch.Length..]; }
         var quoteSuffix = System.Text.RegularExpressions.Regex.Match(cleanFmt, "\"([^\"]+)\"$");
         if (quoteSuffix.Success) { suffix = quoteSuffix.Groups[1].Value + suffix; cleanFmt = cleanFmt[..^quoteSuffix.Length]; }
 
@@ -2853,6 +2959,19 @@ public partial class ExcelHandler
             if (eIdx < 0) eIdx = fmt.IndexOf("e-", StringComparison.Ordinal);
             var expDigits = eIdx >= 0 ? fmtCode[(eIdx + 2)..].Count(c => c == '0') : 2;
             var exp = (int)Math.Floor(Math.Log10(Math.Abs(value)));
+
+            // Engineering notation: when the integer-mantissa width N (# / 0
+            // placeholders before the 'E') is > 1, Excel rounds the exponent DOWN
+            // to a multiple of N (e.g. ##0.0E+0 → exponent multiple of 3, mantissa
+            // 1-999). Standard 0.00E+00 (N=1) keeps the per-decade exponent.
+            var mantSpec = eIdx >= 0 ? fmtCode[..eIdx] : "";
+            var mantDot = mantSpec.IndexOf('.');
+            var mantInt = mantDot >= 0 ? mantSpec[..mantDot] : mantSpec;
+            var mantWidth = mantInt.Count(c => c == '#' || c == '0');
+            if (mantWidth < 1) mantWidth = 1;
+            if (mantWidth > 1)
+                exp = (int)(Math.Floor((double)exp / mantWidth) * mantWidth);
+
             var mantissa = value / Math.Pow(10, exp);
             var expStr = exp >= 0 ? $"+{exp.ToString().PadLeft(expDigits, '0')}" : $"-{Math.Abs(exp).ToString().PadLeft(expDigits, '0')}";
             return $"{mantissa.ToString($"F{decimals}")}E{expStr}";
@@ -2867,6 +2986,38 @@ public partial class ExcelHandler
         {
             value /= Math.Pow(1000, trailingCommas);
             fmtCode = fmtTrimmed;
+        }
+
+        // Digit-group integer formats with embedded literal separators, e.g. phone
+        // "###-####" → "555-1234", SSN "000-00-0000" → "123-45-6789". An integer-only
+        // format (no '.', no thousands ',') whose '#'/'0' placeholders are interleaved
+        // with literal chars maps the number's digits RIGHT-TO-LEFT into the
+        // placeholder positions, emitting the literals in place. '0' placeholders with
+        // no remaining digit emit '0'; surplus '#' emit nothing.
+        if (!fmtCode.Contains('.') && !fmtCode.Contains(',')
+            && (fmtCode.Contains('#') || fmtCode.Contains('0'))
+            && fmtCode.Contains('-'))
+        {
+            var digits = ((long)Math.Round(Math.Abs(value)))
+                .ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var outChars = new List<char>();
+            int di = digits.Length - 1;
+            for (int i = fmtCode.Length - 1; i >= 0; i--)
+            {
+                var c = fmtCode[i];
+                if (c == '#' || c == '0')
+                {
+                    if (di >= 0) { outChars.Add(digits[di]); di--; }
+                    else if (c == '0') outChars.Add('0');
+                }
+                else outChars.Add(c);
+            }
+            // Any leftover leading digits (more digits than placeholders) prepend to
+            // the front, matching Excel which never truncates the number.
+            while (di >= 0) { outChars.Add(digits[di]); di--; }
+            outChars.Reverse();
+            var s = new string(outChars.ToArray());
+            return value < 0 ? "-" + s : s;
         }
 
         // Numeric with thousands separator and/or decimals
