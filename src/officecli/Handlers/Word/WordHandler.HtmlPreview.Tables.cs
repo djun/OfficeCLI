@@ -88,6 +88,17 @@ public partial class WordHandler
             tableStyles.Add("margin-left:auto;margin-right:auto");
         else if (tblJc == "right")
             tableStyles.Add("margin-left:auto;margin-right:0");
+        else if (tblpPr == null)
+        {
+            // Table left indent (w:tblInd, dxa): indent the whole table from
+            // the left text margin. Only for left-aligned, non-floating tables
+            // (center/right use auto margins; floating handles its own offset).
+            // twips -> pt = w / 20. pct/auto types skipped (dxa is the common case).
+            var tblInd = tblPr?.TableIndentation;
+            if (tblInd?.Type?.InnerText is null or "dxa"
+                && tblInd?.Width?.Value is int indW && indW > 0)
+                tableStyles.Add($"margin-left:{indW / 20.0:0.#}pt");
+        }
 
         // Apply base table style rPr (font-size, color, alignment) to the <table>
         if (styleId != null)
