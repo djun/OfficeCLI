@@ -1023,6 +1023,28 @@ public partial class WordHandler
                     lnNum.CountBy = (short)ncb;
                     break;
                 }
+                case "valign":
+                {
+                    // CONSISTENCY(section-layout-fallback): mirror
+                    // TrySetSectionLayout's valign case so /section[N] users
+                    // can set vertical page alignment (top/center/bottom/both)
+                    // without falling back to raw-set. BUG-DUMP6-03.
+                    sectPr.RemoveAllChildren<VerticalTextAlignmentOnPage>();
+                    var lower = value.ToLowerInvariant().Trim();
+                    if (lower is "none" or "off" or "false")
+                        break;
+                    var enumVal = lower switch
+                    {
+                        "top" => VerticalJustificationValues.Top,
+                        "center" or "centre" or "middle" => VerticalJustificationValues.Center,
+                        "bottom" => VerticalJustificationValues.Bottom,
+                        "both" => VerticalJustificationValues.Both,
+                        _ => throw new ArgumentException(
+                            $"Invalid vAlign value: '{value}'. Valid: top, center, bottom, both, none.")
+                    };
+                    InsertSectPrChildInOrder(sectPr, new VerticalTextAlignmentOnPage { Val = enumVal });
+                    break;
+                }
                 default:
                     // Generic dotted "element.attr=value" fallback (pgSz.orient,
                     // pgMar.top, cols.num, …). Same helper as paragraph/run

@@ -400,11 +400,15 @@ public partial class WordHandler
         if (spacing == null)
             spacing = styleSpacing;
 
-        // In Word, paragraph before/after spacing is rendered INSIDE borders.
-        // Use padding instead of margin when the paragraph has borders.
-        var hasBorders = pProps.ParagraphBorders != null;
-        var vSpacingPropBefore = hasBorders ? "padding-top" : "margin-top";
-        var vSpacingPropAfter = hasBorders ? "padding-bottom" : "margin-bottom";
+        // Paragraph before/after spacing always renders OUTSIDE the border box
+        // (verified against real Word): the border hugs the text — its internal
+        // text-to-border gap comes solely from the border's w:space, emitted as
+        // padding — and spaceBefore/spaceAfter sit above/below the border as
+        // margin. Mapping spacing to padding when borders are present put the
+        // space INSIDE the box (tall border, no gap below) and additionally
+        // collided with the w:space padding on the same side (last-wins).
+        var vSpacingPropBefore = "margin-top";
+        var vSpacingPropAfter = "margin-bottom";
 
         if (spacing != null)
         {

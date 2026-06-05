@@ -1144,9 +1144,24 @@ public partial class WordHandler
     /// </summary>
     private static string BuildColBodyStyle(SectionProperties? section, double colBodyHeightPt)
     {
+        // w:vAlign on the section vertically aligns the page content block.
+        // The .page-body is already a flex column (flex:1), so justify-content
+        // positions the whole content block along the cross page axis. Word's
+        // "both"/"justify" stretch the block top-to-bottom; we render those as
+        // top-aligned (no vertical justification of paragraph gaps) which is
+        // visually closest without per-line distribution.
+        var vAlign = section?.GetFirstChild<VerticalTextAlignmentOnPage>()?.Val?.InnerText;
+        var justify = vAlign switch
+        {
+            "center" => "center",
+            "bottom" => "flex-end",
+            _ => null, // top / both / justify / null → default flex-start
+        };
+
         var sectCols = section?.GetFirstChild<Columns>();
         var colCount = sectCols?.ColumnCount?.Value ?? 1;
-        if (colCount <= 1) return "";
+        if (colCount <= 1)
+            return justify != null ? $" style=\"justify-content:{justify}\"" : "";
         var colSep = sectCols?.Separator?.Value == true;
         var colSpacing = sectCols?.Space?.Value;
         return $" style=\"column-count:{colCount}"

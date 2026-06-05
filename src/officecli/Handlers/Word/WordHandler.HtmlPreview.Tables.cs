@@ -299,10 +299,28 @@ public partial class WordHandler
                 // through the same path as body paragraphs: <div> wrapper with
                 // inline pPr CSS plus an &nbsp; placeholder for empties so the
                 // line box forms and renders the resolved line-height.
+                // List grouping inside the cell mirrors the body path: a run of
+                // ListBullet/numbered paragraphs becomes <ul>/<ol> with <li>
+                // children (single-level — the common in-cell case) instead of
+                // plain <div>s, so bullets/numbers render. A non-list paragraph
+                // or a nested table closes the open list.
+                string? cellListTag = null; // "ul" | "ol" when a list is open
+                void CloseCellList()
+                {
+                    if (cellListTag != null) { sb.Append($"</{cellListTag}>"); cellListTag = null; }
+                }
+
                 foreach (var child in cell.ChildElements)
                 {
                     if (child is Paragraph cellPara)
                     {
+                        var listStyle = GetParagraphListStyle(cellPara);
+                        if (listStyle != null)
+                        {
+                            RenderCellListItem(sb, cellPara, listStyle, ref cellListTag);
+                            continue;
+                        }
+                        CloseCellList();
                         var text = GetParagraphText(cellPara);
                         var runs = GetAllRuns(cellPara);
                         var pCss = GetParagraphInlineCss(cellPara);
@@ -317,9 +335,11 @@ public partial class WordHandler
                     }
                     else if (child is Table nestedTable)
                     {
+                        CloseCellList();
                         RenderTableHtml(sb, nestedTable);
                     }
                 }
+                CloseCellList();
 
                 if (exactWrap) sb.Append("</div>");
                 sb.AppendLine($"</{tag}>");
@@ -568,5 +588,91 @@ public partial class WordHandler
                 break;
         }
         return span;
+    }
+
+    /// <summary>
+    /// Render one list paragraph inside a table cell as an &lt;li&gt;, opening
+    /// the &lt;ul&gt;/&lt;ol&gt; when needed. Single-level only — the common
+    /// in-cell case — but uses the same marker classes / ordered-marker spans
+    /// as the body path so bullets and numbers render identically. Multi-level
+    /// nesting inside a cell collapses to one level (a known simplification;
+    /// body-level lists remain the full-fidelity path).
+    /// </summary>
+    private void RenderCellListItem(StringBuilder sb, Paragraph para, string listStyle, ref string? cellListTag)
+    {
+        var resolvedNumPr = ResolveNumPrFromStyle(para);
+        var ilvl = resolvedNumPr?.Ilvl ?? 0;
+        var numId = resolvedNumPr?.NumId ?? 0;
+        if (ilvl < 0) ilvl = 0; else if (ilvl > 8) ilvl = 8;
+        var lvlText = GetLevelText(numId, ilvl);
+        var picBulletUri = listStyle == "bullet" ? GetPicBulletDataUri(numId, ilvl) : null;
+        var tag = listStyle == "bullet" ? "ul" : "ol";
+
+        // Swap the open list if the type changed (ul ↔ ol).
+        if (cellListTag != null && cellListTag != tag)
+        {
+            sb.Append($"</{cellListTag}>");
+            cellListTag = null;
+        }
+
+        var (lvlLeft, lvlHanging) = GetListLevelIndentFull(numId, ilvl);
+        var indentPt = lvlLeft / 20.0;
+        if (indentPt < 18) indentPt = 18;
+        var hangingPt = lvlHanging / 20.0;
+        var listStyleParts = $"padding-left:{indentPt:0.#}pt;margin:0";
+        if (tag == "ol") listStyleParts += ";list-style-type:none";
+        if (picBulletUri != null)
+            listStyleParts += $";list-style-image:url('{picBulletUri}')";
+        else if (tag == "ul")
+        {
+            listStyleParts += ";list-style-image:none";
+            var bulletType = lvlText switch
+            {
+                "o" => "circle",
+                "◦" => "circle",
+                "" or "▪" => "square",
+                _ => "disc"
+            };
+            listStyleParts += $";list-style-type:{bulletType}";
+        }
+
+        if (cellListTag == null)
+        {
+            sb.Append($"<{tag} style=\"{listStyleParts}\">");
+            cellListTag = tag;
+        }
+
+        sb.Append("<li");
+        sb.Append($" class=\"marker-{numId}-{ilvl}\"");
+        var paraStyle = GetParagraphInlineCss(para, isListItem: true);
+        if (!string.IsNullOrEmpty(paraStyle))
+            sb.Append($" style=\"{paraStyle}\"");
+        sb.Append(">");
+
+        // Ordered lists render the marker via an inline span (same as body),
+        // since list-style-type:none suppresses the native ::marker.
+        if (tag == "ol")
+        {
+            var template = string.IsNullOrEmpty(lvlText) ? $"%{ilvl + 1}" : lvlText!;
+            var counter = (GetStartValue(numId, ilvl) ?? 1);
+            var marker = System.Text.RegularExpressions.Regex.Replace(template, @"%(\d)", m =>
+            {
+                var lvlFmt = GetNumberingFormat(numId, ilvl);
+                return OfficeCli.Core.WordNumFmtRenderer.Render(counter, lvlFmt);
+            });
+            var suff = GetLevelSuffix(numId, ilvl);
+            var jc = GetLevelJustification(numId, ilvl);
+            var markerWidth = hangingPt > 0 ? $"{hangingPt:0.#}pt" : "3em";
+            var markerPadding = suff switch { "nothing" => "0", "space" => "0.25em", _ => "0.5em" };
+            var align = jc switch { "right" => "right", "center" => "center", _ => "left" };
+            var inlineMarkerCss = GetMarkerInlineCss(numId, ilvl, para);
+            var markerStyle = $"display:inline-block;min-width:{markerWidth};padding-right:{markerPadding};text-align:{align}";
+            if (!string.IsNullOrEmpty(inlineMarkerCss))
+                markerStyle = inlineMarkerCss + ";" + markerStyle;
+            sb.Append($"<span style=\"{markerStyle}\">{HtmlEncode(marker)}</span>");
+        }
+
+        RenderParagraphContentHtml(sb, para);
+        sb.Append("</li>");
     }
 }
