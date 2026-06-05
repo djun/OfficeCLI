@@ -300,6 +300,11 @@ public partial class ExcelHandler
         // below, after they're computed from cell data.
         var sparklineMap = BuildSparklineMap(ws);
 
+        // AutoFilter header cells: every cell in the top row of an AutoFilter
+        // range (sheet-level <autoFilter> and each table's own <autoFilter>)
+        // gets a dropdown indicator, matching Excel's filter-button affordance.
+        var autoFilterCells = BuildAutoFilterHeaderCells(ws, worksheetPart);
+
         // Collect column widths
         var colWidths = GetColumnWidths(ws);
 
@@ -558,7 +563,7 @@ public partial class ExcelHandler
         var ctx = new SheetRenderContext(sheetName, sheetIdx, cellMap, maxRow, maxCol,
             rowHeights, hiddenRows, hiddenCols, mergeMap, frozenRows, frozenCols,
             frozenLeftOffsets, frozenTopOffsets, cfMap, dataBarMap, iconSetMap, sparklineMap,
-            stylesheet, evaluator, defaultColWidthPt, defaultRowHeightPt, colWidths);
+            autoFilterCells, stylesheet, evaluator, defaultColWidthPt, defaultRowHeightPt, colWidths);
         RenderTbody(sb, ctx);
         sb.AppendLine("</table>");
 
@@ -634,6 +639,7 @@ public partial class ExcelHandler
         Dictionary<string, string> DataBarMap,
         Dictionary<string, string> IconSetMap,
         Dictionary<string, string> SparklineMap,
+        HashSet<string> AutoFilterCells,
         Stylesheet? Stylesheet,
         Core.FormulaEvaluator? Evaluator,
         double DefaultColWidthPt,
@@ -683,6 +689,14 @@ public partial class ExcelHandler
     // static rendering) and ExcelHandler.HtmlPreview.Virt.cs (JSON serialisation).
     // Returns the <tr> inner content: row-header <th> + all cell <td> elements,
     // without the <tr> wrapper.
+    // AutoFilter dropdown indicator: a small right-aligned filter-arrow button
+    // box matching Excel's filter-button look. Rendered on each header cell in
+    // an AutoFilter range's top row.
+    private const string AutoFilterIndicatorHtml =
+        "<span class=\"autofilter-btn\" style=\"display:inline-block;float:right;margin-left:3px;" +
+        "padding:0 2px;border:1px solid #b0b0b0;border-radius:2px;background:#f3f3f3;" +
+        "font-size:0.7em;line-height:1.2;color:#444\">▼</span>";
+
     internal string BuildRowInnerHtml(SheetRenderContext ctx, int r, bool isRowFrozen)
     {
         var rowSb = new StringBuilder();
@@ -726,6 +740,7 @@ public partial class ExcelHandler
                 content = WrapVerticalAlign(content, GetCellVerticalAlign(cell, ctx.Stylesheet), richHtml);
                 if (ctx.SparklineMap.TryGetValue(cellRef, out var spkSvg)) content = spkSvg + content;
                 var diagSvg = TryBuildCellDiagonalSvg(cell, ctx.Stylesheet) ?? "";
+                if (ctx.AutoFilterCells.Contains(cellRef)) content += AutoFilterIndicatorHtml;
                 rowSb.Append($"<td data-path=\"/{HtmlEncode(ctx.SheetName)}/{cellRef}\"{GetFormulaAttr(cell)}{spanAttrs}{style}>{diagSvg}{content}</td>");
             }
             else
@@ -753,6 +768,7 @@ public partial class ExcelHandler
                     spillClass = " class=\"spill\"";
                     content = $"<span class=\"spill-text\" style=\"max-width:{spillWidth:0.##}pt\">{content}</span>";
                 }
+                if (ctx.AutoFilterCells.Contains(cellRef)) content += AutoFilterIndicatorHtml;
                 rowSb.Append($"<td data-path=\"/{HtmlEncode(ctx.SheetName)}/{cellRef}\"{GetFormulaAttr(cell)}{spillClass}{style}>{diagSvg}{content}</td>");
             }
         }
@@ -1625,6 +1641,39 @@ public partial class ExcelHandler
     }
 
     /// <summary>Expand a sqref string like "E7:E21" into individual cell references.</summary>
+    /// <summary>
+    /// Collect every header cellRef (top row of an AutoFilter range) that should
+    /// carry a filter-dropdown indicator. Covers the sheet-level &lt;autoFilter&gt;
+    /// and each table's own &lt;autoFilter&gt;.
+    /// </summary>
+    private HashSet<string> BuildAutoFilterHeaderCells(Worksheet ws, WorksheetPart worksheetPart)
+    {
+        var cells = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddRange(string? rangeRef)
+        {
+            if (string.IsNullOrEmpty(rangeRef)) return;
+            var range = rangeRef.Replace("$", "");
+            var sides = range.Split(':');
+            var (startColName, startRow) = ParseCellReference(sides[0]);
+            var startCol = ColumnNameToIndex(startColName);
+            int endCol = startCol;
+            if (sides.Length > 1)
+            {
+                var (endColName, _) = ParseCellReference(sides[1]);
+                endCol = ColumnNameToIndex(endColName);
+            }
+            for (int c = startCol; c <= endCol; c++)
+                cells.Add($"{IndexToColumnName(c)}{startRow}");
+        }
+
+        AddRange(ws.GetFirstChild<AutoFilter>()?.Reference?.Value);
+        foreach (var tdp in worksheetPart.TableDefinitionParts)
+            AddRange(tdp.Table?.AutoFilter?.Reference?.Value);
+
+        return cells;
+    }
+
     private List<(string cellRef, int row, int col)> ExpandSqref(string sqref)
     {
         var result = new List<(string, int, int)>();

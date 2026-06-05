@@ -98,7 +98,16 @@ internal partial class ChartSvgRenderer
         else maxVal = allValues.Max();
         if (maxVal <= 0) maxVal = 1;
 
-        double niceMax, tickStep;
+        // R12b parity (bar/column): the value-axis domain must include negatives
+        // when the data has them, so negative bars get plot space and a zero
+        // baseline can be drawn. dataMin is 0 for all-positive data (axis stays
+        // anchored at the bottom/left exactly as before). Not applied to
+        // percent-stacked (fixed 0..100) or waterfall (cumulative running total).
+        double dataMin = (!percentStacked && !stacked && !isWaterfall)
+            ? Math.Min(0, allValues.Min())
+            : 0;
+
+        double niceMax, niceMin = 0, tickStep;
         int nTicks;
         if (!percentStacked)
         {
@@ -109,8 +118,28 @@ internal partial class ChartSvgRenderer
                 nTicks = (int)Math.Round(niceMax / tickStep);
             }
             else (niceMax, tickStep, nTicks) = ComputeNiceAxis(ooxmlMax ?? maxVal);
+            // Extend the axis floor below zero for negative data (mirrors the
+            // line-chart DataToY path): snap the negative floor to the same
+            // tickStep so a gridline lands on zero and on the negative extreme.
+            if (ooxmlMin.HasValue)
+                niceMin = ooxmlMin.Value;
+            else if (dataMin < 0)
+            {
+                var negMagnitude = ComputeNiceAxis(-dataMin).niceMax;
+                niceMin = -negMagnitude;
+            }
+            if (niceMin < 0)
+                nTicks = (int)Math.Ceiling((niceMax - niceMin) / tickStep);
         }
         else { niceMax = 100; nTicks = 5; tickStep = 20; }
+
+        // Span and zero-position helpers. span is the full axis range; a value
+        // maps to a fraction of the plot along the value axis, with zero sitting
+        // at zeroFrac of the way from the axis floor. For all-positive data
+        // niceMin == 0 so zeroFrac == 0 and behaviour is unchanged.
+        var span = niceMax - niceMin;
+        if (span <= 0) span = 1;
+        var zeroFrac = (0 - niceMin) / span;
 
         if (horizontal)
         {
@@ -130,13 +159,18 @@ internal partial class ChartSvgRenderer
             if (stacked) { barH = groupH / (1 + gapPct); gap = (groupH - barH) / 2; }
             else { barH = groupH / (serCount + gapPct); gap = barH * gapPct / 2; }
 
-            for (int t = 1; t <= nTicks; t++)
+            // Zero-baseline X coordinate within the plot (== plotOx when niceMin==0).
+            var plotZeroX = plotOx + zeroFrac * plotPw;
+            for (int t = 0; t <= nTicks; t++)
             {
                 var gx = plotOx + (double)plotPw * t / nTicks;
                 sb.AppendLine($"        <line x1=\"{gx:0.#}\" y1=\"{oy}\" x2=\"{gx:0.#}\" y2=\"{oy + ph}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
             }
             sb.AppendLine($"        <line x1=\"{plotOx}\" y1=\"{oy}\" x2=\"{plotOx}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
             sb.AppendLine($"        <line x1=\"{plotOx}\" y1=\"{oy + ph}\" x2=\"{plotOx + plotPw}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
+            // Zero baseline when the domain straddles zero (negative data present).
+            if (niceMin < 0)
+                sb.AppendLine($"        <line x1=\"{plotZeroX:0.#}\" y1=\"{oy}\" x2=\"{plotZeroX:0.#}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
 
             for (int c = 0; c < catCount; c++)
             {
@@ -147,9 +181,9 @@ internal partial class ChartSvgRenderer
                 {
                     var rawVal = dataIdx < series[s].values.Length ? series[s].values[dataIdx] : 0;
                     var val = percentStacked && catSum > 0 ? (rawVal / catSum) * 100 : rawVal;
-                    var barW = (val / niceMax) * plotPw;
                     if (stacked)
                     {
+                        var barW = (val / niceMax) * plotPw;
                         var bx = plotOx + (stackX / niceMax) * plotPw;
                         var by = oy + c * groupH + gap;
                         sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.85\"/>");
@@ -163,16 +197,22 @@ internal partial class ChartSvgRenderer
                     }
                     else
                     {
-                        var bx = plotOx;
+                        // Draw from the zero baseline: positive extends right, negative
+                        // extends left. Always emit a non-negative width using the
+                        // absolute magnitude (a negative width would clip to zero).
+                        var barW = Math.Abs(val) / span * plotPw;
+                        var bx = val >= 0 ? plotZeroX : plotZeroX - barW;
                         var by = oy + c * groupH + gap + (serCount - 1 - s) * barH;
-                        sb.AppendLine($"        <rect x=\"{bx}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.85\"/>");
+                        sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.85\"/>");
                         // Data label at the bar's end (grouped horizontal bars).
                         // Mirrors the stacked-branch and vertical-column label logic
                         // which previously left non-stacked horizontal bars unlabeled.
                         if (showDataLabels && barH > DataLabelFontPx)
                         {
                             var vlabel = rawVal % 1 == 0 ? $"{(int)rawVal}" : $"{rawVal:0.#}";
-                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW + 3:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"start\" dominant-baseline=\"middle\">{vlabel}</text>");
+                            var lx = val >= 0 ? bx + barW + 3 : bx - 3;
+                            var anchor = val >= 0 ? "start" : "end";
+                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lx:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"{anchor}\" dominant-baseline=\"middle\">{vlabel}</text>");
                         }
                     }
                 }
@@ -208,12 +248,12 @@ internal partial class ChartSvgRenderer
                         var rawVal = dataIdx < series[s].values.Length ? series[s].values[dataIdx] : 0;
                         var by = oy + c * groupH + gap + (serCount - 1 - s) * barH;
                         var cy = by + barH / 2;
-                        var bxTip = plotOx + (rawVal / niceMax) * plotPw;
+                        var bxTip = plotOx + ((rawVal - niceMin) / span) * plotPw;
                         double plusErr = eb.ValueType == "percentage" ? Math.Abs(rawVal) * eb.Value / 100.0 : errAmount;
                         var showPlus = eb.BarType is "both" or "plus";
                         var showMinus = eb.BarType is "both" or "minus";
-                        var xPlus = showPlus ? plotOx + ((rawVal + plusErr) / niceMax) * plotPw : bxTip;
-                        var xMinus = showMinus ? plotOx + ((rawVal - plusErr) / niceMax) * plotPw : bxTip;
+                        var xPlus = showPlus ? plotOx + ((rawVal + plusErr - niceMin) / span) * plotPw : bxTip;
+                        var xMinus = showMinus ? plotOx + ((rawVal - plusErr - niceMin) / span) * plotPw : bxTip;
                         // Horizontal whisker line
                         sb.AppendLine($"        <line x1=\"{xMinus:0.#}\" y1=\"{cy:0.#}\" x2=\"{xPlus:0.#}\" y2=\"{cy:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
                         // Short VERTICAL cap lines at each end (y1==y2 false → these
@@ -236,7 +276,7 @@ internal partial class ChartSvgRenderer
             }
             for (int t = 0; t <= nTicks; t++)
             {
-                var val = tickStep * t;
+                var val = niceMin + tickStep * t;
                 var label = percentStacked ? $"{(int)val}%" : FormatAxisValue(val, valNumFmt);
                 var tx = plotOx + (double)plotPw * t / nTicks;
                 sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{AxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"middle\">{label}</text>");
@@ -247,8 +287,8 @@ internal partial class ChartSvgRenderer
                 foreach (var rl in referenceLines)
                 {
                     var v = percentStacked ? rl.Value * 100 : rl.Value;
-                    if (v < 0 || v > niceMax) continue;
-                    var rx = plotOx + (v / niceMax) * plotPw;
+                    if (v < niceMin || v > niceMax) continue;
+                    var rx = plotOx + ((v - niceMin) / span) * plotPw;
                     var strokeColor = rl.Color.StartsWith("#") ? rl.Color : "#" + rl.Color;
                     var dashArray = RefLineDashArray(rl.Dash);
                     sb.AppendLine($"        <line x1=\"{rx:0.#}\" y1=\"{oy}\" x2=\"{rx:0.#}\" y2=\"{oy + ph}\" stroke=\"{strokeColor}\" stroke-width=\"{rl.WidthPt:0.##}\" stroke-dasharray=\"{dashArray}\"/>");
@@ -262,13 +302,18 @@ internal partial class ChartSvgRenderer
             if (stacked) { barW = groupW / (1 + gapPct); gap = (groupW - barW) / 2; }
             else { barW = groupW / (serCount + gapPct); gap = barW * gapPct / 2; }
 
-            for (int t = 1; t <= nTicks; t++)
+            // Zero-baseline Y coordinate within the plot (== oy+ph when niceMin==0).
+            var plotZeroY = oy + ph - zeroFrac * ph;
+            for (int t = 0; t <= nTicks; t++)
             {
                 var gy = oy + ph - (double)ph * t / nTicks;
                 sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
             }
             sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
             sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + ph}\" x2=\"{ox + pw}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
+            // Zero baseline when the domain straddles zero (negative data present).
+            if (niceMin < 0)
+                sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{plotZeroY:0.#}\" x2=\"{ox + pw}\" y2=\"{plotZeroY:0.#}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
 
             // Track waterfall connector positions for drawing connecting lines
             var wfPrevTopY = double.NaN;
@@ -284,6 +329,7 @@ internal partial class ChartSvgRenderer
                     var barH = (val / niceMax) * ph;
                     if (stacked)
                     {
+                        // (stacked/waterfall: niceMin==0, span==niceMax — unchanged)
                         var bx = ox + c * groupW + gap;
                         var by = oy + ph - (stackY / niceMax) * ph - barH;
                         // For waterfall: skip rendering Base series (s=0), only render Increase/Decrease
@@ -308,13 +354,18 @@ internal partial class ChartSvgRenderer
                     }
                     else
                     {
+                        // Draw from the zero baseline: positive extends up, negative
+                        // extends down. Always emit a non-negative height using the
+                        // absolute magnitude (a negative height would clip to zero).
+                        var bh = Math.Abs(val) / span * ph;
                         var bx = ox + c * groupW + gap + s * barW;
-                        var by = oy + ph - barH;
-                        sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.85\"/>");
+                        var by = val >= 0 ? plotZeroY - bh : plotZeroY;
+                        sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{bh:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.85\"/>");
                         if (showDataLabels)
                         {
                             var vlabel = FormatAxisValue(rawVal, valNumFmt);
-                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by - 3:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
+                            var ly = val >= 0 ? by - 3 : by + bh + DataLabelFontPx;
+                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{ly:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
                         }
                     }
                 }
@@ -344,13 +395,13 @@ internal partial class ChartSvgRenderer
                     {
                         var rawVal = c < series[s].values.Length ? series[s].values[c] : 0;
                         var bx = ox + c * groupW + gap + s * barW + barW / 2;
-                        var byTop = oy + ph - (rawVal / niceMax) * ph;
+                        var byTop = oy + ph - ((rawVal - niceMin) / span) * ph;
                         double plusErr = eb.ValueType == "percentage" ? Math.Abs(rawVal) * eb.Value / 100.0 : errAmount;
                         double minusErr = plusErr;
                         var showPlus = eb.BarType is "both" or "plus";
                         var showMinus = eb.BarType is "both" or "minus";
-                        var yTop = showPlus ? oy + ph - ((rawVal + plusErr) / niceMax) * ph : byTop;
-                        var yBot = showMinus ? oy + ph - ((rawVal - minusErr) / niceMax) * ph : byTop;
+                        var yTop = showPlus ? oy + ph - ((rawVal + plusErr - niceMin) / span) * ph : byTop;
+                        var yBot = showMinus ? oy + ph - ((rawVal - minusErr - niceMin) / span) * ph : byTop;
                         sb.AppendLine($"        <line x1=\"{bx:0.#}\" y1=\"{yTop:0.#}\" x2=\"{bx:0.#}\" y2=\"{yBot:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
                         if (showPlus)
                             sb.AppendLine($"        <line x1=\"{bx - capW:0.#}\" y1=\"{yTop:0.#}\" x2=\"{bx + capW:0.#}\" y2=\"{yTop:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
@@ -367,7 +418,7 @@ internal partial class ChartSvgRenderer
             }
             for (int t = 0; t <= nTicks; t++)
             {
-                var val = tickStep * t;
+                var val = niceMin + tickStep * t;
                 var label = percentStacked ? $"{(int)val}%" : FormatAxisValue(val, valNumFmt);
                 var ty = oy + ph - (double)ph * t / nTicks;
                 sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
@@ -377,8 +428,8 @@ internal partial class ChartSvgRenderer
                 foreach (var rl in referenceLines)
                 {
                     var v = percentStacked ? rl.Value * 100 : rl.Value;
-                    if (v < 0 || v > niceMax) continue;
-                    var ry = oy + ph - (v / niceMax) * ph;
+                    if (v < niceMin || v > niceMax) continue;
+                    var ry = oy + ph - ((v - niceMin) / span) * ph;
                     var strokeColor = rl.Color.StartsWith("#") ? rl.Color : "#" + rl.Color;
                     var dashArray = RefLineDashArray(rl.Dash);
                     sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{ry:0.#}\" x2=\"{ox + pw}\" y2=\"{ry:0.#}\" stroke=\"{strokeColor}\" stroke-width=\"{rl.WidthPt:0.##}\" stroke-dasharray=\"{dashArray}\"/>");
