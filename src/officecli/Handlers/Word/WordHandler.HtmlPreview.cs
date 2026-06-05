@@ -498,11 +498,24 @@ public partial class WordHandler
         // Auto-pagination: measure content and split overflowing pages
         sb.AppendLine($"  var maxBodyH={bodyHeightPt:0.#}*96/72;"); // pt to px (96dpi)
         sb.AppendLine("  var ftpl=" + JsStringLiteral(footerTemplate) + ";");
-        // Header template cloned per paginated page. Capture the fallback
-        // header's PAGE/NUMPAGES placeholders so field updates work on
-        // every continuation page, not just page 1.
-        var headerTemplate = pageNumPattern.Replace(fallbackHeaderHtml, "$1<!--PAGE_NUM-->$2", 1);
-        headerTemplate = pageNumPattern.Replace(headerTemplate, "$1<!--NUM_PAGES-->$2", 1);
+        // Header template cloned per paginated page. Continuation pages (2+)
+        // never carry the first-page (titlePg) header — use the section's
+        // DEFAULT header so a first-page header doesn't bleed onto later
+        // pages. fallbackHeaderHtml takes arbitrary part order and may be the
+        // first-page variant; prefer the resolved Default of section 0.
+        var contHeaderHtml = (sectionHeaders.TryGetValue(0, out var hb0) && hb0.Default != null)
+            ? hb0.Default
+            : fallbackHeaderHtml;
+        // Mirror the footer (ftpl) template exactly: emit named
+        // page-num-field / num-pages-field spans rather than bare comments.
+        // The JS replaces <!--PAGE_NUM--> per page and the renumber loop fills
+        // both .page-num-field and .num-pages-field spans — a bare
+        // <!--NUM_PAGES--> comment in the header was never substituted, so
+        // continuation-page headers showed an empty NUMPAGES count.
+        var headerTemplate = pageNumPattern.Replace(contHeaderHtml,
+            "$1<span class=\"page-num-field\"><!--PAGE_NUM--></span>$2", 1);
+        headerTemplate = pageNumPattern.Replace(headerTemplate,
+            "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
         sb.AppendLine("  var htpl=" + JsStringLiteral(headerTemplate) + ";");
         sb.AppendLine(@"
   function paginate(){
