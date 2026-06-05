@@ -441,6 +441,24 @@ public partial class PowerPointHandler
                 }
             }
 
+            // Run-level text outline (a:rPr/a:ln). PowerPoint strokes each glyph
+            // edge; Chromium renders this via -webkit-text-stroke. Width is the
+            // a:ln @w in EMU (12700 EMU = 1pt); convert to px (1pt = 4/3 px) so a
+            // 3pt outline reads as a ~4px stroke. Color comes from the a:ln's
+            // solidFill child (default black when absent). paint-order:stroke fill
+            // keeps the fill painted on top so the stroke hugs the glyph outside.
+            var runOutline = rp.GetFirstChild<Drawing.Outline>();
+            if (runOutline != null)
+            {
+                double strokePx = runOutline.Width?.HasValue == true
+                    ? Units.EmuToPt(runOutline.Width.Value) * 4.0 / 3.0
+                    : 1.0;
+                var strokeColor = ResolveFillColor(runOutline.GetFirstChild<Drawing.SolidFill>(), themeColors)
+                    ?? "#000000";
+                styles.Add($"-webkit-text-stroke:{strokePx:0.##}px {strokeColor}");
+                styles.Add("paint-order:stroke fill");
+            }
+
             // Character spacing
             if (rp.Spacing?.HasValue == true)
                 styles.Add($"letter-spacing:{rp.Spacing.Value / 100.0:0.##}pt");
