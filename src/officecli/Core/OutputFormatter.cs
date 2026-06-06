@@ -355,6 +355,18 @@ internal static class OutputFormatter
             return;
         }
 
+        // Pattern: "Cell value[ at A1] exceeds Excel's 32767-character limit
+        // (got N)" — EnsureCellValueLength rejects over-long cell text. It's an
+        // input-validation failure (the user supplied a value Excel can't store),
+        // not a handler crash; classify as invalid_value like the row/col overflow
+        // rules above, not internal_error.
+        if (msg.StartsWith("Cell value", StringComparison.Ordinal)
+            && msg.Contains("character limit", StringComparison.Ordinal))
+        {
+            result.Code = "invalid_value";
+            return;
+        }
+
         // Pattern: "Cell <ref> not found" — raised by RemoveCell when the
         // caller targets an empty/missing cell. Symmetric with the
         // existing "Path not found:" / "Sheet not found:" rules; without
