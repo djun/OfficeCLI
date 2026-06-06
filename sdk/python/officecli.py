@@ -45,6 +45,7 @@ import json
 import time
 import socket
 import hashlib
+import shutil
 import threading
 import subprocess
 
@@ -66,7 +67,8 @@ _builtin_open = open   # preserved; this module defines its own open() below
 # the missing-CLI error points users at it / at install().
 _INSTALL_URL = "https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh"
 _MISSING_CLI = (
-    "officecli CLI not found: {bin!r} is not on PATH. This SDK only forwards "
+    "officecli CLI not found: {bin!r} is not on PATH nor in the default install "
+    "location (~/.local/bin, or %LOCALAPPDATA%\\OfficeCLI on Windows). This SDK only forwards "
     "commands to the officecli binary, which must be installed separately. Install it:\n"
     "    python -m officecli install            # runs the official installer\n"
     "    # or: curl -fsSL " + _INSTALL_URL + " | bash\n"
@@ -229,6 +231,42 @@ def _serves(ping_path, full_path, timeout=1.0):
     return a == full_path or ((_IS_MAC or _IS_WIN) and a.lower() == full_path.lower())
 
 
+def _install_dir_candidate(name):
+    """Where the official installer (install.sh / install.ps1) drops the binary:
+    ~/.local/bin on macOS/Linux, %LOCALAPPDATA%\\OfficeCLI on Windows. Used only
+    as a PATH-miss fallback (see _resolve_binary)."""
+    if _IS_WIN:
+        base = os.environ.get("LOCALAPPDATA")
+        if not base:
+            return None
+        exe = name if name.lower().endswith(".exe") else name + ".exe"
+        return os.path.join(base, "OfficeCLI", exe)
+    return os.path.join(os.path.expanduser("~"), ".local", "bin", name)
+
+
+def _resolve_binary(binary):
+    """Resolve the officecli binary to invoke. Order: explicit path (a value with
+    a path separator) is trusted as-is; otherwise a bare name is looked up on
+    PATH; if PATH misses, fall back to the official installer's known location.
+
+    Why the fallback: the installer adds its dir to PATH via the shell rc file, so
+    a bare 'officecli' resolves in an interactive terminal — but NOT in processes
+    that never sourced that rc (IDE-spawned Python, cron, systemd, CI). The binary
+    is still sitting at the known install path; find it there instead of failing.
+
+    Idempotent: an already-resolved absolute path passes straight through, so it's
+    safe to call at every entry point (create + Document)."""
+    if os.sep in binary or (os.altsep and os.altsep in binary):
+        return binary                       # explicit path: trust the caller
+    found = shutil.which(binary)
+    if found:
+        return found                        # on PATH: normal case
+    cand = _install_dir_candidate(binary)   # PATH miss: try the known install dir
+    if cand and os.path.isfile(cand) and os.access(cand, os.X_OK):
+        return cand
+    return binary                           # give up; _run_cli raises the helpful error
+
+
 def _run_cli(binary, argv):
     """Run `binary <argv...>` (capturing output). A missing binary surfaces as a
     clear OfficeCliError with install guidance, not a raw FileNotFoundError."""
@@ -242,7 +280,7 @@ def _run_cli(binary, argv):
 class Document:
     def __init__(self, path, binary="officecli", timeout=30.0):
         self.path = os.path.abspath(path)
-        self.bin = binary
+        self.bin = _resolve_binary(binary)
         self.timeout = timeout          # connect timeout (s); the reply read blocks
         self._main, self._ping = pipe_paths(self.path)
         self._restart_lock = threading.Lock()   # serialize dead-resident restarts
@@ -390,6 +428,7 @@ def create(path, *args, binary="officecli", timeout=30.0):
         another owner's active session.
       • file exists without --force → file_exists (pass "--force" to overwrite)."""
     full = os.path.abspath(path)
+    binary = _resolve_binary(binary)
     r = _run_cli(binary, ["create", full, *args])
     if r.returncode != 0:
         raise OfficeCliError(r.returncode, r.stderr or r.stdout)
