@@ -238,7 +238,7 @@ public partial class WordHandler
             }
         }
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -503,7 +503,7 @@ public partial class WordHandler
             // else: index is at or past the end — current append position is correct.
         }
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
 
         // Compute result path
         int ffIdx = 0;

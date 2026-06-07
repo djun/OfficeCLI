@@ -231,7 +231,7 @@ public partial class WordHandler
             throw new ArgumentException($"Invalid index or anchor for add '{type}'. Check --index / --after / --before values.", ex);
         }
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return resultPath;
     }
 

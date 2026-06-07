@@ -250,8 +250,14 @@ static partial class CommandBuilder
                 return response.ExitCode;
             }
 
-            // Non-resident: open file once, execute all commands, save once
+            // Non-resident: open file once, execute all commands, save once.
+            // Defer per-mutation Document.Save() so N commands serialize the
+            // part once (at Dispose) instead of N times — eliminates an O(N²)
+            // re-serialize that dominates large replays. Save-once is the
+            // documented intent of this path; per-op Save was redundant given
+            // the Dispose-time flush.
             using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
+            if (handler is OfficeCli.Handlers.WordHandler batchWh) batchWh.DeferSave = true;
             var batchResults = new List<BatchResult>();
             for (int bi = 0; bi < items.Count; bi++)
             {

@@ -252,7 +252,7 @@ public partial class WordHandler
                 }
             }
 
-            _doc.MainDocumentPart?.Document?.Save();
+            SaveDoc();
             return unsupported;
         }
 
@@ -261,7 +261,7 @@ public partial class WordHandler
             || path.Equals("/document", StringComparison.OrdinalIgnoreCase))
         {
             SetDocumentProperties(properties, unsupported);
-            _doc.MainDocumentPart?.Document?.Save();
+            SaveDoc();
             return unsupported;
         }
 

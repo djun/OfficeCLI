@@ -81,7 +81,7 @@ public partial class WordHandler
         if (path.Equals("/watermark", StringComparison.OrdinalIgnoreCase))
         {
             RemoveWatermarkHeaders();
-            _doc.MainDocumentPart?.Document?.Save();
+            SaveDoc();
             return null;
         }
 
@@ -146,7 +146,7 @@ public partial class WordHandler
         if (colRemoveMatch.Success)
         {
             RemoveTableColumn(colRemoveMatch);
-            _doc.MainDocumentPart?.Document?.Save();
+            SaveDoc();
             return null;
         }
 
@@ -239,7 +239,7 @@ public partial class WordHandler
                     sp.RemoveAllChildren<TitlePage>();
             }
 
-            mainPart.Document?.Save();
+            SaveDoc();
             return null;
         }
 
@@ -265,7 +265,7 @@ public partial class WordHandler
             }
 
             tocPara.Remove();
-            mainPart.Document?.Save();
+            SaveDoc();
             return null;
         }
 
@@ -293,7 +293,7 @@ public partial class WordHandler
                 fnRef.Parent?.Remove();
             fn.Remove();
             mainPart.FootnotesPart?.Footnotes?.Save();
-            mainPart.Document?.Save();
+            SaveDoc();
             return null;
         }
         if (parts.Count == 1 && parts[0].Name.ToLowerInvariant() == "endnote")
@@ -319,7 +319,7 @@ public partial class WordHandler
                 enRef.Parent?.Remove();
             en.Remove();
             mainPart.EndnotesPart?.Endnotes?.Save();
-            mainPart.Document?.Save();
+            SaveDoc();
             return null;
         }
 
@@ -345,7 +345,7 @@ public partial class WordHandler
                 run?.Remove();
             }
             mainPart.DeletePart(chartPart);
-            mainPart.Document?.Save();
+            SaveDoc();
             return null;
         }
 
@@ -756,7 +756,7 @@ public partial class WordHandler
             parentPara.TextId = GenerateParaId();
 
         _doc.MainDocumentPart?.WordprocessingCommentsPart?.Comments?.Save();
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         // BUG-R10-03: if we removed a run inside a header/footer, the
         // Save() above only persists the main document part. Also save
         // every header/footer part so the removal actually lands on disk.
@@ -958,7 +958,7 @@ public partial class WordHandler
                         ?? element.Ancestors<Paragraph>().FirstOrDefault();
         if (refreshPara != null) refreshPara.TextId = GenerateParaId();
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return null;
     }
 
@@ -999,7 +999,7 @@ public partial class WordHandler
                 Id = GenerateRevisionId(),
             });
         }
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return null;
     }
 
@@ -1275,7 +1275,7 @@ public partial class WordHandler
             targetParent.AppendChild(element);
         }
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
 
         var siblings = targetParent.ChildElements.Where(e => e.LocalName == element.LocalName).ToList();
         var newIdx = siblings.IndexOf(element) + 1;
@@ -1460,7 +1460,7 @@ public partial class WordHandler
         moveTo.InsertBeforeSelf(mtRangeStart);
         moveTo.InsertAfterSelf(mtRangeEnd);
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
 
         // Path to dest run: moveTo is now a sibling among target paragraph's
         // children. The Run lives inside it; the watcher / GetAllRuns model
@@ -1484,7 +1484,7 @@ public partial class WordHandler
             throw new ArgumentException("Cannot swap elements with different parents");
 
         PowerPointHandler.SwapXmlElements(elem1, elem2);
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
 
         // Recompute paths
         var parent = elem1.Parent!;
@@ -1768,7 +1768,7 @@ public partial class WordHandler
                 else
                     hit.Para.InsertBeforeSelf(clone);
 
-                _doc.MainDocumentPart?.Document?.Save();
+                SaveDoc();
                 var fSiblings = targetParent.ChildElements.Where(e => e.LocalName == clone.LocalName).ToList();
                 var fNewIdx = fSiblings.IndexOf(clone) + 1;
                 return $"{targetParentPath}/{clone.LocalName}[{fNewIdx}]";
@@ -1782,7 +1782,7 @@ public partial class WordHandler
 
         InsertAtPosition(targetParent, clone, index);
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
 
         var siblings = targetParent.ChildElements.Where(e => e.LocalName == clone.LocalName).ToList();
         var newIdx = siblings.IndexOf(clone) + 1;
@@ -2011,7 +2011,7 @@ public partial class WordHandler
         foreach (var marker in body.Descendants<MoveToRangeStart>().ToList()) marker.Remove();
         foreach (var marker in body.Descendants<MoveToRangeEnd>().ToList()) marker.Remove();
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return count;
     }
 
@@ -2281,7 +2281,7 @@ public partial class WordHandler
         foreach (var marker in body.Descendants<MoveToRangeStart>().ToList()) marker.Remove();
         foreach (var marker in body.Descendants<MoveToRangeEnd>().ToList()) marker.Remove();
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return count;
     }
 
@@ -2434,7 +2434,7 @@ public partial class WordHandler
                 row.AppendChild(movingCell);
         }
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         var newGridCols = grid.Elements<GridColumn>().ToList();
         var newColIdx = newGridCols.IndexOf(movingGridCol) + 1;
         return $"/body/tbl[{tableIdx}]/col[{newColIdx}]";
@@ -2494,7 +2494,7 @@ public partial class WordHandler
             foreach (var p in clonedCell.Descendants<Paragraph>())
                 AssignParaId(p);
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         var newGridCols = grid.Elements<GridColumn>().ToList();
         var newColIdx = newGridCols.IndexOf(clonedGridCol) + 1;
         return $"/body/tbl[{tableIdx}]/col[{newColIdx}]";

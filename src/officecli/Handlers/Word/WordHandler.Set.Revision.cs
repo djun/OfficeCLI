@@ -689,7 +689,7 @@ public partial class WordHandler
             if (act == "accept") AcceptRevision(rev);
             else RejectRevision(rev);
         }
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -792,7 +792,7 @@ public partial class WordHandler
             if (act == "accept") AcceptRevision(rev);
             else RejectRevision(rev);
         }
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 

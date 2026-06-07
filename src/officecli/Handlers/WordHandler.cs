@@ -59,6 +59,27 @@ public partial class WordHandler : IDocumentHandler
     internal bool Modified { get; set; }
 
     /// <summary>
+    /// When true, per-mutation <c>Document.Save()</c> calls are skipped — the
+    /// in-memory DOM stays authoritative and is serialized once at Dispose
+    /// (AutoSave) / explicit flush. Set by the batch driver around a replay so
+    /// N mutations cost O(N) instead of O(N²) (each Save re-serializes the whole
+    /// growing part). Single-command paths leave this false and save eagerly.
+    /// </summary>
+    public bool DeferSave { get; set; }
+
+    /// <summary>
+    /// Serialize the main document part to the backing store, unless
+    /// <see cref="DeferSave"/> is set (batch replay defers to one save at the
+    /// end). Every mutation path (Add/Set/Remove/Move/Swap) routes its
+    /// per-operation <c>Document.Save()</c> through here so the eager-vs-deferred
+    /// decision lives in ONE place — N batch mutations cost one serialize, not N.
+    /// </summary>
+    private void SaveDoc()
+    {
+        if (!DeferSave) _doc.MainDocumentPart?.Document?.Save();
+    }
+
+    /// <summary>
     /// Enumerate every <see cref="OpenXmlPart"/> in the package (transitive
     /// walk via the SDK's own <c>GetAllParts</c> extension) yielding each
     /// part's zip-URI (<c>OpenXmlPart.Uri.OriginalString</c>). Used by the

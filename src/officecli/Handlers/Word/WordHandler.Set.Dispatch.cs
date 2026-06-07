@@ -156,7 +156,7 @@ public partial class WordHandler
         {
             unsupported.AddRange(Core.ChartHelper.SetChartProperties(chartInfo.StandardPart!, chartProps));
         }
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -402,7 +402,7 @@ public partial class WordHandler
                     break;
             }
         }
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -500,7 +500,7 @@ public partial class WordHandler
             fldChar.Dirty = true;
         }
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -1065,7 +1065,7 @@ public partial class WordHandler
         // Phase 5: append sectPrChange now that all props applied successfully.
         // No-op when BeginTrackChangeIfRequested found no trackChange.* sub-keys.
         wrapTrackChange();
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 

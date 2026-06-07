@@ -55,7 +55,7 @@ public partial class WordHandler
             }
         }
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -160,7 +160,7 @@ public partial class WordHandler
                     break;
             }
         }
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -821,7 +821,7 @@ public partial class WordHandler
         var affectedPara = run.Ancestors<Paragraph>().FirstOrDefault();
         if (affectedPara != null)
             affectedPara.TextId = GenerateParaId();
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -893,7 +893,7 @@ public partial class WordHandler
         var affectedPara = hl.Ancestors<Paragraph>().FirstOrDefault();
         if (affectedPara != null)
             affectedPara.TextId = GenerateParaId();
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -954,7 +954,7 @@ public partial class WordHandler
         var affectedPara = mPara.Ancestors<Paragraph>().FirstOrDefault();
         if (affectedPara != null)
             affectedPara.TextId = GenerateParaId();
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -1236,7 +1236,7 @@ public partial class WordHandler
         var affectedPara = para;
         if (affectedPara != null)
             affectedPara.TextId = GenerateParaId();
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -1339,7 +1339,7 @@ public partial class WordHandler
                     break;
             }
         }
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -1943,7 +1943,7 @@ public partial class WordHandler
         var affectedPara = cell.Ancestors<Paragraph>().FirstOrDefault();
         if (affectedPara != null)
             affectedPara.TextId = GenerateParaId();
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -2010,7 +2010,7 @@ public partial class WordHandler
         var affectedPara = row.Ancestors<Paragraph>().FirstOrDefault();
         if (affectedPara != null)
             affectedPara.TextId = GenerateParaId();
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -2475,7 +2475,7 @@ public partial class WordHandler
         var affectedPara = tbl.Ancestors<Paragraph>().FirstOrDefault();
         if (affectedPara != null)
             affectedPara.TextId = GenerateParaId();
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 

@@ -1040,7 +1040,7 @@ public partial class WordHandler
             parentOfPara.InsertAfter(addedElement, para);
         }
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return result;
     }
 }

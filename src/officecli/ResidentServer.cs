@@ -938,6 +938,18 @@ public class ResidentServer : IDisposable
         }
 
         var results = new List<BatchResult>();
+        // Defer per-mutation Document.Save() across the whole batch so N resident
+        // mutations serialize once (at the next save/close) instead of N times —
+        // the per-op Save was an O(N²) re-serialize of the growing part. Mirrors
+        // the non-resident batch path. get/query inside the batch still read the
+        // live in-memory DOM, so they observe every just-added element; the
+        // resident only flushes to disk on `save`/`close`, which go through
+        // _doc.Save() directly (bypassing the deferred SaveDoc()).
+        var deferHandler = _handler as OfficeCli.Handlers.WordHandler;
+        var prevDefer = deferHandler?.DeferSave ?? false;
+        if (deferHandler != null) deferHandler.DeferSave = true;
+        try
+        {
         for (int bi = 0; bi < items.Count; bi++)
         {
             var item = items[bi];
@@ -963,6 +975,11 @@ public class ResidentServer : IDisposable
                 });
                 if (stopOnError) break;
             }
+        }
+        }
+        finally
+        {
+            if (deferHandler != null) deferHandler.DeferSave = prevDefer;
         }
 
         // Judgment contract: batch is classified as a judgment command (root
