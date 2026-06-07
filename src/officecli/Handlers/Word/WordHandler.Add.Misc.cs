@@ -1577,6 +1577,36 @@ public partial class WordHandler
     // v5.7-cont: add type=textbox / add type=shape
     // =====================================================================
 
+    // Valid <wp:positionV>/<wp:positionH> relativeFrom values (ST_RelFromV /
+    // ST_RelFromH). Stored in schema spelling; matched case-insensitively so
+    // SanitizeRelativeFrom returns the canonical casing the XML needs.
+    private static readonly HashSet<string> VerticalRelativeFroms = new(StringComparer.OrdinalIgnoreCase)
+        { "margin", "page", "paragraph", "line", "topMargin", "bottomMargin", "insideMargin", "outsideMargin" };
+    private static readonly HashSet<string> HorizontalRelativeFroms = new(StringComparer.OrdinalIgnoreCase)
+        { "margin", "page", "column", "character", "leftMargin", "rightMargin", "insideMargin", "outsideMargin" };
+
+    /// <summary>
+    /// Map a caller-supplied anchor reference frame to a valid schema value,
+    /// returning the canonical casing. Unknown/empty falls back to the legacy
+    /// default so existing callers (who never set it) are unchanged.
+    /// </summary>
+    private static string SanitizeRelativeFrom(string? value, HashSet<string> valid, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return fallback;
+        return valid.TryGetValue(value.Trim(), out var canonical) ? canonical : fallback;
+    }
+
+    /// <summary>
+    /// Parse a textbox bodyPr inset (EMU). Empty/invalid falls back to the
+    /// Word default so callers that omit it keep the standard padding.
+    /// Negative values are clamped to 0 (insets cannot be negative).
+    /// </summary>
+    private static long ParseInsetEmu(string? value, long fallback)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return fallback;
+        return long.TryParse(value.Trim(), out var emu) ? Math.Max(0, emu) : fallback;
+    }
+
     private string AddTextbox(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         // BUG-D1-MULTIDRAWING-HOST: a paragraph parent means "attach the
@@ -1597,6 +1627,23 @@ public partial class WordHandler
         string wrap = properties.GetValueOrDefault("wrap", "square").ToLowerInvariant();
         long hPos = ParseDrawingPos(properties, "anchor.x", "hposition", defaultEmu: 0);
         long vPos = ParseDrawingPos(properties, "anchor.y", "vposition", defaultEmu: 0);
+        // Anchor reference frames. Default to the legacy hardcoded column/
+        // paragraph so existing callers are unchanged; the dump emitter forwards
+        // the source frames (hRelative/vRelative) so a relativeFrom="page"
+        // textbox round-trips faithfully instead of floating off-position.
+        string hRel = SanitizeRelativeFrom(
+            properties.GetValueOrDefault("hRelative") ?? properties.GetValueOrDefault("hrelative"),
+            HorizontalRelativeFroms, "column");
+        string vRel = SanitizeRelativeFrom(
+            properties.GetValueOrDefault("vRelative") ?? properties.GetValueOrDefault("vrelative"),
+            VerticalRelativeFroms, "paragraph");
+        // bodyPr text insets (EMU). Default to Word's standard insets so callers
+        // that don't set them are unchanged; the dump emitter forwards the
+        // source insets so a zero-inset letterhead box keeps its text width.
+        long lIns = ParseInsetEmu(properties.GetValueOrDefault("inset.left"), 91440);
+        long tIns = ParseInsetEmu(properties.GetValueOrDefault("inset.top"), 45720);
+        long rIns = ParseInsetEmu(properties.GetValueOrDefault("inset.right"), 91440);
+        long bIns = ParseInsetEmu(properties.GetValueOrDefault("inset.bottom"), 45720);
         string? fillColor = properties.GetValueOrDefault("fill") ?? properties.GetValueOrDefault("fillcolor");
         string? lineColor = properties.GetValueOrDefault("line.color") ?? properties.GetValueOrDefault("linecolor");
         string? lineStyle = properties.GetValueOrDefault("line.style") ?? properties.GetValueOrDefault("linestyle");
@@ -1623,7 +1670,7 @@ public partial class WordHandler
         // Drawing scaffolding. EffectExtent + DocProperties + a:graphic with
         // a:graphicData uri = wordprocessingShape; inner wps:wsp carries
         // spPr (preset rect geometry + fill + line) + txbx (body paragraphs) + bodyPr.
-        string drawingXml = $@"<w:drawing xmlns:w=""http://schemas.openxmlformats.org/wordprocessingml/2006/main"" xmlns:wp=""http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"" xmlns:a=""http://schemas.openxmlformats.org/drawingml/2006/main"" xmlns:wps=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wp:anchor distT=""0"" distB=""0"" distL=""114300"" distR=""114300"" simplePos=""0"" relativeHeight=""251{siblingShapes:D3}"" behindDoc=""0"" locked=""0"" layoutInCell=""1"" allowOverlap=""1""><wp:simplePos x=""0"" y=""0""/><wp:positionH relativeFrom=""column""><wp:posOffset>{hPos}</wp:posOffset></wp:positionH><wp:positionV relativeFrom=""paragraph""><wp:posOffset>{vPos}</wp:posOffset></wp:positionV><wp:extent cx=""{cxEmu}"" cy=""{cyEmu}""/><wp:effectExtent l=""0"" t=""0"" r=""0"" b=""0""/>{wrapInnerXml}<wp:docPr id=""{docPropId}"" name=""{System.Security.SecurityElement.Escape(altText)}""/><wp:cNvGraphicFramePr/><a:graphic><a:graphicData uri=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wps:wsp><wps:cNvSpPr txBox=""1""/><wps:spPr><a:xfrm><a:off x=""0"" y=""0""/><a:ext cx=""{cxEmu}"" cy=""{cyEmu}""/></a:xfrm><a:prstGeom prst=""rect""><a:avLst/></a:prstGeom>{fillXml}{lnXml}</wps:spPr><wps:txbx><w:txbxContent>{txbxBodyXml}</w:txbxContent></wps:txbx><wps:bodyPr rot=""0"" wrap=""square"" lIns=""91440"" tIns=""45720"" rIns=""91440"" bIns=""45720"" anchor=""t"" anchorCtr=""0""/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing>";
+        string drawingXml = $@"<w:drawing xmlns:w=""http://schemas.openxmlformats.org/wordprocessingml/2006/main"" xmlns:wp=""http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"" xmlns:a=""http://schemas.openxmlformats.org/drawingml/2006/main"" xmlns:wps=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wp:anchor distT=""0"" distB=""0"" distL=""114300"" distR=""114300"" simplePos=""0"" relativeHeight=""251{siblingShapes:D3}"" behindDoc=""0"" locked=""0"" layoutInCell=""1"" allowOverlap=""1""><wp:simplePos x=""0"" y=""0""/><wp:positionH relativeFrom=""{hRel}""><wp:posOffset>{hPos}</wp:posOffset></wp:positionH><wp:positionV relativeFrom=""{vRel}""><wp:posOffset>{vPos}</wp:posOffset></wp:positionV><wp:extent cx=""{cxEmu}"" cy=""{cyEmu}""/><wp:effectExtent l=""0"" t=""0"" r=""0"" b=""0""/>{wrapInnerXml}<wp:docPr id=""{docPropId}"" name=""{System.Security.SecurityElement.Escape(altText)}""/><wp:cNvGraphicFramePr/><a:graphic><a:graphicData uri=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wps:wsp><wps:cNvSpPr txBox=""1""/><wps:spPr><a:xfrm><a:off x=""0"" y=""0""/><a:ext cx=""{cxEmu}"" cy=""{cyEmu}""/></a:xfrm><a:prstGeom prst=""rect""><a:avLst/></a:prstGeom>{fillXml}{lnXml}</wps:spPr><wps:txbx><w:txbxContent>{txbxBodyXml}</w:txbxContent></wps:txbx><wps:bodyPr rot=""0"" wrap=""square"" lIns=""{lIns}"" tIns=""{tIns}"" rIns=""{rIns}"" bIns=""{bIns}"" anchor=""t"" anchorCtr=""0""/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing>";
 
         var drawing = ParseDrawingFromXml(drawingXml);
         var run = new Run(drawing);
@@ -1679,6 +1726,12 @@ public partial class WordHandler
         string wrap = properties.GetValueOrDefault("wrap", "none").ToLowerInvariant();
         long hPos = ParseDrawingPos(properties, "anchor.x", "hposition", defaultEmu: 0);
         long vPos = ParseDrawingPos(properties, "anchor.y", "vposition", defaultEmu: 0);
+        string hRel = SanitizeRelativeFrom(
+            properties.GetValueOrDefault("hRelative") ?? properties.GetValueOrDefault("hrelative"),
+            HorizontalRelativeFroms, "column");
+        string vRel = SanitizeRelativeFrom(
+            properties.GetValueOrDefault("vRelative") ?? properties.GetValueOrDefault("vrelative"),
+            VerticalRelativeFroms, "paragraph");
         // fill: bare color, or "none"; "line=STYLE;SIZE;COLOR" composite.
         string? fillRaw = properties.GetValueOrDefault("fill");
         string fillXml;
@@ -1709,7 +1762,7 @@ public partial class WordHandler
         uint docPropId = NextDocPropId();
         string wrapInnerXml = WrapXmlFragment(wrap);
 
-        string drawingXml = $@"<w:drawing xmlns:w=""http://schemas.openxmlformats.org/wordprocessingml/2006/main"" xmlns:wp=""http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"" xmlns:a=""http://schemas.openxmlformats.org/drawingml/2006/main"" xmlns:wps=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wp:anchor distT=""0"" distB=""0"" distL=""114300"" distR=""114300"" simplePos=""0"" relativeHeight=""251{siblingShapes:D3}"" behindDoc=""0"" locked=""0"" layoutInCell=""1"" allowOverlap=""1""><wp:simplePos x=""0"" y=""0""/><wp:positionH relativeFrom=""column""><wp:posOffset>{hPos}</wp:posOffset></wp:positionH><wp:positionV relativeFrom=""paragraph""><wp:posOffset>{vPos}</wp:posOffset></wp:positionV><wp:extent cx=""{cxEmu}"" cy=""{cyEmu}""/><wp:effectExtent l=""0"" t=""0"" r=""0"" b=""0""/>{wrapInnerXml}<wp:docPr id=""{docPropId}"" name=""{System.Security.SecurityElement.Escape(altText)}""/><wp:cNvGraphicFramePr/><a:graphic><a:graphicData uri=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wps:wsp><wps:cNvSpPr/><wps:spPr><a:xfrm><a:off x=""0"" y=""0""/><a:ext cx=""{cxEmu}"" cy=""{cyEmu}""/></a:xfrm><a:prstGeom prst=""{SanitizeGeometry(preset)}""><a:avLst/></a:prstGeom>{fillXml}{lnXml}</wps:spPr><wps:bodyPr/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing>";
+        string drawingXml = $@"<w:drawing xmlns:w=""http://schemas.openxmlformats.org/wordprocessingml/2006/main"" xmlns:wp=""http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"" xmlns:a=""http://schemas.openxmlformats.org/drawingml/2006/main"" xmlns:wps=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wp:anchor distT=""0"" distB=""0"" distL=""114300"" distR=""114300"" simplePos=""0"" relativeHeight=""251{siblingShapes:D3}"" behindDoc=""0"" locked=""0"" layoutInCell=""1"" allowOverlap=""1""><wp:simplePos x=""0"" y=""0""/><wp:positionH relativeFrom=""{hRel}""><wp:posOffset>{hPos}</wp:posOffset></wp:positionH><wp:positionV relativeFrom=""{vRel}""><wp:posOffset>{vPos}</wp:posOffset></wp:positionV><wp:extent cx=""{cxEmu}"" cy=""{cyEmu}""/><wp:effectExtent l=""0"" t=""0"" r=""0"" b=""0""/>{wrapInnerXml}<wp:docPr id=""{docPropId}"" name=""{System.Security.SecurityElement.Escape(altText)}""/><wp:cNvGraphicFramePr/><a:graphic><a:graphicData uri=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wps:wsp><wps:cNvSpPr/><wps:spPr><a:xfrm><a:off x=""0"" y=""0""/><a:ext cx=""{cxEmu}"" cy=""{cyEmu}""/></a:xfrm><a:prstGeom prst=""{SanitizeGeometry(preset)}""><a:avLst/></a:prstGeom>{fillXml}{lnXml}</wps:spPr><wps:bodyPr/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing>";
 
         var drawing = ParseDrawingFromXml(drawingXml);
         var run = new Run(drawing);

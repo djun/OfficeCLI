@@ -1131,10 +1131,20 @@ public static partial class WordBatchEmitter
             }
             if (anchor != null)
             {
-                var posH = anchor.Element(wp + "positionH")?.Element(wp + "posOffset")?.Value;
-                var posV = anchor.Element(wp + "positionV")?.Element(wp + "posOffset")?.Value;
+                var posHEl = anchor.Element(wp + "positionH");
+                var posVEl = anchor.Element(wp + "positionV");
+                var posH = posHEl?.Element(wp + "posOffset")?.Value;
+                var posV = posVEl?.Element(wp + "posOffset")?.Value;
                 if (!string.IsNullOrEmpty(posH)) props["anchor.x"] = posH + "emu";
                 if (!string.IsNullOrEmpty(posV)) props["anchor.y"] = posV + "emu";
+                // Anchor reference frames. AddTextbox hardcodes column/paragraph;
+                // without forwarding these a textbox anchored relativeFrom="page"
+                // round-trips as relativeFrom="paragraph" and floats off-position
+                // (the source posOffset is measured from a different origin).
+                var hRel = posHEl?.Attribute("relativeFrom")?.Value;
+                var vRel = posVEl?.Attribute("relativeFrom")?.Value;
+                if (!string.IsNullOrEmpty(hRel)) props["hRelative"] = hRel;
+                if (!string.IsNullOrEmpty(vRel)) props["vRelative"] = vRel;
                 // wrap token
                 if (anchor.Element(wp + "wrapSquare") != null) props["wrap"] = "square";
                 else if (anchor.Element(wp + "wrapTight") != null) props["wrap"] = "tight";
@@ -1146,6 +1156,19 @@ public static partial class WordBatchEmitter
             var solidFill = spPr?.Element(a + "solidFill");
             var srgbClr = solidFill?.Element(a + "srgbClr")?.Attribute("val")?.Value;
             if (!string.IsNullOrEmpty(srgbClr)) props["fill"] = srgbClr;
+            // bodyPr text insets. AddTextbox hardcodes Word defaults
+            // (91440/45720); a source with zero insets (common on tight
+            // letterhead title boxes) otherwise loses ~0.2in of usable width
+            // and its text rewraps. Forward each present inset verbatim (EMU).
+            var bodyPr = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "bodyPr");
+            if (bodyPr != null)
+            {
+                foreach (var (attr, key) in new[] { ("lIns", "inset.left"), ("tIns", "inset.top"), ("rIns", "inset.right"), ("bIns", "inset.bottom") })
+                {
+                    var v = bodyPr.Attribute(attr)?.Value;
+                    if (!string.IsNullOrEmpty(v)) props[key] = v;
+                }
+            }
             // docPr name → alt
             var docPr = doc.Descendants(wp + "docPr").FirstOrDefault();
             var altName = docPr?.Attribute("name")?.Value;
