@@ -1072,8 +1072,19 @@ public partial class WordHandler
                 secNode.Format["docGrid.type"] = docGrid.Type.InnerText;
             if (docGrid.LinePitch?.Value != null)
                 secNode.Format["docGrid.linePitch"] = docGrid.LinePitch.Value;
-            if (docGrid.CharacterSpace?.Value != null)
-                secNode.Format["docGrid.charSpace"] = docGrid.CharacterSpace.Value;
+            if (docGrid.CharacterSpace != null)
+            {
+                // Signed charSpace stored as unsigned 32-bit (e.g. -2049 →
+                // 4294965247) overflows Int32Value.Value. Read raw + wrap.
+                // Mirrors WordHandler.Navigation.DocSettings.
+                var rawCs = docGrid.CharacterSpace.InnerText;
+                if (long.TryParse(rawCs, System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out var csVal))
+                {
+                    if (csVal > int.MaxValue) csVal -= 4294967296L;
+                    secNode.Format["docGrid.charSpace"] = (int)csVal;
+                }
+            }
         }
 
         return secNode;

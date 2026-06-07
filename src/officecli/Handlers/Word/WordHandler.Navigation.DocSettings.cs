@@ -28,8 +28,22 @@ public partial class WordHandler
                     node.Format["docGrid.type"] = grid.Type.InnerText;
                 if (grid.LinePitch?.Value != null)
                     node.Format["docGrid.linePitch"] = grid.LinePitch.Value;
-                if (grid.CharacterSpace?.Value != null)
-                    node.Format["docGrid.charSpace"] = grid.CharacterSpace.Value;
+                if (grid.CharacterSpace != null)
+                {
+                    // charSpace is signed (ST_DecimalNumber). Word commonly stores
+                    // negative CJK spacing as its unsigned 32-bit form (e.g. -2049
+                    // → 4294965247), which overflows Int32Value.Value and threw
+                    // "Value was either too large or too small for an Int32" on
+                    // dump. Read the raw text and wrap unsigned→signed so the
+                    // setter (which accepts negatives) round-trips it.
+                    var rawCs = grid.CharacterSpace.InnerText;
+                    if (long.TryParse(rawCs, System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture, out var csVal))
+                    {
+                        if (csVal > int.MaxValue) csVal -= 4294967296L; // 2^32 unsigned→signed
+                        node.Format["docGrid.charSpace"] = (int)csVal;
+                    }
+                }
             }
 
             // ==================== Columns ====================
