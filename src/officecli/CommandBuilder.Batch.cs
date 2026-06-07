@@ -195,49 +195,15 @@ static partial class CommandBuilder
             // semantics, also update CommandBuilder.Set.cs at the matching
             // CheckDocxProtection call site.
             var force = forceFlag;
-            if (!force && file.Extension.Equals(".docx", StringComparison.OrdinalIgnoreCase))
-            {
-                // Document protection is a file-level property, so read it ONCE
-                // for the whole batch — not once per item. CheckDocxProtection
-                // reopens the entire .docx to read settings.xml, so the old
-                // per-item loop turned an N-item batch into N full document
-                // opens (≈10s of pure I/O for a 16k-item batch). The `path`
-                // argument only drives the formfield/sdt exemption, so pass a
-                // representative non-exempt gated path when one exists;
-                // otherwise any gated path (all exempt → CheckDocxProtection
-                // returns 0 just as the per-item loop did).
-                string? exemptPath = null; bool hasNonExemptGated = false;
-                foreach (var batchItem in items)
-                {
-                    // Only mutation commands need the protection gate. Read
-                    // commands (get/query/view) are unaffected by document
-                    // protection — protection blocks writes, not reads.
-                    var cmdLower = (batchItem.Command ?? "").ToLowerInvariant();
-                    if (cmdLower is not ("set" or "add" or "remove" or "raw-set"))
-                        continue;
-                    // Property-bag protection-changing op is its own escape
-                    // hatch (mirrors set's isProtectionChange exemption).
-                    if (batchItem.Props != null && batchItem.Props.Keys.Any(k =>
-                        k.Equals("protection", StringComparison.OrdinalIgnoreCase)))
-                        continue;
-                    var path = batchItem.Path ?? "";
-                    bool pathExempt = path.StartsWith("/formfield[", StringComparison.OrdinalIgnoreCase)
-                        || path.Contains("/sdt[", StringComparison.OrdinalIgnoreCase);
-                    if (pathExempt) { exemptPath ??= path; continue; }
-                    hasNonExemptGated = true;
-                    var rc = CheckDocxProtection(file.FullName, path, json);
-                    if (rc != 0) return rc;
-                    break; // protection state is document-wide; one check suffices
-                }
-                // No non-exempt gated mutation, but exempt ones exist: preserve
-                // the old behavior of still consulting protection (returns 0 for
-                // formfield/sdt paths) so the contract is byte-identical.
-                if (!hasNonExemptGated && exemptPath != null)
-                {
-                    var rc = CheckDocxProtection(file.FullName, exemptPath, json);
-                    if (rc != 0) return rc;
-                }
-            }
+            // Document protection is gated ONCE per batch against the in-memory
+            // DOM, not by reopening the file per item (the old per-item loop did
+            // N full document opens — ~10s of I/O for a 16k batch). The check
+            // runs where the live tree is available: the resident server checks
+            // its in-memory _handler (see ExecuteBatch), and the non-resident
+            // path checks just after it opens the handler (below). Reading the
+            // live tree — not the on-disk copy — also keeps the gate correct
+            // when a resident holds uncommitted in-memory protection changes
+            // (resident sessions flush only on save/close).
 
             // If a resident process is running, send the entire batch as a
             // single "batch" command so it executes in one open/save cycle
@@ -281,6 +247,20 @@ static partial class CommandBuilder
             // the Dispose-time flush.
             using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
             if (handler is OfficeCli.Handlers.WordHandler batchWh) batchWh.DeferSave = true;
+            // Protection gate against the just-opened in-memory DOM (one check
+            // for the whole batch; no second file open).
+            if (!force && file.Extension.Equals(".docx", StringComparison.OrdinalIgnoreCase))
+            {
+                var protBlock = GetBatchProtectionBlock(handler, items);
+                if (protBlock != null)
+                {
+                    if (json)
+                        Console.WriteLine(OfficeCli.Core.OutputFormatter.WrapEnvelopeError(protBlock, new List<OfficeCli.Core.CliWarning>()));
+                    else
+                        Console.Error.WriteLine($"ERROR: {protBlock}");
+                    return 1;
+                }
+            }
             var batchResults = new List<BatchResult>();
             for (int bi = 0; bi < items.Count; bi++)
             {

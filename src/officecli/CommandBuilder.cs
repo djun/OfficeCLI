@@ -1208,6 +1208,44 @@ static partial class CommandBuilder
         }
     }
 
+    // Batch-scoped protection gate evaluated against an ALREADY-OPEN handler's
+    // in-memory DOM — no extra file open, and authoritative even when the
+    // on-disk copy lags the in-memory tree (resident sessions flush only on
+    // save/close, so a prior in-memory protection change would not yet be on
+    // disk; reading the file there could mis-gate the batch). This is the
+    // in-memory equivalent of CheckDocxProtection applied once per batch: a
+    // protected document rejects the batch unless every gated mutation targets
+    // a formfield/sdt path (which manage their own editable check). Returns 0
+    // to allow, non-zero after emitting the rejection.
+    internal static string? GetBatchProtectionBlock(OfficeCli.Core.IDocumentHandler handler, List<BatchItem> items)
+    {
+        OfficeCli.Core.DocumentNode root;
+        try { root = handler.Get("/"); }
+        catch { return null; } // can't read protection -> allow (mirrors CheckDocxProtection)
+        var protection = root.Format.TryGetValue("protection", out var pVal) ? pVal?.ToString() : "none";
+        var enforced = root.Format.TryGetValue("protectionEnforced", out var eVal) && eVal is true;
+        if (!enforced || protection == "none")
+            return null;
+        foreach (var item in items)
+        {
+            var cmd = (item.Command ?? "").ToLowerInvariant();
+            if (cmd is not ("set" or "add" or "remove" or "raw-set"))
+                continue;
+            if (item.Props != null && item.Props.Keys.Any(k =>
+                k.Equals("protection", StringComparison.OrdinalIgnoreCase)))
+                continue;
+            var path = item.Path ?? "";
+            if (path.StartsWith("/formfield[", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (path.Contains("/sdt[", StringComparison.OrdinalIgnoreCase))
+                continue;
+            // Non-exempt mutation against a protected document — block the batch.
+            return $"Document is protected (mode: {protection}). " +
+                   "Use Query(\"editable\") to find editable fields, or use --force to override protection.";
+        }
+        return null;
+    }
+
     private static readonly HashSet<string> PositionKeys = new(StringComparer.OrdinalIgnoreCase)
         { "x", "left", "y", "top", "width", "w", "height", "h" };
 

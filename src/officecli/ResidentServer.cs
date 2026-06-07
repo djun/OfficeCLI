@@ -948,6 +948,18 @@ public class ResidentServer : IDisposable
                     $"batch item[{ni}] is null. Each entry must be a JSON object (e.g. {{\"command\":\"get\",\"path\":\"/\"}}).");
         }
 
+        // Document-protection gate, evaluated against the resident's in-memory
+        // DOM (not the on-disk file, which may lag uncommitted protection
+        // changes — the resident flushes only on save/close). Mirrors the
+        // non-resident batch path; honors --force. Throw so the command's
+        // exception handler maps it to a non-zero exit with the message.
+        if (!force && _handler is OfficeCli.Handlers.WordHandler)
+        {
+            var protBlock = CommandBuilder.GetBatchProtectionBlock(_handler, items);
+            if (protBlock != null)
+                throw new CliException(protBlock) { Code = "document_protected" };
+        }
+
         var results = new List<BatchResult>();
         // Defer per-mutation Document.Save() across the whole batch so N resident
         // mutations serialize once (at the next save/close) instead of N times —
