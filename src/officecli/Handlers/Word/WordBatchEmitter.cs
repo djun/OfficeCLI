@@ -179,6 +179,10 @@ public static partial class WordBatchEmitter
         // adds that carry `numId=N` need /numbering to already hold N.
         EmitNumberingRaw(word, items);
         EmitStyles(word, items);
+        // docDefaults (inside styles.xml) round-trips verbatim via raw-set —
+        // must follow EmitStyles so it overwrites the blank's stamped block
+        // rather than being clobbered by it. See EmitDocDefaultsRaw.
+        EmitDocDefaultsRaw(word, items);
         EmitThemeRaw(word, items);
         EmitSettingsRaw(word, items);
         EmitSection(word, items);

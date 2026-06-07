@@ -211,6 +211,50 @@ public static partial class WordBatchEmitter
         }
     }
 
+    // Round-trip the source's <w:docDefaults> (the document-wide rPr/pPr
+    // baseline inside styles.xml) VERBATIM via raw-set replace. This is the
+    // root fix for "blank-default pollution": BlankDocCreator stamps an
+    // opinionated docDefaults (Calibri, sz=22/11pt, szCs=22) that a source
+    // omitting a slot — calibre/pandoc exports routinely carry only szCs, or
+    // only a complex-script font, leaving the Latin size/lang/textAlignment to
+    // Word's application default — would otherwise inherit on replay, rendering
+    // at the wrong size/font. Per-property emits (docDefaults.font.latin,
+    // docDefaults.fontSize, …) only covered the slots the source set
+    // EXPLICITLY and could not express "this slot is absent", so the blank's
+    // value leaked through. Replacing the whole block makes the rebuilt
+    // docDefaults byte-identical to the source — including its absences — so
+    // Word applies the same defaults to both. Mirrors the theme/settings/
+    // numbering raw-emit rationale (structured XML edited as a block).
+    private static void EmitDocDefaultsRaw(WordHandler word, List<BatchItem> items)
+    {
+        string stylesXml;
+        try { stylesXml = word.Raw("/styles"); }
+        catch { return; }
+        if (string.IsNullOrEmpty(stylesXml) || !stylesXml.StartsWith("<")) return;
+        string? dd;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(stylesXml);
+            var wNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+            var el = doc.Root?.Element(wNs + "docDefaults");
+            // Source carries no docDefaults — leave the blank target's in place
+            // (removing it risks a docDefaults-less styles.xml some consumers
+            // dislike; absence here is rare and low-impact).
+            dd = el?.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+        }
+        catch { return; }
+        if (string.IsNullOrEmpty(dd)) return;
+
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = "/styles",
+            Xpath = "/w:styles/w:docDefaults",
+            Action = "replace",
+            Xml = dd
+        });
+    }
+
     private static void EmitThemeRaw(WordHandler word, List<BatchItem> items)
     {
         // Theme carries clrScheme + fontScheme + fmtScheme — pure structured
@@ -711,6 +755,10 @@ public static partial class WordBatchEmitter
                 }
             }
             if (!include) continue;
+            // docDefaults round-trips verbatim via EmitDocDefaultsRaw now —
+            // skip the per-property emit here so the two paths don't fight
+            // (and so source-absent slots aren't re-stamped from the blank).
+            if (k.StartsWith("docDefaults.", StringComparison.OrdinalIgnoreCase)) continue;
             if (v == null) continue;
             var s = v switch { bool b => b ? "true" : "false", _ => v.ToString() ?? "" };
             if (s.Length == 0) continue;
@@ -729,47 +777,12 @@ public static partial class WordBatchEmitter
             }
             props[k] = s;
         }
-        // docDefaults.font side-effect: the bare TrySetDocDefaults("docdefaults.font", v)
-        // case writes ALL four font slots (Ascii/HAnsi/EastAsia/ComplexScript)
-        // — convenient for setup, harmful on round-trip. Source documents
-        // commonly carry only Ascii/HAnsi (latin) in docDefaults; emitting
-        // the bare key on replay would spuriously stamp the same value into
-        // eastAsia and complexScript, drifting away from source.
-        //
-        // Rewrite the bare `docDefaults.font` into the targeted
-        // `docDefaults.font.latin` (= Ascii+HAnsi only) so the round-trip
-        // doesn't bleed into the other script slots. Per-slot eastAsia /
-        // complexScript / hAnsi keys remain untouched and continue to
-        // address only their own slot.
-        if (props.TryGetValue("docDefaults.font", out var bareFont))
-        {
-            props.Remove("docDefaults.font");
-            props["docDefaults.font.latin"] = bareFont;
-        }
-        // BUG-X6-05: BlankDocCreator (minimal path) stamps `Times New Roman`
-        // into docDefaults RunFonts. Source docs that omit the slot (use
-        // theme fonts) round-trip with the blank's TNR baked in. Force an
-        // explicit empty `docDefaults.font.latin=` so the Set path clears
-        // the blank's TNR back to absent.
-        //
-        // BUG-R6-01: only do this when the SOURCE truly lacks a docDefaults
-        // latin/ascii font. The baseline-match skip above can suppress an
-        // emit for a source that DOES carry `docDefaults.font=<X>` simply
-        // because the blank already has the same value — in that case the
-        // injection below was firing with "" and clearing the very font the
-        // source intended to keep (e.g. Calibri → blank rFonts). Guard on
-        // raw source presence, not on the post-baseline-filter `props`.
-        bool sourceHasDocDefaultsFont =
-            (root.Format.TryGetValue("docDefaults.font", out var srcFont)
-             && !string.IsNullOrEmpty(srcFont?.ToString()))
-            || (root.Format.TryGetValue("docDefaults.font.latin", out var srcLatin)
-                && !string.IsNullOrEmpty(srcLatin?.ToString()));
-        if (!sourceHasDocDefaultsFont
-            && !props.ContainsKey("docDefaults.font.latin")
-            && !props.ContainsKey("docDefaults.font"))
-        {
-            props["docDefaults.font.latin"] = "";
-        }
+        // NOTE: docDefaults (fonts, size, lang, spacing, …) is no longer
+        // emitted property-by-property here — EmitDocDefaultsRaw round-trips
+        // the whole <w:docDefaults> block verbatim, which also handles the
+        // "source omits a slot the blank stamped" pollution the old
+        // per-property clears (bare-font rewrite, the BUG-X6-05 font.latin=""
+        // clear) were patching one slot at a time.
         if (props.Count == 0) return;
         items.Add(new BatchItem
         {
