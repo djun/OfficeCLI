@@ -844,6 +844,15 @@ public static partial class WordBatchEmitter
                 Path = "/styles/Normal",
             });
         }
+        // Dedupe by styleId. A styleId is effectively a key — OOXML requires
+        // it unique — but real-world sources (LibreOffice / merged docs) carry
+        // duplicates (e.g. 88 <w:style> elements, 58 unique ids). Word itself
+        // tolerates this by keeping the FIRST occurrence and ignoring the rest
+        // (it opens the file fine). Mirror that: emit each styleId once. Without
+        // this, every duplicate replayed as an `add style` that failed the id
+        // uniqueness check. (Get-by-id also resolves all duplicates to the first
+        // style anyway, so the extra emits were redundant copies.)
+        var seenStyleIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var stub in styles)
         {
             // CONSISTENCY(slash-in-style-id): style ids/names containing '/'
@@ -862,6 +871,9 @@ public static partial class WordBatchEmitter
                 if (props.TryGetValue("name", out var n)) props["id"] = n;
                 else continue;
             }
+            var emitId = props.GetValueOrDefault("id") ?? props.GetValueOrDefault("styleId");
+            if (!string.IsNullOrEmpty(emitId) && !seenStyleIds.Add(emitId))
+                continue; // duplicate styleId — keep first, skip the rest (Word's behavior)
             // BUG-X6-03: built-in style ids (Normal / Heading1-9 / Title /
             // …) collide with the blank template's reservations on a
             // fresh batch target. AddStyle is now idempotent for those
