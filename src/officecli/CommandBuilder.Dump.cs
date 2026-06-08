@@ -80,6 +80,20 @@ static partial class CommandBuilder
             // CONSISTENCY(dump-format-dispatch): mirrors docx vs pptx branch
             List<BatchItem> items;
             List<CliWarning>? dumpWarnings = null;
+
+            // CONSISTENCY(dump-text-clean-output): warnings go to stderr in
+            // --json mode, OR in text mode when the batch JSON is written to a
+            // file (`--out <file>`, not stdout). The original suppression
+            // existed because text-mode `dump 2>&1 | batch --input -` piped
+            // stderr into the JSON stdin and broke batch's parse. That hazard
+            // only exists when the JSON array goes to STDOUT; once `--out`
+            // diverts it to a file, stdout carries just the path and stderr is
+            // free for human-facing warnings. Without this, orphan-note /
+            // dropped-drawing warnings were invisible on the most common
+            // `dump file -o out.json` invocation (text mode). `--out -` (stdout)
+            // normalizes to null below, so it correctly stays suppressed.
+            var outIsFile = !string.IsNullOrEmpty(outPath) && outPath != "-";
+            var warnToStderr = json || outIsFile;
             // BUG-R4-01: route open through DocumentHandlerFactory so the
             // FileFormatException / OpenXmlPackageException → CliException
             // (code=corrupt_file) wrapping applies. Without this, direct
@@ -107,14 +121,10 @@ static partial class CommandBuilder
                             Message = $"skipped {w.Element} at {w.Path}: {w.Reason}",
                             Code = "unsupported_element"
                         });
-                        // CONSISTENCY(dump-text-clean-output): emit warnings to
-                        // stderr only in --json mode (text-mode pipelines like
-                        // `dump 2>&1 | batch --input -` saw warnings mixed into
-                        // the JSON array and batch parse failed). JSON callers
-                        // pick warnings up via the envelope warnings[] field;
-                        // text callers must inspect the envelope directly or
-                        // re-run with --json.
-                        if (json)
+                        // CONSISTENCY(dump-text-clean-output): emit to stderr in
+                        // --json mode or when --out diverts the JSON to a file;
+                        // see warnToStderr above for the stdout-pipe rationale.
+                        if (warnToStderr)
                             Console.Error.WriteLine($"warning: skipped {w.Element} at {w.Path}: {w.Reason}");
                     }
                 }
@@ -134,12 +144,10 @@ static partial class CommandBuilder
                             Message = $"skipped {w.Element} on {w.SlidePath}: {w.Reason}",
                             Code = "unsupported_element"
                         });
-                        // CONSISTENCY(dump-text-clean-output): only emit to
-                        // stderr in --json mode. Text-mode callers piping
-                        // `dump 2>&1 | batch --input -` got warnings inlined
-                        // after the JSON array and `batch` then failed to
-                        // parse. See docx branch above for the rationale.
-                        if (json)
+                        // CONSISTENCY(dump-text-clean-output): emit to stderr in
+                        // --json mode or when --out diverts the JSON to a file.
+                        // See docx branch above for the stdout-pipe rationale.
+                        if (warnToStderr)
                             Console.Error.WriteLine($"warning: skipped {w.Element} on {w.SlidePath}: {w.Reason}");
                     }
                 }

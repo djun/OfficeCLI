@@ -1477,19 +1477,22 @@ public class ResidentServer : IDisposable
             throw new CliException($"Unsupported --format: {dumpFormat}. Valid: batch")
                 { Code = "invalid_format", ValidValues = ["batch"] };
 
+        // CONSISTENCY(dump-text-clean-output): warnings reach stderr in --json
+        // mode OR when --out diverts the JSON array to a file (stdout then
+        // carries just the path, so the `dump 2>&1 | batch --input -` pipe
+        // hazard doesn't apply). Mirrors CommandBuilder.Dump.cs's warnToStderr.
+        var outIsFile = !string.IsNullOrEmpty(outPath) && outPath != "-";
+        var warnToStderr = req.Json || outIsFile;
+
         // CONSISTENCY(dump-format-dispatch): mirrors docx vs pptx branch
         List<BatchItem> items;
         if (_handler is WordHandler word)
         {
             var (wItems, wWarnings) = WordBatchEmitter.EmitWordWithWarnings(word, path);
             items = wItems;
-            // CONSISTENCY(dump-text-clean-output): emit warnings to stderr
-            // only in --json mode. Text-mode pipelines (`dump 2>&1 | batch
-            // --input -`) saw warnings inlined after the JSON array and
-            // batch then failed to parse. JSON callers still see warnings
-            // via the envelope warnings[] field; text callers must inspect
-            // the envelope directly or re-run with --json.
-            if (req.Json)
+            // CONSISTENCY(dump-text-clean-output): see warnToStderr above —
+            // stderr in --json mode or when --out diverts the JSON to a file.
+            if (warnToStderr)
             {
                 foreach (var w in wWarnings)
                     Console.Error.WriteLine($"warning: skipped {w.Element} at {w.Path}: {w.Reason}");
@@ -1500,7 +1503,7 @@ public class ResidentServer : IDisposable
             var (pItems, pWarnings) = OfficeCli.Handlers.PptxBatchEmitter.EmitPptx(ppt, path);
             items = pItems;
             // CONSISTENCY(dump-text-clean-output): see docx branch above.
-            if (req.Json)
+            if (warnToStderr)
             {
                 foreach (var w in pWarnings)
                     Console.Error.WriteLine($"warning: skipped {w.Element} on {w.SlidePath}: {w.Reason}");
