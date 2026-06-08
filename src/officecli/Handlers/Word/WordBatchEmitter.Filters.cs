@@ -325,6 +325,34 @@ public static partial class WordBatchEmitter
                 continue;
             }
 
+            // BUG-DUMPR2-01: a zero-width gridCol/cell (<w:gridCol w:w="0"/> /
+            // <w:tcW w:w="0"/>) is legal OOXML — Word emits it for a collapsed
+            // column — but the Add/Set width guards reject 0 to catch the
+            // layout-corrupting typo case. To keep the round-trip from tripping
+            // its own guard (which would drop the whole table and its text),
+            // clamp an emitted zero column/cell width up to 1 twip: ~1/1440",
+            // visually identical to 0. Cell/gridCol zero-width emits as the
+            // explicit "0dxa" form; a table's auto width is bare "0" (type=auto)
+            // and is left untouched. Mirrors the out-of-window font-size clamp.
+            if (string.Equals(key, "colWidths", StringComparison.OrdinalIgnoreCase)
+                && val is string cwRaw && cwRaw.Contains('0'))
+            {
+                var clamped = string.Join(",", cwRaw.Split(',').Select(part =>
+                {
+                    var t = part.Trim();
+                    var num = t.EndsWith("dxa", StringComparison.OrdinalIgnoreCase) ? t[..^3] : t;
+                    return int.TryParse(num, out var n) && n <= 0 ? "1dxa" : t;
+                }));
+                result[key] = clamped;
+                continue;
+            }
+            if (string.Equals(key, "width", StringComparison.OrdinalIgnoreCase)
+                && val is string wRaw && wRaw.Trim() == "0dxa")
+            {
+                result[key] = "1dxa";
+                continue;
+            }
+
             if (val == null) continue;
             string s = val switch
             {
