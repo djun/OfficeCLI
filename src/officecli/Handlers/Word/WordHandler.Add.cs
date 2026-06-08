@@ -586,7 +586,16 @@ public partial class WordHandler
             switch (key.ToLowerInvariant())
             {
                 case "pagebackground" or "background":
-                    doc.DocumentBackground = new DocumentBackground { Color = value };
+                    // w:background/@w:color is ST_HexColor (bare RRGGBB or
+                    // "auto") — strip a leading '#' and resolve named/rgb()
+                    // forms like every other color write. Get emits the
+                    // canonical "#FFFFFF" form (FormatHexColor); without this
+                    // the '#' leaked verbatim into the attribute and a
+                    // dump→batch round-trip produced schema-invalid OOXML.
+                    doc.DocumentBackground = new DocumentBackground
+                    {
+                        Color = OfficeCli.Core.ParseHelpers.SanitizeColorForOoxml(value).Rgb
+                    };
                     // Enable background display in settings
                     var settingsPart = _doc.MainDocumentPart!.DocumentSettingsPart
                         ?? _doc.MainDocumentPart.AddNewPart<DocumentSettingsPart>();
