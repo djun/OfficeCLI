@@ -822,6 +822,18 @@ public partial class WordHandler
         // the document opens. PAGE/NUMPAGES/SECTION etc. still get "1" (the
         // OOXML convention \u2014 Word auto-updates these on open regardless).
         bool isExpressionField = fieldInstr.TrimStart().StartsWith("=");
+        // BUG-R8A(BUG3): the "1" cached placeholder is only correct for numeric
+        // page fields (PAGE/PAGEREF/NUMPAGES/SECTION/SECTIONPAGES), where Word
+        // auto-updates on open and "1" is a sensible seed. A raw `instruction=`
+        // field arrives with effectiveType "field" (no named type), so detect a
+        // numeric-page instruction head from the built instruction text too —
+        // otherwise `add field --prop instruction="PAGEREF X"` would be denied
+        // the seed that `add field --prop fieldType=pageref` gets.
+        var instrHead = fieldInstr.TrimStart().Split(' ', 2)[0].ToUpperInvariant();
+        bool isNumericPageField =
+            effectiveType is "pagenum" or "pagenumber" or "page" or "numpages"
+                or "section" or "sectionpages" or "pageref"
+            || instrHead is "PAGE" or "PAGEREF" or "NUMPAGES" or "SECTION" or "SECTIONPAGES";
         var fieldPlaceholder = properties.ContainsKey("text")
             ? properties["text"]
             : effectiveType switch
@@ -841,7 +853,16 @@ public partial class WordHandler
                     => FormatDateForField(dateFmtVal, "M/d/yyyy"),
                 "time" => FormatDateForField(dateFmtVal, "h:mm tt"),
                 _ when isExpressionField => "",
-                _ => "1"
+                // BUG-R8A(BUG3): keep the intentional "1" only for numeric page
+                // fields. The old `_ => "1"` arm leaked to every unrecognized raw
+                // `instruction=` field (SYMBOL/EQ/ADVANCE/TC/...), fabricating a
+                // bogus cached "1" reported as evaluated=true. Per the `evaluated`
+                // protocol, a field with no genuine cached result must be
+                // evaluated=false — omit the cached run (empty placeholder, same
+                // path as the expression field) so `view text` shows the sentinel
+                // and `view issues` emits field_not_evaluated.
+                _ when isNumericPageField => "1",
+                _ => ""
             };
 
         // Build complex field. Canonical shape:
