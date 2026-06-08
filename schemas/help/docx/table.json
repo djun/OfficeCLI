@@ -2,7 +2,9 @@
   "$schema": "../_schema.json",
   "format": "docx",
   "element": "table",
-  "elementAliases": ["tbl"],
+  "elementAliases": [
+    "tbl"
+  ],
   "parent": "body",
   "operations": {
     "add": true,
@@ -140,6 +142,30 @@
         "--prop padding=100"
       ],
       "readback": "n/a",
+      "enforcement": "report"
+    },
+    "caption": {
+      "type": "string",
+      "description": "accessibility caption for the table (<w:tblCaption> @w:val). Surfaced to assistive technology.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop caption=\"...\""
+      ],
+      "readback": "string value",
+      "enforcement": "report"
+    },
+    "description": {
+      "type": "string",
+      "description": "accessibility description / long-desc for the table (<w:tblDescription> @w:val).",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop description=\"...\""
+      ],
+      "readback": "string value",
       "enforcement": "report"
     }
   }

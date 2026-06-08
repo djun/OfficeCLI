@@ -251,7 +251,7 @@ public partial class WordHandler
             "padding", "padding.top", "padding.bottom", "padding.left", "padding.right",
             "style", "shd", "shading", "direction", "dir", "bidi",
             // CONSISTENCY(add-set-symmetry): mirror Set's tblPr-level cases.
-            "overlap",
+            "overlap", "caption", "description",
         };
         foreach (var (tk, tv) in properties)
         {
@@ -477,6 +477,20 @@ public partial class WordHandler
                     if (ParseDirectionRtl(tv))
                         InsertTblPrChildInOrder(tblProps, new BiDiVisual());
                     explicitDirection = true;
+                    break;
+                // Accessibility caption / description (<w:tblCaption>/<w:tblDescription>).
+                // Mirrors the SetElementTable cases so dump→batch round-trips them;
+                // without these the emitter's `add table` carried caption/description
+                // but AddTable silently dropped them. CONSISTENCY(add-set-symmetry).
+                case "caption":
+                    tblProps.RemoveAllChildren<TableCaption>();
+                    if (!string.IsNullOrEmpty(tv))
+                        InsertTblPrChildInOrder(tblProps, new TableCaption { Val = tv });
+                    break;
+                case "description":
+                    tblProps.RemoveAllChildren<TableDescription>();
+                    if (!string.IsNullOrEmpty(tv))
+                        InsertTblPrChildInOrder(tblProps, new TableDescription { Val = tv });
                     break;
                 // BUG-R4-02/08: tblLook props at Add time. Mirrors the Set.Element.cs
                 // tblLook switch — accepts lowercase + camelCase aliases as input.
