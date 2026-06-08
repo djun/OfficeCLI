@@ -739,9 +739,12 @@ public partial class WordHandler
     private readonly Dictionary<OpenXmlElement, (List<OpenXmlElement> paras, List<OpenXmlElement> tables)>
         _bodyChildIndexCache = new();
 
-    // Drop the body child-index cache after a structural mutation. Cheap
-    // (O(#bodies), typically 1). Called from Add() and InvalidateBodyParaCache.
-    private void ClearBodyChildIndex() => _bodyChildIndexCache.Clear();
+    // Per-body-child → owning section, built lazily by FindOwningSectionProperties.
+    private Dictionary<OpenXmlElement, SectionProperties?>? _owningSectionCache;
+
+    // Drop the body child-index + owning-section caches after a structural
+    // mutation. Cheap. Called from Add() (body-level) and InvalidateBodyParaCache.
+    private void ClearBodyChildIndex() { _bodyChildIndexCache.Clear(); _owningSectionCache = null; }
 
     private List<OpenXmlElement> GetBodyParagraphIndex(Body body) => GetBodyChildIndex(body).paras;
     private List<OpenXmlElement> GetBodyTableIndex(Body body) => GetBodyChildIndex(body).tables;

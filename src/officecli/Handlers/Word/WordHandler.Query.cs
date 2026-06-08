@@ -1147,19 +1147,29 @@ public partial class WordHandler
             bodyChild = bodyChild.Parent;
         if (bodyChild == null) return body.GetFirstChild<SectionProperties>();
 
-        // Scan forward from bodyChild for the first paragraph-level sectPr.
-        var cur = bodyChild;
-        while (cur != null)
+        // Each body child's owning section = the first paragraph-level sectPr at
+        // or after it (else the body-level sectPr). A forward scan per call is
+        // O(n), so resolving it for every paragraph (effective.* on get / dump /
+        // batch get of /body/p[N]) was O(n²). Build the whole map once in a
+        // reverse pass (O(n)), serve O(1) lookups, and drop it on any structural
+        // mutation via ClearBodyChildIndex.
+        if (_owningSectionCache == null)
         {
-            if (cur is Paragraph p)
+            _owningSectionCache = new();
+            SectionProperties? running = body.GetFirstChild<SectionProperties>();
+            var kids = new List<OpenXmlElement>();
+            foreach (var k in body.ChildElements) kids.Add(k);
+            for (int i = kids.Count - 1; i >= 0; i--)
             {
-                var sectPr = p.ParagraphProperties?.GetFirstChild<SectionProperties>();
-                if (sectPr != null) return sectPr;
+                if (kids[i] is Paragraph pp
+                    && pp.ParagraphProperties?.GetFirstChild<SectionProperties>() is { } own)
+                    running = own;
+                _owningSectionCache[kids[i]] = running;
             }
-            cur = cur.NextSibling();
         }
-        // Fall back to the body-level sectPr (final section).
-        return body.GetFirstChild<SectionProperties>();
+        return _owningSectionCache.TryGetValue(bodyChild, out var sect)
+            ? sect
+            : body.GetFirstChild<SectionProperties>();
     }
 
     /// <summary>
