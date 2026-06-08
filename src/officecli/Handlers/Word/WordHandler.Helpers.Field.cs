@@ -16,6 +16,70 @@ namespace OfficeCli.Handlers;
 public partial class WordHandler
 {
 
+    /// <summary>
+    /// Find body-level fields whose fldChar(begin)…fldChar(end) chain straddles
+    /// more than one paragraph (e.g. a real, cached Table of Contents — the
+    /// outer TOC field opens in the first entry paragraph and closes in the
+    /// last). Returns inclusive 1-based <c>/body/p[N]</c> positional ranges
+    /// (the same numbering EmitBody/Navigation use — oMathPara wrappers are not
+    /// counted). WordBatchEmitter raw-passes each such span verbatim instead of
+    /// collapsing the opener through AddToc/AddField, which can only model a
+    /// self-contained single-paragraph field and would otherwise destroy the
+    /// first entry's cached content and detach the rest of the result from the
+    /// field. Self-contained fields (begin…end balanced within one paragraph)
+    /// are NOT returned — they round-trip correctly through the typed path.
+    /// </summary>
+    internal List<(int Start, int End)> GetCrossParagraphFieldSpanRanges()
+    {
+        var spans = new List<(int, int)>();
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body == null) return spans;
+
+        int pos = 0;        // /body/p[N] positional index of the current paragraph
+        int depth = 0;      // open outer-field nesting carried across paragraphs
+        int spanStart = -1; // /body/p[N] index where the open span began
+        foreach (var el in body.ChildElements)
+        {
+            if (el is Paragraph p)
+            {
+                if (IsOMathParaWrapperParagraph(p)) continue;
+                pos++;
+                int begins = 0, ends = 0;
+                foreach (var fc in p.Descendants<FieldChar>())
+                {
+                    if (fc.FieldCharType?.HasValue != true) continue;
+                    var t = fc.FieldCharType.InnerText;
+                    if (t == "begin") begins++;
+                    else if (t == "end") ends++;
+                }
+                if (spanStart < 0)
+                {
+                    // Not currently inside a cross-paragraph field. A paragraph
+                    // that opens more field chars than it closes starts one;
+                    // a balanced paragraph (self-contained field) is left alone.
+                    if (begins > ends) { spanStart = pos; depth = begins - ends; }
+                }
+                else
+                {
+                    depth += begins - ends;
+                    if (depth <= 0) { spans.Add((spanStart, pos)); depth = 0; spanStart = -1; }
+                }
+            }
+            else if (spanStart >= 0)
+            {
+                // A non-paragraph body child (table, sdt, …) interrupts an open
+                // field span. Such a field can't be represented as a run of
+                // consecutive paragraphs — abandon the span so its paragraphs
+                // fall back to the normal per-paragraph emit (degraded but
+                // safe) rather than producing a malformed raw slice.
+                depth = 0; spanStart = -1;
+            }
+        }
+        // An unterminated span (begin with no matching end before end-of-body)
+        // is malformed; drop it so the opener falls back to the typed path.
+        return spans;
+    }
+
     // CONSISTENCY(field-cache-stale): true when <paramref name="run"/> sits
     // between an owning field's <w:fldChar w:fldCharType="separate"/> and
     // <w:fldChar w:fldCharType="end"/> — i.e. it is the cached result run

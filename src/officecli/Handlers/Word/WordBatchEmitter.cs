@@ -410,6 +410,19 @@ public static partial class WordBatchEmitter
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             Warnings: warnings);
 
+        // Cross-paragraph fields (a real cached TOC, an IF/REF whose result
+        // spans paragraphs, …) can't be modelled by the per-paragraph typed
+        // emit — the opener's fldChar(begin) has no matching end in its own
+        // paragraph, so TryEmitTocParagraph/AddField would collapse it to a
+        // self-contained placeholder and drop the first entry's cached content
+        // while orphaning the rest of the result. Raw-pass every paragraph of
+        // such a span verbatim instead. Ranges are inclusive 1-based /body/p[N]
+        // positions matching pIndex below.
+        var spanStartToEnd = new Dictionary<int, int>();
+        foreach (var (s, e) in word.GetCrossParagraphFieldSpanRanges())
+            spanStartToEnd[s] = e;
+        int? activeSpanEnd = null;
+
         int pIndex = 0, tblIndex = 0;
         foreach (var child in bodyNode.Children)
         {
@@ -433,7 +446,17 @@ public static partial class WordBatchEmitter
                     else
                     {
                         pIndex++;
-                        EmitParagraph(word, child.Path, "/body", pIndex, items, autoPresent: false, ctx);
+                        if (activeSpanEnd == null && spanStartToEnd.TryGetValue(pIndex, out var spEnd))
+                            activeSpanEnd = spEnd;
+                        if (activeSpanEnd != null)
+                        {
+                            EmitCrossParagraphFieldMember(word, child, pIndex, items, ctx);
+                            if (pIndex >= activeSpanEnd.Value) activeSpanEnd = null;
+                        }
+                        else
+                        {
+                            EmitParagraph(word, child.Path, "/body", pIndex, items, autoPresent: false, ctx);
+                        }
                     }
                     break;
                 case "table":
@@ -543,5 +566,40 @@ public static partial class WordBatchEmitter
         // are emitted last so AddBookmark sees the full sibling list when
         // walking forward to the BookmarkEnd's target paragraph.
         items.AddRange(ctx.DeferredBookmarks);
+    }
+
+    // Raw-pass one paragraph belonging to a cross-paragraph field span (see
+    // WordHandler.GetCrossParagraphFieldSpanRanges). The verbatim <w:p> is
+    // inserted immediately before the body's trailing sectPr — the same slot
+    // `add p` lands in (AppendBodyParaFast appends before sectPr) — so a span
+    // emitted in document order interleaves correctly with the surrounding
+    // typed paragraph adds. pIndex still advances per member so subsequent
+    // paragraphs' /body/p[N] targets stay aligned with their real position.
+    private static void EmitCrossParagraphFieldMember(
+        WordHandler word, DocumentNode child, int pIndex,
+        List<BatchItem> items, BodyEmitContext ctx)
+    {
+        // Comments / cross-paragraph anchors keyed by paraId still need this
+        // paragraph's position to resolve on replay.
+        if (ctx.ParaIdToTargetIdx != null
+            && child.Format.TryGetValue("paraId", out var pid) && pid != null)
+            ctx.ParaIdToTargetIdx[pid.ToString()!] = pIndex;
+
+        var rawP = word.GetElementXml(child.Path);
+        if (string.IsNullOrEmpty(rawP))
+        {
+            // Couldn't read the element XML — fall back to the typed emit so the
+            // paragraph at least keeps its visible text (degraded field).
+            EmitParagraph(word, child.Path, "/body", pIndex, items, autoPresent: false, ctx);
+            return;
+        }
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = "/document",
+            Xpath = "/w:document/w:body/w:sectPr",
+            Action = "before",
+            Xml = rawP
+        });
     }
 }
