@@ -432,9 +432,15 @@ public partial class WordHandler
         // CONSISTENCY(docx-hyperlink-canonical-url): canonical key is `url`
         // (per schemas/help/docx/hyperlink.json). `href` and `link` are legacy
         // input aliases; Get normalizes readback to `url`.
-        var hasUrl = properties.TryGetValue("url", out var hlUrl)
+        // Require a non-whitespace value: an empty/blank url is not a usable
+        // target (and since relative URIs are accepted, an empty string would
+        // otherwise slip through as a valid relative URI). Treating blank as
+        // "no url" means url="" with no anchor hits the "url or anchor required"
+        // error below, while url="" alongside an anchor proceeds as anchor-only.
+        var hasUrl = (properties.TryGetValue("url", out var hlUrl)
             || properties.TryGetValue("href", out hlUrl)
-            || properties.TryGetValue("link", out hlUrl);
+            || properties.TryGetValue("link", out hlUrl))
+            && !string.IsNullOrWhiteSpace(hlUrl);
         var hasAnchor = properties.TryGetValue("anchor", out var hlAnchor) || properties.TryGetValue("bookmark", out hlAnchor);
         // BUG-DUMP10-05: a w:hyperlink element with neither r:id nor anchor
         // is still a valid Word construct (tooltip-only / target-frame-only
