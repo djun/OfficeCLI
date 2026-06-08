@@ -136,7 +136,7 @@ PPT also accepts `@name=` (e.g. `shape[@name=Title 1]`), with morph `!!` prefix 
 
 ### query
 
-CSS-like selectors: `[attr=value]`, `[attr!=value]`, `[attr~=text]`, `[attr>=value]`, `[attr<=value]`, `:contains("text")`, `:empty`, `:has(formula)`, `:no-alt`.
+CSS-like selectors: `[attr=value]`, `[attr!=value]`, `[attr~=text]`, `[attr>=value]`, `[attr<=value]`, `:contains("text")`, `:empty`, `:has(formula)`, `:no-alt`. Boolean `and`/`or` supported across `query`/`set`/`remove`: `cell[value>5000 or value<100]`, `cell[(type=Number or type=Date) and value>0]`. Excel row-by-column-name: `Sheet1!row[Salary>5000]`. `set` accepts selectors and Excel-native paths (parity with `get`/`query`). Bare unscoped selectors rejected on `set`/`remove`.
 
 ```bash
 officecli query report.docx 'paragraph[style=Normal] > run[font!=Arial]'
@@ -215,20 +215,23 @@ officecli set <file> <path> --prop key=value [--prop ...]
 
 ### find — format or replace matched text
 
-Use `find=` with `set` to target specific text for formatting or replacement. Format props are separate `--prop` flags — do NOT nest them.
+Use top-level `--find` / `--replace` on `set` (and `--find` on `query`). Legacy `--prop find=X` still works but emits a hint.
 
 ```bash
 # Format matched text (auto-splits runs)
-officecli set doc.docx '/body/p[1]' --prop find=weather --prop bold=true --prop color=red
+officecli set doc.docx '/body/p[1]' --find weather --prop bold=true --prop color=red
 
-# Regex matching
-officecli set doc.docx '/body/p[1]' --prop 'find=\d+%' --prop regex=true --prop color=red
+# Regex matching (regex= still a prop flag)
+officecli set doc.docx '/body/p[1]' --find '\d+%' --prop regex=true --prop color=red
 
 # Replace text (use `/` for whole-document scope)
-officecli set doc.docx / --prop find=draft --prop replace=final
+officecli set doc.docx / --find draft --replace final
+
+# docx: tracked Find&Replace
+officecli set doc.docx / --find draft --replace final --prop revision.author=Alice
 
 # PPT — same syntax, different paths
-officecli set slides.pptx / --prop find=draft --prop replace=final
+officecli set slides.pptx / --find draft --replace final
 ```
 
 **Path controls search scope:** `/` = whole document, `/body/p[1]` or `/slide[N]/shape[M]` = specific element, `/header[1]` / `/footer[1]` = headers/footers.

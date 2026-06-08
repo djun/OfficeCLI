@@ -487,8 +487,8 @@ See `officecli --help` for full details on exit codes and error formats.
 | [`view`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-view) | View content (modes: `outline`, `text`, `annotated`, `stats` (`--page-count`), `issues`, `html`, `svg`, `screenshot`, `pdf` (via exporter plugin), `forms` (via format-handler plugin)). docx supports `--render auto\|native\|html`. |
 | [`load_skill`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-skills) | Print embedded SKILL.md content for a specialized skill (no install) |
 | [`get`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-get) | Get element and children (`--depth N`, `--json`) |
-| [`query`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-query) | CSS-like query (`[attr=value]`, `:contains()`, `:has()`, etc.) |
-| [`set`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-set) | Modify element properties |
+| [`query`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-query) | CSS-like query with boolean `and`/`or`, row-by-column-name (`row[Salary>5000]`), `--find` flag |
+| [`set`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-set) | Modify element properties; accepts selectors and Excel-native paths (parity with `get`/`query`), `--find`/`--replace` flags |
 | [`add`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-add) | Add element (or clone with `--from <path>`) |
 | [`remove`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-remove) | Remove an element |
 | [`move`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-move) | Move element (`--to <parent>`, `--index N`, `--after <path>`, `--before <path>`) |
@@ -571,19 +571,23 @@ officecli merge invoice-template.docx invoice-001.docx '{"client":"Acme","total"
 officecli validate report.docx && officecli view report.docx issues --json
 ```
 
-**From Python** — wrap once, get parsed JSON back from every call:
+**From Python** — install the thin `officecli-sdk` (resident-pipe wrapper, no per-call process spawn) or wrap subprocess directly:
 
 ```python
-import json, subprocess
+# Option A: thin SDK over the resident pipe
+from officecli import Doc
+with Doc("deck.pptx") as d:
+    d.add("/", type="slide", title="Q4 Report")
+    print(d.get("/slide[1]"))
 
+# Option B: subprocess wrapper (one-shot, no resident)
+import json, subprocess
 def cli(*args):
     return json.loads(subprocess.check_output(["officecli", *args, "--json"], text=True))
-
 cli("create", "deck.pptx")
-cli("add", "deck.pptx", "/", "--type", "slide", "--prop", "title=Q4 Report")
-slide = cli("get", "deck.pptx", "/slide[1]")
-print(slide["attributes"]["text"])
 ```
+
+The SDK falls back to the default install dir when `officecli` is not on PATH.
 
 ## Documentation
 
