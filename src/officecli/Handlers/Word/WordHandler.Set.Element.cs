@@ -1717,15 +1717,20 @@ public partial class WordHandler
 
                     // BUG-R5-table-merge BUG-9: continuation vMerge in the first
                     // row has no restart anchor above it — Word renders the cell
-                    // as invisible / repairs the file. Only reject the explicit
-                    // continuation case; removal and restart are always safe.
+                    // as invisible / repairs the file.
+                    // BUG-R4F-01: a first-row <w:vMerge w:val="continue"/> is
+                    // nonetheless valid OOXML and Word-tolerated, so a dump→batch
+                    // round-trip of such a source must preserve it. Hard-rejecting
+                    // dropped the element on replay (round-trip contract violation).
+                    // Accept it but surface a warning about the missing restart
+                    // anchor instead of throwing.
                     if (isContinue
                         && cell.Parent is TableRow vmRow0
                         && vmRow0.Parent is Table vmTbl0
                         && vmTbl0.Elements<TableRow>().FirstOrDefault() == vmRow0)
                     {
-                        throw new ArgumentException(
-                            "Cannot set vmerge=continue on a cell in the first row: there is no restart anchor above it. Use vmerge=restart instead.");
+                        LastSetWarnings.Add(
+                            "vmerge=continue on a cell in the first row has no restart anchor above it; Word may render the cell as invisible. Use vmerge=restart if a merge was intended.");
                     }
 
                     if (isRemove)
