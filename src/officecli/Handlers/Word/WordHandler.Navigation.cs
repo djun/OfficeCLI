@@ -1740,8 +1740,14 @@ public partial class WordHandler
                     node.Format["font.ascii"] = ascii;
                     node.Format["font.hAnsi"] = hAnsi;
                 }
-                else if (ascii != null) node.Format["font.latin"] = ascii;
-                else if (hAnsi != null) node.Format["font.latin"] = hAnsi;
+                // BUG-DUMP-FONT-LATIN: ascii-only (hAnsi absent) must emit
+                // font.ascii, NOT font.latin. font.latin sets BOTH slots on
+                // replay, so a source <w:rFonts ascii="X"/> round-tripped to
+                // ascii="X" hAnsi="X" — silently rebinding extended-Latin
+                // glyphs (which had fallen back to the style/docDefaults font)
+                // to X. Same for hAnsi-only.
+                else if (ascii != null) node.Format["font.ascii"] = ascii;
+                else if (hAnsi != null) node.Format["font.hAnsi"] = hAnsi;
             }
             if (!string.IsNullOrEmpty(rFonts.EastAsia?.Value)) node.Format["font.ea"] = rFonts.EastAsia!.Value!;
             // BUG-DUMP14-03: theme-font slots (asciiTheme/hAnsiTheme/
@@ -3307,23 +3313,29 @@ public partial class WordHandler
                     node.Format["markRPr.color"] = ParseHelpers.FormatHexColor(clr.Val.Value);
             }
             var rf = pmrpForDump.GetFirstChild<RunFonts>();
-            // BUG-DUMP-MARKRPR-HANSI: mirror the run/empty-paragraph font
-            // readback — collapse to font.latin only when ascii == hAnsi;
-            // when they diverge (ascii=方正小标宋简体 hAnsi=宋体, common in CJK
-            // covers) emit both slots. Emitting only ascii made replay's
-            // font.latin set BOTH ascii and hAnsi to the ascii value, silently
-            // rewriting the ¶ mark's hAnsi font on every round-trip.
+            // BUG-DUMP-MARKRPR-HANSI / BUG-DUMP-FONT-LATIN: collapse to
+            // font.latin only when BOTH slots are present and equal. Divergent
+            // slots emit both; ascii-only emits font.ascii and hAnsi-only
+            // emits font.hAnsi — NEVER font.latin for a single slot, since
+            // font.latin sets both on replay and would silently rebind the ¶
+            // mark's missing slot (extended-Latin falls back to the
+            // style/docDefaults font when hAnsi is absent).
             var markAscii = rf?.Ascii?.Value;
             var markHAnsi = rf?.HighAnsi?.Value;
-            if (markAscii != null && markHAnsi != null && markAscii != markHAnsi)
+            if (markAscii != null && markHAnsi != null)
             {
-                node.Format["markRPr.font.ascii"] = markAscii;
-                node.Format["markRPr.font.hAnsi"] = markHAnsi;
+                if (markAscii == markHAnsi)
+                    node.Format["markRPr.font.latin"] = markAscii;
+                else
+                {
+                    node.Format["markRPr.font.ascii"] = markAscii;
+                    node.Format["markRPr.font.hAnsi"] = markHAnsi;
+                }
             }
             else if (markAscii != null)
-                node.Format["markRPr.font.latin"] = markAscii;
+                node.Format["markRPr.font.ascii"] = markAscii;
             else if (markHAnsi != null)
-                node.Format["markRPr.font.latin"] = markHAnsi;
+                node.Format["markRPr.font.hAnsi"] = markHAnsi;
             if (rf?.EastAsia?.Value != null)
                 node.Format["markRPr.font.ea"] = rf.EastAsia.Value;
             if (rf?.ComplexScript?.Value != null)
@@ -3384,15 +3396,18 @@ public partial class WordHandler
                     if (!node.Format.ContainsKey("font.hAnsi"))
                         node.Format["font.hAnsi"] = hAnsi;
                 }
+                // BUG-DUMP-FONT-LATIN: ascii-only → font.ascii, hAnsi-only →
+                // font.hAnsi (NOT font.latin, which sets both on replay and
+                // would rebind the absent slot).
                 else if (ascii != null)
                 {
-                    if (!node.Format.ContainsKey("font.latin"))
-                        node.Format["font.latin"] = ascii;
+                    if (!node.Format.ContainsKey("font.ascii"))
+                        node.Format["font.ascii"] = ascii;
                 }
                 else if (hAnsi != null)
                 {
-                    if (!node.Format.ContainsKey("font.latin"))
-                        node.Format["font.latin"] = hAnsi;
+                    if (!node.Format.ContainsKey("font.hAnsi"))
+                        node.Format["font.hAnsi"] = hAnsi;
                 }
                 if (!string.IsNullOrEmpty(pRunFonts.EastAsia?.Value) && !node.Format.ContainsKey("font.ea"))
                     node.Format["font.ea"] = pRunFonts.EastAsia!.Value!;
