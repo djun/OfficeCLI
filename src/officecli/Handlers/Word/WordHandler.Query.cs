@@ -1863,42 +1863,12 @@ public partial class WordHandler
         if (parsed.Element == "editable")
         {
             // Collect editable SDTs
-            int blockSdtIdx = 0;
             foreach (var sdt in body.Descendants().Where(e => e is SdtBlock or SdtRun))
             {
-                string sdtPath;
-                if (sdt is SdtBlock)
-                {
-                    blockSdtIdx++;
-                    sdtPath = $"/body/{BuildSdtPathSegment(sdt, blockSdtIdx)}";
-                }
-                else if (sdt is SdtRun sdtRun)
-                {
-                    var parentPara = sdtRun.Ancestors<Paragraph>().FirstOrDefault();
-                    if (parentPara != null)
-                    {
-                        int pIdx = 1;
-                        foreach (var el in body.ChildElements)
-                        {
-                            if (el == parentPara) break;
-                            if (el is Paragraph) pIdx++;
-                        }
-                        int sdtInParaIdx = 1;
-                        foreach (var child in parentPara.ChildElements)
-                        {
-                            if (child == sdtRun) break;
-                            if (child is SdtRun) sdtInParaIdx++;
-                        }
-                        sdtPath = $"/body/{BuildParaPathSegment(parentPara, pIdx)}/{BuildSdtPathSegment(sdt, sdtInParaIdx)}";
-                    }
-                    else
-                    {
-                        blockSdtIdx++;
-                        sdtPath = $"/body/{BuildSdtPathSegment(sdt, blockSdtIdx)}";
-                    }
-                }
-                else continue;
-
+                // BUG-R11A(BUG2): full-ancestry path (tbl/tr/tc/sdt) so a
+                // cell-nested SDT reports a resolvable path; body-direct and
+                // inline SDTs are unchanged.
+                string sdtPath = BuildSdtPath(body, "/body", sdt);
                 var sdtNode = ElementToNode(sdt, sdtPath, 0);
                 if (sdtNode.Format.TryGetValue("editable", out var editableVal) && editableVal is true)
                     results.Add(sdtNode);
@@ -2381,46 +2351,12 @@ public partial class WordHandler
 
         if (isSdtSelector)
         {
-            int blockSdtIdx = 0;
             foreach (var sdt in body.Descendants().Where(e => e is SdtBlock or SdtRun))
             {
-                string path;
-                if (sdt is SdtBlock)
-                {
-                    blockSdtIdx++;
-                    path = $"/body/{BuildSdtPathSegment(sdt, blockSdtIdx)}";
-                }
-                else if (sdt is SdtRun sdtRun)
-                {
-                    // Inline SDT: compute path via parent paragraph
-                    var parentPara = sdtRun.Ancestors<DocumentFormat.OpenXml.Wordprocessing.Paragraph>().FirstOrDefault();
-                    if (parentPara != null)
-                    {
-                        int pIdx = 1;
-                        foreach (var el in body.ChildElements)
-                        {
-                            if (el == parentPara) break;
-                            if (el is DocumentFormat.OpenXml.Wordprocessing.Paragraph) pIdx++;
-                        }
-                        int sdtInParaIdx = 1;
-                        foreach (var child in parentPara.ChildElements)
-                        {
-                            if (child == sdtRun) break;
-                            if (child is SdtRun) sdtInParaIdx++;
-                        }
-                        path = $"/body/{BuildParaPathSegment(parentPara, pIdx)}/{BuildSdtPathSegment(sdt, sdtInParaIdx)}";
-                    }
-                    else
-                    {
-                        blockSdtIdx++;
-                        path = $"/body/{BuildSdtPathSegment(sdt, blockSdtIdx)}";
-                    }
-                }
-                else
-                {
-                    blockSdtIdx++;
-                    path = $"/body/{BuildSdtPathSegment(sdt, blockSdtIdx)}";
-                }
+                // BUG-R11A(BUG2): full-ancestry path (tbl/tr/tc/sdt) so a
+                // cell-nested SDT reports a resolvable path; body-direct and
+                // inline SDTs are unchanged.
+                string path = BuildSdtPath(body, "/body", sdt);
                 var node = ElementToNode(sdt, path, 0);
                 if (parsed.ContainsText != null && !(node.Text?.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase) ?? false))
                     continue;
@@ -3213,6 +3149,96 @@ public partial class WordHandler
             var runs = GetAllRuns(parentPara);
             var runIdx = runs.TakeWhile(r => r != run).Count() + 1;
             sb.Append($"/r[{runIdx}]");
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// BUG-R11A(BUG2): Build a root-rooted path to an SDT (content control) by
+    /// walking its ancestor chain so a cell-nested (or otherwise non-body-direct)
+    /// SDT reports its full <c>/body/tbl[i]/tr[j]/tc[k]/sdt[...]</c> ancestry
+    /// instead of flattening to <c>/body/sdt[...]</c>. Mirrors the ancestor-walk
+    /// in <see cref="BuildOleRunPath"/> (tbl/tr/tc/sdt/paragraph segments), then
+    /// appends the SDT's own segment indexed among its siblings of the same kind
+    /// within the immediate container. Body-direct and inline (SdtRun in a body
+    /// paragraph) SDTs round-trip unchanged because the walk emits no extra
+    /// segments for them.
+    /// </summary>
+    private static string BuildSdtPath(OpenXmlElement root, string rootPath, OpenXmlElement sdt)
+    {
+        var ancestors = sdt.Ancestors().TakeWhile(a => a != root).Reverse().ToList();
+
+        var sb = new System.Text.StringBuilder(rootPath);
+        OpenXmlElement cursor = root;
+        foreach (var anc in ancestors)
+        {
+            if (anc is SdtBlock sdtBlockAnc)
+            {
+                var sdtIdx = cursor.ChildElements.OfType<SdtBlock>()
+                    .TakeWhile(s => s != sdtBlockAnc).Count() + 1;
+                sb.Append($"/{BuildSdtPathSegment(sdtBlockAnc, sdtIdx)}");
+                cursor = sdtBlockAnc;
+            }
+            else if (anc is SdtContentBlock sdtContentBlockAnc)
+            {
+                cursor = sdtContentBlockAnc;
+            }
+            else if (anc is SdtRun sdtRunAnc)
+            {
+                var sdtIdx = cursor.ChildElements.OfType<SdtRun>()
+                    .TakeWhile(s => s != sdtRunAnc).Count() + 1;
+                sb.Append($"/{BuildSdtPathSegment(sdtRunAnc, sdtIdx)}");
+                cursor = sdtRunAnc;
+            }
+            else if (anc is SdtContentRun sdtContentRunAnc)
+            {
+                cursor = sdtContentRunAnc;
+            }
+            else if (anc is DocumentFormat.OpenXml.Wordprocessing.Table tblAnc)
+            {
+                var tblIdx = cursor.Elements<DocumentFormat.OpenXml.Wordprocessing.Table>()
+                    .TakeWhile(t => t != tblAnc).Count() + 1;
+                sb.Append($"/tbl[{tblIdx}]");
+                cursor = tblAnc;
+            }
+            else if (anc is TableRow rowAnc)
+            {
+                var rowIdx = cursor.Elements<TableRow>()
+                    .TakeWhile(r => r != rowAnc).Count() + 1;
+                sb.Append($"/tr[{rowIdx}]");
+                cursor = rowAnc;
+            }
+            else if (anc is TableCell cellAnc)
+            {
+                var cellIdx = cursor.Elements<TableCell>()
+                    .TakeWhile(c => c != cellAnc).Count() + 1;
+                sb.Append($"/tc[{cellIdx}]");
+                cursor = cellAnc;
+            }
+            else if (anc is Paragraph paraAnc)
+            {
+                var pIdx = cursor.Elements<Paragraph>()
+                    .TakeWhile(p => p != paraAnc).Count() + 1;
+                sb.Append($"/{BuildParaPathSegment(paraAnc, pIdx)}");
+                cursor = paraAnc;
+            }
+        }
+
+        // The SDT's own segment, indexed among its same-kind siblings in the
+        // immediate container (cursor). BuildSdtPathSegment prefers @sdtId= when
+        // present and falls back to this positional index otherwise.
+        if (sdt is SdtBlock)
+        {
+            var idx = cursor.ChildElements.OfType<SdtBlock>()
+                .TakeWhile(s => s != sdt).Count() + 1;
+            sb.Append($"/{BuildSdtPathSegment(sdt, idx)}");
+        }
+        else if (sdt is SdtRun)
+        {
+            var idx = cursor.ChildElements.OfType<SdtRun>()
+                .TakeWhile(s => s != sdt).Count() + 1;
+            sb.Append($"/{BuildSdtPathSegment(sdt, idx)}");
         }
 
         return sb.ToString();
