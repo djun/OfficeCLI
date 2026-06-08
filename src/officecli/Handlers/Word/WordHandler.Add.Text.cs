@@ -319,8 +319,16 @@ public partial class WordHandler
             || properties.TryGetValue("listlevel", out numLevel))
         {
             var ilvlVal = ParseHelpers.SafeParseInt(numLevel, "ilvl");
+            // BUG-R4B(BUG2): clamp ilvl > 8 (Word tolerates it) instead of
+            // rejecting, so dump→replay never drops the paragraph. Mirror the
+            // Set path (WordHandler.Set.cs numLevel case) and the HtmlPreview
+            // clamp.
             if (ilvlVal < 0 || ilvlVal > 8)
-                throw new ArgumentException($"ilvl must be in range 0..8 (got {ilvlVal}).");
+            {
+                var clamped = Math.Clamp(ilvlVal, 0, 8);
+                LastAddWarnings.Add($"ilvl {ilvlVal} out of OOXML range 0..8 — clamped to {clamped}");
+                ilvlVal = clamped;
+            }
             var numPr = pProps.NumberingProperties ?? (pProps.NumberingProperties = new NumberingProperties());
             numPr.NumberingLevelReference = new NumberingLevelReference { Val = ilvlVal };
         }

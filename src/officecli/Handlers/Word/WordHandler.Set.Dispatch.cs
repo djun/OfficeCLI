@@ -1730,8 +1730,14 @@ public partial class WordHandler
                     var pPrN2 = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
                     var sNumPr2 = pPrN2.NumberingProperties ?? (pPrN2.NumberingProperties = new NumberingProperties());
                     var ilvl = ParseHelpers.SafeParseInt(value, "ilvl");
+                    // BUG-R4B(BUG2): clamp ilvl > 8 (Word tolerates it) rather
+                    // than reject, mirroring the paragraph add/set numLevel path.
                     if (ilvl < 0 || ilvl > 8)
-                        throw new ArgumentException($"ilvl must be in range 0..8 (got {ilvl}).");
+                    {
+                        var clampedIlvl = Math.Clamp(ilvl, 0, 8);
+                        LastSetWarnings.Add($"ilvl {ilvl} out of OOXML range 0..8 — clamped to {clampedIlvl}");
+                        ilvl = clampedIlvl;
+                    }
                     sNumPr2.NumberingLevelReference = new NumberingLevelReference { Val = ilvl };
                     break;
                 }

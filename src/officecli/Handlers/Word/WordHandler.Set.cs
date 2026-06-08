@@ -1014,8 +1014,17 @@ public partial class WordHandler
             case "numLevel" or "numlevel" or "ilvl" or "listLevel" or "listlevel":
                 var numPr2 = pProps.NumberingProperties ?? (pProps.NumberingProperties = new NumberingProperties());
                 var ilvlSetVal = ParseHelpers.SafeParseInt(value, "numLevel");
+                // BUG-R4B(BUG2): Word tolerates ilvl > 8 (real-world docs carry
+                // w:ilvl w:val="12"); the old hard reject dropped the whole
+                // paragraph on dump→replay. Clamp to the OOXML-legal range
+                // [0,8] with a warning so the paragraph and its text survive.
+                // Mirrors the HtmlPreview ilvl clamp (HtmlPreview.cs ~1889).
                 if (ilvlSetVal < 0 || ilvlSetVal > 8)
-                    throw new ArgumentException($"ilvl must be in range 0..8 (got {ilvlSetVal}).");
+                {
+                    var clampedSet = Math.Clamp(ilvlSetVal, 0, 8);
+                    warnings?.Add($"ilvl {ilvlSetVal} out of OOXML range 0..8 — clamped to {clampedSet}");
+                    ilvlSetVal = clampedSet;
+                }
                 numPr2.NumberingLevelReference = new NumberingLevelReference { Val = ilvlSetVal };
                 return true;
             case "pbdr.top" or "pbdr.bottom" or "pbdr.left" or "pbdr.right" or "pbdr.between" or "pbdr.bar" or "pbdr.all" or "pbdr":

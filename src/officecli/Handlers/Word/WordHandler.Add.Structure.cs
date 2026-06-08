@@ -920,8 +920,15 @@ public partial class WordHandler
             if (!string.IsNullOrEmpty(ilvlRaw))
             {
                 var ilvl = ParseHelpers.SafeParseInt(ilvlRaw, "ilvl");
+                // BUG-R4B(BUG2): clamp ilvl > 8 (Word tolerates it) rather than
+                // reject, mirroring the paragraph add/set + style set paths so a
+                // style numPr survives dump→replay.
                 if (ilvl < 0 || ilvl > 8)
-                    throw new ArgumentException($"ilvl must be in range 0..8 (got {ilvl}).");
+                {
+                    var clampedIlvl = Math.Clamp(ilvl, 0, 8);
+                    LastAddWarnings.Add($"ilvl {ilvl} out of OOXML range 0..8 — clamped to {clampedIlvl}");
+                    ilvl = clampedIlvl;
+                }
                 numPr.NumberingLevelReference = new NumberingLevelReference { Val = ilvl };
             }
         }
