@@ -1279,9 +1279,16 @@ public partial class WordHandler
             var pMarkRPr2 = pProps.ParagraphMarkRunProperties
                           ?? pProps.AppendChild(new ParagraphMarkRunProperties());
             // Don't double-emit if a Deleted element already lives here.
+            // Prepend (not append) the <w:del> within the rPr: in CT_ParaRPr the
+            // ins/del/move group leads the sequence, so when markRPr.* props
+            // (rFonts / sz / …) were already added to this rPr the del must
+            // precede them or Word rejects it as an unexpected child. A
+            // paragraph mark is never both inserted and deleted, so prepending
+            // del cannot mis-order it relative to an ins. Mirrors the paragraph-
+            // mark ins handling above.
             if (pMarkRPr2.GetFirstChild<Deleted>() == null)
             {
-                pMarkRPr2.AppendChild(new Deleted
+                pMarkRPr2.PrependChild(new Deleted
                 {
                     Author = author,
                     Date = date,
