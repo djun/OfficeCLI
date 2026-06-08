@@ -150,11 +150,17 @@ mkdir -p "$INSTALL_DIR"
 cp "$SOURCE" "$INSTALL_DIR/$BINARY_NAME.new"
 chmod +x "$INSTALL_DIR/$BINARY_NAME.new"
 
-# macOS: remove quarantine flag and ad-hoc codesign (required by AppleSystemPolicy)
+# macOS: clear the quarantine flag, then ensure the staged copy carries a
+# valid signature (Apple Silicon refuses to exec an unsigned Mach-O).
+# Release binaries are Developer ID signed + notarized by CI; a forced
+# ad-hoc re-sign would strip that signature and invalidate notarization,
+# so only ad-hoc sign as a fallback when no valid signature is present.
 # Done on the staged .new copy so the live binary is never mutated in place.
 if [ "$(uname -s)" = "Darwin" ]; then
     xattr -d com.apple.quarantine "$INSTALL_DIR/$BINARY_NAME.new" 2>/dev/null || true
-    codesign -s - -f "$INSTALL_DIR/$BINARY_NAME.new" 2>/dev/null || true
+    if ! codesign -v --strict "$INSTALL_DIR/$BINARY_NAME.new" 2>/dev/null; then
+        codesign -s - -f "$INSTALL_DIR/$BINARY_NAME.new" 2>/dev/null || true
+    fi
 fi
 
 mv -f "$INSTALL_DIR/$BINARY_NAME.new" "$INSTALL_DIR/$BINARY_NAME"
