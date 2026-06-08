@@ -465,12 +465,30 @@ public partial class WordHandler
             var hlIsFragment = !string.IsNullOrEmpty(hlUrl) && hlUrl.StartsWith('#');
             Uri? hlUri;
             if (hlIsFragment)
+            {
                 hlUri = new Uri(hlUrl!, UriKind.Relative);
-            else if (!Uri.TryCreate(hlUrl, UriKind.Absolute, out hlUri))
-                throw new ArgumentException($"Invalid hyperlink URL '{hlUrl}'. Expected a valid absolute URI (e.g. 'https://example.com') or a fragment-only anchor (e.g. '#bookmark').");
-            // CONSISTENCY(hyperlink-scheme-allowlist): gate absolute URIs only.
-            if (!hlIsFragment)
+            }
+            else if (Uri.TryCreate(hlUrl, UriKind.Absolute, out hlUri))
+            {
+                // CONSISTENCY(hyperlink-scheme-allowlist): gate absolute URIs only.
                 Core.HyperlinkUriValidator.RequireSafeScheme(hlUrl!, "url");
+            }
+            else if (Uri.TryCreate(hlUrl, UriKind.Relative, out hlUri))
+            {
+                // BUG-DUMPR2: a relative external target (e.g. "court-exif.jpg",
+                // "../report.docx") is a valid Word hyperlink relationship with
+                // TargetMode="External" and a relative Target — Word writes these
+                // for links to sibling files. The dump emits exactly this value,
+                // so rejecting it broke the round-trip. No scheme check applies
+                // (a relative path carries none, so it cannot smuggle a
+                // javascript:/data: scheme — those are absolute).
+            }
+            else
+            {
+                throw new ArgumentException($"Invalid hyperlink URL '{hlUrl}'. Expected an absolute URI (e.g. 'https://example.com'), a relative target (e.g. 'file.docx'), or a fragment-only anchor (e.g. '#bookmark').");
+            }
+            // Fragment = internal anchor; absolute and relative both round-trip
+            // as External relationships.
             hlRelId = hostPart.AddHyperlinkRelationship(hlUri!, isExternal: !hlIsFragment).Id;
         }
 
