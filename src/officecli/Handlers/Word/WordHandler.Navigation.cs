@@ -12,6 +12,17 @@ namespace OfficeCli.Handlers;
 
 public partial class WordHandler
 {
+    // Perf: append-monotonic body caches for batch replay. Each body append
+    // otherwise costs O(n) — navigation scans all paragraphs to resolve
+    // /body/p[last()], and AddParagraph re-Count()s Elements<Paragraph>() to
+    // name the result path — making an N-paragraph replay O(N²). Self-validating
+    // against the live tree (see AppendedBodyParaCount), so no mutation site has
+    // to remember to invalidate.
+    private OpenXmlElement? _lastBodyParagraph;
+    private int _bodyParaCount = -1;
+
+    private void InvalidateBodyParaCache() { _lastBodyParagraph = null; _bodyParaCount = -1; }
+
     // ==================== Navigation ====================
 
     /// <summary>
@@ -514,6 +525,43 @@ public partial class WordHandler
             : $"p[{positionalIndex}]";
     }
 
+    // 1-based position of a just-appended paragraph among its parent's Paragraph
+    // children, for naming the result path. O(1) for the body via the
+    // append-monotonic cache; other parents Count() directly (not the hot path).
+    // Self-validating: the incremental count is trusted only when the paragraph
+    // cached last time is the element immediately preceding this freshly-appended
+    // one — any out-of-band insert/remove/non-paragraph sibling breaks the chain
+    // and forces one O(n) reseed, so no mutation site must invalidate manually.
+    // Also refreshes _lastBodyParagraph to keep /body/p[last()] navigation warm.
+    private int AppendBodyParaFast(OpenXmlElement parent, Paragraph para)
+    {
+        // The Open XML SDK keeps children in a singly-linked list, so
+        // InsertBefore(refChild) and PreviousSibling() scan for the predecessor
+        // — O(N) each, making an N-paragraph append O(N²). InsertAfterSelf and
+        // NextSibling are O(1). So append right after the cached last body
+        // paragraph (whose NextSibling is the trailing sectPr) and bump the
+        // cached count. Cold cache or an out-of-band mutation (NextSibling no
+        // longer the sectPr) falls back to the O(N) append + recount, which then
+        // reseeds the cache for the next run.
+        if (parent is Body fastBody && _bodyParaCount >= 0
+            && _lastBodyParagraph is Paragraph anchor
+            && ReferenceEquals(anchor.Parent, fastBody)
+            && anchor.NextSibling() is SectionProperties)
+        {
+            anchor.InsertAfterSelf(para);
+            _lastBodyParagraph = para;
+            return ++_bodyParaCount;
+        }
+        AppendToParent(parent, para);
+        if (parent is Body coldBody)
+        {
+            _bodyParaCount = coldBody.Elements<Paragraph>().Count();
+            _lastBodyParagraph = para;
+            return _bodyParaCount;
+        }
+        return parent.Elements<Paragraph>().Count();
+    }
+
     private static List<PathSegment> ParsePath(string path)
     {
         var segments = new List<PathSegment>();
@@ -979,6 +1027,25 @@ public partial class WordHandler
                 && (current is SdtContentBlock || current is SdtContentRun))
             {
                 parentPath += "/sdtContent";
+                continue;
+            }
+
+            // O(1) fast-path for /body/p[last()] — batch run-add resolves this
+            // once per run (100k+ times in a large replay). Trusted when the
+            // cached last paragraph is still parented to this body and its
+            // NextSibling is the trailing sectPr, i.e. it is genuinely last
+            // (NextSibling is O(1) on the SDK's singly-linked list, unlike a
+            // full ToList()+LastOrDefault scan). Emit the same "/p[N]" segment
+            // the scan below would, so resolvedPath is identical. A stale hit
+            // falls through to the scan.
+            if (seg.StringIndex == "last()" && seg.Name == "p" && current is Body
+                && _bodyParaCount >= 0
+                && _lastBodyParagraph is Paragraph lbpFast
+                && ReferenceEquals(lbpFast.Parent, current)
+                && lbpFast.NextSibling() is SectionProperties)
+            {
+                parentPath += $"/p[{_bodyParaCount}]";
+                current = lbpFast;
                 continue;
             }
 

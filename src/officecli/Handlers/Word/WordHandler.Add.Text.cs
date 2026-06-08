@@ -1123,19 +1123,18 @@ public partial class WordHandler
                 parent.InsertBefore(para, refElement);
                 var paraPosIdx = parent.Elements<Paragraph>().ToList().IndexOf(para) + 1;
                 resultPath = $"{parentPath}/{BuildParaPathSegment(para, paraPosIdx)}";
+                // Positional insert shifts which paragraph is last and the count;
+                // drop the append-monotonic body cache.
+                if (parent is Body) InvalidateBodyParaCache();
             }
             else
             {
-                AppendToParent(parent, para);
-                var paraCount = parent.Elements<Paragraph>().Count();
-                resultPath = $"{parentPath}/{BuildParaPathSegment(para, paraCount)}";
+                resultPath = $"{parentPath}/{BuildParaPathSegment(para, AppendBodyParaFast(parent, para))}";
             }
         }
         else
         {
-            AppendToParent(parent, para);
-            var paraCount = parent.Elements<Paragraph>().Count();
-            resultPath = $"{parentPath}/{BuildParaPathSegment(para, paraCount)}";
+            resultPath = $"{parentPath}/{BuildParaPathSegment(para, AppendBodyParaFast(parent, para))}";
         }
         // R20-fuzz-11: post-insert evaluation of inherited RTL for direction=ltr.
         // Only the style-chain layer can be evaluated before insertion; the
