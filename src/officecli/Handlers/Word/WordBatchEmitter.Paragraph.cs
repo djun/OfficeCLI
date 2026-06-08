@@ -284,7 +284,7 @@ public static partial class WordBatchEmitter
             if (TryEmitBreakRun(run, paraTargetPath, items)) continue;
             if (TryEmitTabRun(run, paraTargetPath, items)) continue;
             if (TryEmitPtabRun(run, paraTargetPath, items)) continue;
-            if (TryEmitEquationRun(run, paraTargetPath, items)) continue;
+            if (TryEmitEquationRun(word, run, paraTargetPath, items)) continue;
             if (TryEmitFormFieldRun(run, paraTargetPath, items)) continue;
             if (TryEmitFieldRun(run, paraTargetPath, items, ctx)) continue;
             // OLE/embedded-object runs surface as type="ole" (see CreateOleNode
@@ -703,7 +703,29 @@ public static partial class WordBatchEmitter
         return true;
     }
 
-    private static bool TryEmitEquationRun(DocumentNode run, string paraTargetPath, List<BatchItem> items)
+    // Build `add hyperlink` props from a source hyperlink node so a hyperlink
+    // that carries no emittable runs (e.g. one wrapping only an <m:oMath>) can
+    // still be materialized. Returns null when the hyperlink has no addressable
+    // destination (neither url nor anchor) — the caller then routes the child
+    // under the paragraph so its content still survives.
+    private static Dictionary<string, string>? TryBuildHyperlinkAddProps(WordHandler word, string srcHlPath)
+    {
+        DocumentNode hl;
+        try { hl = word.Get(srcHlPath); }
+        catch { return null; }
+        var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in new[] { "url", "anchor", "tooltip", "tgtFrame", "history" })
+        {
+            if (hl.Format.TryGetValue(key, out var v) && v != null)
+            {
+                var s = v.ToString();
+                if (!string.IsNullOrEmpty(s)) props[key] = s!;
+            }
+        }
+        return (props.ContainsKey("url") || props.ContainsKey("anchor")) ? props : null;
+    }
+
+    private static bool TryEmitEquationRun(WordHandler word, DocumentNode run, string paraTargetPath, List<BatchItem> items)
     {
         // BUG-DUMP7-03: inline <m:oMath> as paragraph child. Get surfaces it
         // as type="equation" with mode=inline and the LaTeX-ish formula in
@@ -728,8 +750,48 @@ public static partial class WordBatchEmitter
             if (idxEq > 0)
             {
                 var derived = run.Path.Substring(0, idxEq);
-                if (derived.Contains("/hyperlink["))
-                    eqParent = derived;
+                var hlIdx = derived.LastIndexOf("/hyperlink[", StringComparison.Ordinal);
+                if (hlIdx > 0)
+                {
+                    // BUG-DBF-R3-02: the equation lives inside a <w:hyperlink>.
+                    // A hyperlink is normally materialized via its child runs, but
+                    // a hyperlink whose ONLY content is an <m:oMath> has no runs —
+                    // so no `add hyperlink` row is emitted and replaying
+                    // `add equation parent=…/hyperlink[K]` fails ("path not
+                    // found"), dropping the math. Emit the missing `add hyperlink`
+                    // (fetched from the source) before the equation so its parent
+                    // exists; if the hyperlink can't be resolved, fall back to the
+                    // paragraph so the math survives (the rare link wrapper is lost
+                    // rather than the content).
+                    var srcHlPath = run.Path.Substring(0, idxEq); // …/hyperlink[K]
+                    var hlSeg = derived.Substring(hlIdx); // /hyperlink[K]
+                    int alreadyEmitted = items.Count(it => it.Type == "hyperlink"
+                        && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
+                    var rebasedHl = paraTargetPath + hlSeg;
+                    int wantK = 0;
+                    var kStr = hlSeg.Length > 11 ? hlSeg[11..^1] : "";
+                    int.TryParse(kStr, out wantK);
+                    if (alreadyEmitted < wantK)
+                    {
+                        var hlProps = TryBuildHyperlinkAddProps(word, srcHlPath);
+                        if (hlProps != null)
+                        {
+                            items.Add(new BatchItem
+                            {
+                                Command = "add",
+                                Parent = paraTargetPath,
+                                Type = "hyperlink",
+                                Props = hlProps
+                            });
+                            eqParent = rebasedHl;
+                        }
+                        // else: leave eqParent = paraTargetPath (math survives).
+                    }
+                    else
+                    {
+                        eqParent = rebasedHl;
+                    }
+                }
             }
         }
         items.Add(new BatchItem
