@@ -543,6 +543,14 @@ public static partial class WordBatchEmitter
         var r = runs[0];
         // Picture / ptab runs need their own typed `add` rows.
         if (r.Type == "picture" || r.Type == "ptab") return false;
+        // OLE / embedded-object runs must stay on the explicit-run path so
+        // TryEmitOleRun fires. Collapsing folds the ole metadata (progId,
+        // fileSize, drawAspect, …) into `add p` props that AddParagraph
+        // silently ignores — the embedded object vanishes with no warning.
+        // The explicit path surfaces the documented "ole run dropped" warning
+        // (full binary round-trip is a separate, deferred feature) and keeps
+        // the host paragraph intact.
+        if (r.Type == "ole") return false;
         // A single run carrying a drawing/shape payload (textbox, connector
         // line, autoshape — surfaced as a plain "run" when AlternateContent-
         // wrapped) must NOT collapse into `add p`: collapsing flattens the
@@ -973,7 +981,18 @@ public static partial class WordBatchEmitter
                 {
                     Command = "raw-set",
                     Part = "/document",
-                    Xpath = $"/w:document/w:body/w:p[{targetIndex}]",
+                    // BUG-R1-01: attach to the most-recently-emitted paragraph
+                    // via last(), NOT the navigation pIndex (targetIndex). pIndex
+                    // deliberately does not advance for an oMathPara-bearing
+                    // paragraph (EmitBody: display equations resolve as
+                    // /body/oMathPara[N], not /body/p[N]), but in the LITERAL XML
+                    // the equation is a real <w:p> wrapping <m:oMathPara>. So a
+                    // numeric w:p[{pIndex}] under-counts by one per preceding
+                    // equation and the shape lands on the wrong paragraph. The
+                    // host paragraph was just added by this same EmitParagraph
+                    // call, so it is always the last w:p at replay time — the same
+                    // last()-relative attach the typed picture/textbox path uses.
+                    Xpath = "/w:document/w:body/w:p[last()]",
                     Action = "append",
                     Xml = probeXml
                 });
@@ -1048,7 +1067,10 @@ public static partial class WordBatchEmitter
             {
                 Command = "raw-set",
                 Part = "/document",
-                Xpath = $"/w:document/w:body/w:p[{targetIndex}]",
+                // BUG-R1-01 (second site, plain <w:drawing> wps shape): same
+                // last()-relative attach as above — pIndex under-counts literal
+                // w:p when a display equation precedes this shape's paragraph.
+                Xpath = "/w:document/w:body/w:p[last()]",
                 Action = "append",
                 Xml = rawXml
             });
