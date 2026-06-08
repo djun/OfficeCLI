@@ -1685,41 +1685,23 @@ public partial class WordHandler
                     break;
                 case "cnfstyle":
                 {
-                    // BUG-R3-03: cnfStyle is a 12-bit conditional-formatting hex
-                    // bitfield. Validate before writing so invalid values fail
-                    // loudly rather than corrupting the doc. Acceptable forms:
-                    // 12 hex digits (per CT_String per ISO/IEC 29500), or any
-                    // 1..16-char hex string (Word writers commonly emit 4-digit
-                    // hex). Reject negatives, non-hex, and lengths > 16.
+                    // ST_Cnf @val is a binary bitmask string (see ValidateCnfStyleBitmask).
                     if (string.IsNullOrEmpty(value))
                     {
                         tcPr.RemoveAllChildren<ConditionalFormatStyle>();
                         break;
                     }
-                    if (!System.Text.RegularExpressions.Regex.IsMatch(value, "^[0-9A-Fa-f]+$"))
-                    {
-                        throw new ArgumentException(
-                            $"Invalid cnfStyle '{value}': must be a hex string (no negatives or non-hex characters).");
-                    }
-                    // ST_Cnf is a 12-bit field (12 binary digits). Values that
-                    // exceed 0xFFF cannot fit and are rejected.
-                    if (!ulong.TryParse(value, System.Globalization.NumberStyles.HexNumber,
-                            System.Globalization.CultureInfo.InvariantCulture, out var cnfNum)
-                        || cnfNum > 0xFFFu)
-                    {
-                        throw new ArgumentException(
-                            $"Invalid cnfStyle '{value}': numeric value exceeds the 12-bit field width (max 0xFFF).");
-                    }
+                    var cnfVal = ValidateCnfStyleBitmask(value);
                     var cnf = tcPr.GetFirstChild<ConditionalFormatStyle>();
                     if (cnf == null)
                     {
-                        cnf = new ConditionalFormatStyle { Val = value };
+                        cnf = new ConditionalFormatStyle { Val = cnfVal };
                         // cnfStyle is rank 0 in CT_TcPr (FIRST child)
                         tcPr.PrependChild(cnf);
                     }
                     else
                     {
-                        cnf.Val = value;
+                        cnf.Val = cnfVal;
                     }
                     break;
                 }
@@ -1955,6 +1937,23 @@ public partial class WordHandler
         return unsupported;
     }
 
+    // ST_Cnf @val is a conditional-formatting BITMASK string — each character is
+    // a binary flag ('0'/'1'), positionally mapped to firstRow, lastRow,
+    // firstColumn, lastColumn, oddVBand, evenVBand, oddHBand, evenHBand,
+    // firstRowFirstColumn, firstRowLastColumn, lastRowFirstColumn,
+    // lastRowLastColumn. It is NOT a hex number: Word writes e.g.
+    // "100000000000" for firstRow. Accept 1..12 binary digits (shorter input is
+    // right-padded to the canonical 12-bit width so trailing flags default off);
+    // reject anything non-binary. Shared by cell (tcPr) and row (trPr) setters.
+    private static string ValidateCnfStyleBitmask(string value)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(value, "^[01]{1,12}$"))
+            throw new ArgumentException(
+                $"Invalid cnfStyle '{value}': must be a binary bitmask string of 1..12 '0'/'1' digits " +
+                "(ST_Cnf), e.g. '100000000000' for firstRow conditional formatting.");
+        return value.Length == 12 ? value : value.PadRight(12, '0');
+    }
+
     private List<string> SetElementTableRow(TableRow row, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();
@@ -1989,6 +1988,23 @@ public partial class WordHandler
                     else
                         trPr.RemoveAllChildren<CantSplit>();
                     break;
+                case "cnfstyle":
+                {
+                    // ST_Cnf @val bitmask (see ValidateCnfStyleBitmask). cnfStyle
+                    // is rank 0 in CT_TrPr (FIRST child), same as CT_TcPr.
+                    if (string.IsNullOrEmpty(value))
+                    {
+                        trPr.RemoveAllChildren<ConditionalFormatStyle>();
+                        break;
+                    }
+                    var cnfVal = ValidateCnfStyleBitmask(value);
+                    var cnf = trPr.GetFirstChild<ConditionalFormatStyle>();
+                    if (cnf == null)
+                        trPr.PrependChild(new ConditionalFormatStyle { Val = cnfVal });
+                    else
+                        cnf.Val = cnfVal;
+                    break;
+                }
                 default:
                     // c1, c2, ... shorthand: set text of specific cell by index
                     if (key.Length >= 2 && key[0] == 'c' && int.TryParse(key.AsSpan(1), out var cIdx))
@@ -2009,7 +2025,7 @@ public partial class WordHandler
                     }
                     else if (!GenericXmlQuery.TryCreateTypedChild(trPr, key, value))
                         unsupported.Add(unsupported.Count == 0
-                            ? $"{key} (valid row props: height, height.exact, header, cantSplit, c1, c2, ...)"
+                            ? $"{key} (valid row props: height, height.exact, header, cantSplit, cnfStyle, c1, c2, ...)"
                             : key);
                     break;
             }

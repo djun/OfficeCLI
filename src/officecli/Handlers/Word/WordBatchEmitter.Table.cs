@@ -382,6 +382,7 @@ public static partial class WordBatchEmitter
     private static readonly HashSet<string> CellOnlyKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "fill", "width", "valign", "vmerge", "hmerge", "colspan", "nowrap", "textDirection",
+        "cnfStyle",
     };
 
     private static Dictionary<string, string> ExtractCellOnlyProps(Dictionary<string, object?> raw)
@@ -416,7 +417,7 @@ public static partial class WordBatchEmitter
     // children are emitted separately via ExtractCellOnlyProps.
     private static readonly HashSet<string> RowOnlyKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "header", "height", "cantSplit",
+        "header", "height", "cantSplit", "cnfStyle",
     };
 
     /// <summary>Read a string-valued key from a DocumentNode.Format dict

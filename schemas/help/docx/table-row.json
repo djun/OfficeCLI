@@ -2,7 +2,9 @@
   "$schema": "../_schema.json",
   "format": "docx",
   "element": "row",
-  "elementAliases": ["tr"],
+  "elementAliases": [
+    "tr"
+  ],
   "parent": "table",
   "operations": {
     "add": true,
@@ -50,6 +52,18 @@
       "get": true,
       "description": "row height rule readback — `exact` when the row enforces a fixed height, otherwise absent (auto/atLeast).",
       "readback": "`exact` when set",
+      "enforcement": "report"
+    },
+    "cnfStyle": {
+      "type": "string",
+      "description": "conditional-formatting bitmask (ST_Cnf @val) on the row (trPr). A 12-digit binary string — each '0'/'1' flags one region in order: firstRow, lastRow, firstColumn, lastColumn, oddVBand, evenVBand, oddHBand, evenHBand, firstRowFirstColumn, firstRowLastColumn, lastRowFirstColumn, lastRowLastColumn. Short binary input is right-padded to 12. Not a hex number.",
+      "add": false,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop cnfStyle=100000000000"
+      ],
+      "readback": "12-digit binary bitmask string",
       "enforcement": "report"
     }
   }

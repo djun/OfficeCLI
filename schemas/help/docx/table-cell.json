@@ -2,7 +2,9 @@
   "$schema": "../_schema.json",
   "format": "docx",
   "element": "cell",
-  "elementAliases": ["tc"],
+  "elementAliases": [
+    "tc"
+  ],
   "parent": "row",
   "operations": {
     "add": true,
@@ -338,7 +340,10 @@
     },
     "vmerge": {
       "type": "enum",
-      "values": ["restart", "continue"],
+      "values": [
+        "restart",
+        "continue"
+      ],
       "description": "vertical merge marker (w:vMerge). 'restart' marks the top cell of a vertical span; 'continue' marks subsequent merged cells in the same column. Bare <w:vMerge/> reads as 'continue'.",
       "add": false,
       "set": true,
@@ -352,7 +357,10 @@
     },
     "hmerge": {
       "type": "enum",
-      "values": ["restart", "continue"],
+      "values": [
+        "restart",
+        "continue"
+      ],
       "description": "horizontal merge marker (w:hMerge — legacy form). 'restart' marks the leading cell of a horizontal span; 'continue' marks subsequent merged cells. Most modern docs prefer gridSpan; hmerge is preserved for round-trip with files that already use it.",
       "add": false,
       "set": true,
@@ -362,6 +370,18 @@
         "--prop hmerge=continue"
       ],
       "readback": "restart|continue",
+      "enforcement": "report"
+    },
+    "cnfStyle": {
+      "type": "string",
+      "description": "conditional-formatting bitmask (ST_Cnf @val) on the cell (tcPr). A 12-digit binary string — each '0'/'1' flags one region in order: firstRow, lastRow, firstColumn, lastColumn, oddVBand, evenVBand, oddHBand, evenHBand, firstRowFirstColumn, firstRowLastColumn, lastRowFirstColumn, lastRowLastColumn. Short binary input is right-padded to 12. Not a hex number.",
+      "add": false,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop cnfStyle=100000000000"
+      ],
+      "readback": "12-digit binary bitmask string",
       "enforcement": "report"
     }
   }

@@ -3998,6 +3998,11 @@ public partial class WordHandler
             node.Format["header"] = true;
         if (trPr.GetFirstChild<CantSplit>() != null)
             node.Format["cantSplit"] = true;
+        // cnfStyle (conditional-formatting bitmask) — mirror the cell reader
+        // at ~line 4131 so table-row conditional formatting round-trips.
+        var rowCnf = trPr.GetFirstChild<ConditionalFormatStyle>();
+        if (rowCnf?.Val?.Value is string rowCnfVal && !string.IsNullOrEmpty(rowCnfVal))
+            node.Format["cnfStyle"] = rowCnfVal;
     }
 
     private static void ReadCellProps(TableCell cell, DocumentNode node)
@@ -4277,6 +4282,22 @@ public partial class WordHandler
             if (string.IsNullOrEmpty(name)) continue;
             if (CuratedStyleLocalNames.Contains(name)) continue;
             if (child.ChildElements.Count > 0) continue;
+
+            // <w:cnfStyle> (CT_Cnf) must NOT be decomposed into dotted
+            // cnfStyle.firstRow / .lastRow / … keys: the SDK canonicalizes every
+            // individual bit attribute into the combined 12-bit @val string on
+            // parse, so a decomposed replay can't round-trip — set cnfStyle.lastRow=0
+            // reparses to <w:cnfStyle w:val="000000000000"/> and wipes the value
+            // accumulated by the earlier bit keys. Emit the canonical combined @val
+            // as a single key (matching the table-cell reader at ~line 4129); it
+            // replays through one <w:cnfStyle w:val="…"/> set, which is lossless.
+            if (child is ConditionalFormatStyle cnf)
+            {
+                if (!node.Format.ContainsKey(name)
+                    && cnf.Val?.Value is string cnfVal && !string.IsNullOrEmpty(cnfVal))
+                    node.Format[name] = cnfVal;
+                continue;
+            }
 
             var typedAttrs = new System.Collections.Generic.List<DocumentFormat.OpenXml.OpenXmlAttribute>();
             foreach (var a in child.GetAttributes()) typedAttrs.Add(a);
