@@ -187,8 +187,42 @@ public partial class WordHandler
         if (child != null)
         {
             child.Remove();
-            rPr.AppendChild(child);
+            InsertW14ChildInSchemaOrder(rPr, child);
         }
+    }
+
+    // The w14 run-property extension elements have a fixed schema order; a
+    // strict validator (and Word) reject them out of sequence with "unexpected
+    // child element". Appending in call order produced e.g.
+    // textOutline,textFill,shadow,glow,reflection — invalid (BUG-DUMPR2). Insert
+    // each effect before the first already-present w14 child that outranks it so
+    // the set stays canonical regardless of the order the effects are applied.
+    private static readonly string[] W14EffectOrder =
+    {
+        "glow", "shadow", "reflection", "textOutline", "textFill",
+        "scene3d", "props3d", "ligatures", "numForm", "numSpacing",
+        "stylisticSets", "cntxtAlts",
+    };
+
+    private static void InsertW14ChildInSchemaOrder(RunProperties rPr, OpenXmlElement child)
+    {
+        static int Rank(string localName)
+        {
+            var i = Array.IndexOf(W14EffectOrder, localName);
+            return i < 0 ? int.MaxValue : i;
+        }
+        int childRank = Rank(child.LocalName);
+        OpenXmlElement? insertBefore = null;
+        foreach (var existing in rPr.ChildElements)
+        {
+            if (existing.NamespaceUri == W14Ns && Rank(existing.LocalName) > childRank)
+            {
+                insertBefore = existing;
+                break;
+            }
+        }
+        if (insertBefore != null) rPr.InsertBefore(child, insertBefore);
+        else rPr.AppendChild(child);
     }
 
     /// <summary>
