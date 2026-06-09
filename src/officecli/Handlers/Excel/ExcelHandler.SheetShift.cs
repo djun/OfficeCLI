@@ -35,6 +35,7 @@ using DocumentFormat.OpenXml.Spreadsheet;
 using Xdr = DocumentFormat.OpenXml.Drawing.Spreadsheet;
 using C = DocumentFormat.OpenXml.Drawing.Charts;
 using X14 = DocumentFormat.OpenXml.Office2010.Excel;
+using Xm = DocumentFormat.OpenXml.Office.Excel;
 
 namespace OfficeCli.Handlers;
 
@@ -350,6 +351,30 @@ public partial class ExcelHandler
                     }
                 }
             }
+        }
+
+        // 6h. x14 conditional formatting (databar/colorScale/iconSet 2010
+        // extension in the worksheet extLst): its own selection (<xm:sqref>) and
+        // any formula-type value object ref (<xm:f>) must follow the displacement
+        // — the classic <conditionalFormatting> twin is handled in section 2, but
+        // this extension carries a separate sqref that would otherwise drift.
+        foreach (var x14cf in ws.Descendants<X14.ConditionalFormatting>().ToList())
+        {
+            var rs = x14cf.GetFirstChild<Xm.ReferenceSequence>();
+            if (rs != null && !string.IsNullOrEmpty(rs.Text))
+            {
+                var mapped = rs.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(p => refMapper(p)).OfType<string>().ToList();
+                if (mapped.Count == 0) { x14cf.Remove(); continue; }
+                rs.Text = string.Join(" ", mapped);
+            }
+            if (formulaTextMapper != null)
+                foreach (var cfvo in x14cf.Descendants<X14.ConditionalFormattingValueObject>())
+                    if (cfvo.Type?.Value == X14.ConditionalFormattingValueObjectTypeValues.Formula)
+                    {
+                        var f = cfvo.GetFirstChild<Xm.Formula>();
+                        if (f != null && !string.IsNullOrEmpty(f.Text)) f.Text = formulaTextMapper(f.Text);
+                    }
         }
 
         // 7. cell formulas (text + shared/array ref attribute)
