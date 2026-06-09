@@ -1470,6 +1470,23 @@ public static partial class WordBatchEmitter
         // addressable on the Get side (style paths resolve by id, not by
         // index). Query produces id-based paths and excludes docDefaults.
         var styles = word.Query("style");
+        // STYLE-RAW-FALLBACK: scalar Format keys (basedOn / spaceAfter /
+        // font / size / …) cannot express a TABLE style's visual formatting:
+        // its style-level <w:tblPr> (borders, band sizes, cell margins), its
+        // <w:tblStylePr> conditional-formatting blocks (firstRow / lastRow /
+        // band1Vert / …), and table-level <w:shd>/<w:tcPr>/<w:trPr>. A table
+        // that draws its borders/shading/banding from a table style (no inline
+        // <w:tblBorders> on the table itself) therefore lost ALL visual
+        // formatting on round-trip — the rebuilt style emitted only scalars,
+        // dropping tblBorders/tblStylePr/shd, and Word rendered it as plain
+        // borderless text. Give table styles a raw-set replace fallback that
+        // round-trips the whole <w:style> element verbatim — exactly the
+        // pattern docDefaults / theme / settings already use. The scalar `add
+        // style` still runs first (creating the style + handling id collisions
+        // via AddStyle's upsert/suffix path); the raw-set then swaps the
+        // freshly-added <w:style> for the source's verbatim copy, so no
+        // double-apply and no scalar/raw drift. Mirrors EmitDocDefaultsRaw.
+        var rawStyleByMatchAttr = BuildRawTableStyleMap(word);
         // Blank-baseline cleanup: BlankDocCreator always stamps a Normal
         // style (for Word render parity — Calibri 11pt, 1.08x
         // line). When the source has no entry for styleId="Normal",
@@ -1547,7 +1564,62 @@ public static partial class WordBatchEmitter
             {
                 EmitTabStops($"/styles/{styleId}", styleTabs, items);
             }
+            // STYLE-RAW-FALLBACK: if this style is a table style whose verbatim
+            // XML we captured, replace the just-added <w:style> wholesale so
+            // its tblPr / tblStylePr / shd / trPr / tcPr survive. Keyed by the
+            // id the `add` actually used (emitId) so an id collision/suffix on
+            // the target still lands on the right element. The raw XML's
+            // w:styleId is normalized to emitId by BuildRawTableStyleMap.
+            if (!string.IsNullOrEmpty(emitId)
+                && rawStyleByMatchAttr.TryGetValue(emitId, out var rawStyleXml))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = "/styles",
+                    Xpath = $"/w:styles/w:style[@w:styleId='{emitId}']",
+                    Action = "replace",
+                    Xml = rawStyleXml
+                });
+            }
         }
+    }
+
+    // STYLE-RAW-FALLBACK helper: parse the source styles.xml once and return a
+    // map from styleId → verbatim <w:style> XML, restricted to TABLE styles
+    // (w:type="table"). Only table styles need this fallback today: their
+    // <w:tblPr>/<w:tblStylePr>/<w:shd>/<w:trPr>/<w:tcPr> formatting has no
+    // scalar Format representation, unlike paragraph/character styles whose
+    // pPr/rPr round-trips through the scalar emit path. Keeping the scope to
+    // table styles avoids re-clobbering the (correct) scalar emit for the far
+    // more numerous paragraph/character styles. The keying id is each style's
+    // own w:styleId — callers match it against the id the `add` step used.
+    private static Dictionary<string, string> BuildRawTableStyleMap(WordHandler word)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        string stylesXml;
+        try { stylesXml = word.Raw("/styles"); }
+        catch { return map; }
+        if (string.IsNullOrEmpty(stylesXml) || !stylesXml.StartsWith("<")) return map;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(stylesXml);
+            var wNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+            foreach (var styleEl in doc.Root?.Elements(wNs + "style") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
+            {
+                var type = styleEl.Attribute(wNs + "type")?.Value;
+                if (!string.Equals(type, "table", StringComparison.Ordinal)) continue;
+                var idAttr = styleEl.Attribute(wNs + "styleId");
+                var styleId = idAttr?.Value;
+                if (string.IsNullOrEmpty(styleId)) continue;
+                // Dedupe: keep the first occurrence, matching EmitStyles' own
+                // first-wins styleId dedup (Word tolerates duplicate ids).
+                if (map.ContainsKey(styleId)) continue;
+                map[styleId] = styleEl.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+            }
+        }
+        catch { return new Dictionary<string, string>(StringComparer.Ordinal); }
+        return map;
     }
 
     private sealed class NoteCursor { public int Index; }

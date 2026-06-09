@@ -128,7 +128,43 @@ public static partial class WordBatchEmitter
                 "border.right", "border.insideH", "border.insideV" };
             int presentSides = sideKeys.Count(s => tableProps.ContainsKey(s));
             bool hasBorderAll = tableProps.ContainsKey("border") || tableProps.ContainsKey("border.all");
-            if (presentSides < 6 && !hasBorderAll)
+            // BUG-STYLE-BORDER: the none-wipe (and AddTable's default-border
+            // seed it counteracts) exist for tables that are GENUINELY
+            // borderless (no inline <w:tblBorders>, no style). A table whose
+            // borders come from a TABLE STYLE (a <w:tblStyle w:val="…"/> ref,
+            // no inline borders) ALSO emits <6 per-side keys here — but it must
+            // NOT get any inline override: writing all-none borders renders it
+            // borderless, and AddTable's default single-border seed paints a
+            // generic thin grid that masks the style's GridTable5Dark design.
+            // For style-driven tables, instead tell AddTable to skip the
+            // default-border seed entirely (skipDefaultBorders) so the style's
+            // borders apply unmodified; any explicit inline border.* keys the
+            // source DID carry still overlay on top. Genuinely borderless,
+            // style-less tables keep the original none-wipe idempotency fix.
+            // CONSISTENCY(border-default-overlay).
+            bool hasTableStyleRef = tableProps.TryGetValue("style", out var styRef)
+                && !string.IsNullOrEmpty(styRef);
+            if (hasTableStyleRef)
+            {
+                // Suppress AddTable's generic 6-side single-border seed. The
+                // table style supplies borders; explicit inline border.* keys
+                // (if any) still apply via ApplyTableBorders after the seed is
+                // skipped. No all-none wipe — that would defeat the style.
+                tableProps["skipDefaultBorders"] = "true";
+                // Still collapse 6 identical explicit per-side keys to the
+                // compact form for idempotency (fall through to the else-if
+                // below would be skipped otherwise).
+                if (presentSides == 6 && !hasBorderAll)
+                {
+                    var firstS = tableProps[sideKeys[0]];
+                    if (sideKeys.All(s => tableProps[s] == firstS))
+                    {
+                        foreach (var s in sideKeys) tableProps.Remove(s);
+                        tableProps["border"] = firstS;
+                    }
+                }
+            }
+            else if (presentSides < 6 && !hasBorderAll)
             {
                 // Use the canonical "style;size" form: ApplyTableBorders'
                 // ParseBorderValue defaults size=4 for `none`, so writing
