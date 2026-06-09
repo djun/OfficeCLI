@@ -162,6 +162,26 @@
       "readback": "highlight palette name",
       "enforcement": "report"
     },
+    "fill": {
+      "type": "color",
+      "description": "cell background shading (w:shd @fill). Accepts a solid color — hex ('FF0000'), '#'-prefixed hex ('#FF0000'), named color ('red'), rgb(...) notation, or 'transparent' to clear. docx <w:shd> has no native gradient primitive: the CSS-style hyphen form 'COLOR1-COLOR2[-ANGLE]' is NOT accepted (native gradient cell fill is a pptx-only feature). A synthetic two-stop gradient is available via the semicolon form 'gradient;STARTCOLOR;ENDCOLOR[;ANGLE]', emulated with a shading pattern. Bare 'none' is not accepted — use 'transparent'. Set-only; apply after add.",
+      "aliases": [
+        "shd",
+        "shading"
+      ],
+      "add": false,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop fill=FFFF00",
+        "--prop fill=#FF0000",
+        "--prop fill=red",
+        "--prop fill=transparent",
+        "--prop fill=\"gradient;FF0000;0000FF;90\""
+      ],
+      "readback": "#RRGGBB uppercase, or 'gradient' (with a separate 'gradient' key)",
+      "enforcement": "report"
+    },
     "align": {
       "type": "enum",
       "values": [
