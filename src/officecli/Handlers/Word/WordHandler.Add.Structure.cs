@@ -120,13 +120,20 @@ public partial class WordHandler
                 bodySectPr.GetFirstChild<DocGrid>());
         }
 
-        // Copy page size/margins from document section, or use A4 defaults
+        // Copy page size/margins from document section, or use A4 defaults.
+        // BUG-DUMP-SECT-ORIENT: do NOT inherit the body section's w:orient. The
+        // body section is the LAST (often landscape) section; a mid-document
+        // section created without an explicit `orientation` prop must derive its
+        // orientation from its own width/height, never from the trailing
+        // section's stale flag. Inheriting landscape onto a portrait W<H pgSz
+        // produced a contradictory `<w:pgSz w:w="11906" w:h="16838"
+        // w:orient="landscape"/>` on dump→batch replay. Orient is set below
+        // (explicit prop) or derived from final W/H after all overrides land.
         var srcPageSize = bodySectPr?.GetFirstChild<PageSize>();
         InsertSectPrChildInOrder(sectPr, new PageSize
         {
             Width = srcPageSize?.Width ?? WordPageDefaults.A4WidthTwips,
-            Height = srcPageSize?.Height ?? WordPageDefaults.A4HeightTwips,
-            Orient = srcPageSize?.Orient
+            Height = srcPageSize?.Height ?? WordPageDefaults.A4HeightTwips
         });
         var srcMargin = bodySectPr?.GetFirstChild<PageMargin>();
         InsertSectPrChildInOrder(sectPr, new PageMargin
@@ -157,6 +164,18 @@ public partial class WordHandler
                 (ps.Width!.Value, ps.Height!.Value) = (ps.Height.Value, ps.Width.Value);
             if (ps.Orient == PageOrientationValues.Portrait && ps.Width > ps.Height)
                 (ps.Width!.Value, ps.Height!.Value) = (ps.Height.Value, ps.Width.Value);
+        }
+        else
+        {
+            // BUG-DUMP-SECT-ORIENT: no explicit orientation prop. Derive the
+            // landscape flag from the section's own final W/H so the section
+            // never carries a contradictory orient inherited from another
+            // section. Width>Height ⇒ landscape; otherwise leave orient unset
+            // (portrait is the OOXML default; omitting w:orient matches how
+            // Word writes a portrait section, keeping the dump→batch byte shape).
+            var ps = sectPr.GetFirstChild<PageSize>();
+            if (ps?.Width?.Value is uint dw && ps.Height?.Value is uint dh && dw > dh)
+                ps.Orient = PageOrientationValues.Landscape;
         }
 
         // Columns support: "columns=2" or "columns=2,1cm"
