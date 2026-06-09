@@ -620,6 +620,22 @@ public static partial class WordBatchEmitter
             || r.Format.ContainsKey("numSpacing")
             || r.Format.ContainsKey("revision.type")
             || r.Format.ContainsKey("sym")) return false;
+        // BUG-RSHD-PROMOTE: a sole run carrying run-level character shading
+        // (<w:rPr><w:shd>) must NOT collapse into `add p`. AddParagraph routes
+        // `shading`/`shd` to PARAGRAPH properties (<w:pPr><w:shd>) only — there
+        // is no run-level shading routing on `add p` (BUG-DUMP22-03 deliberately
+        // suppresses stamping pPr shading onto the inline run). Collapsing the
+        // run's shading.* keys would therefore hoist a tight character highlight
+        // into a full page-width paragraph band. Unlike `bdr`/`highlight` —
+        // which `add p` forwards to ApplyRunFormatting (rPr) so they keep their
+        // run-level identity in the collapse — `shading` semantics diverge
+        // between pPr and rPr, so the only correct round-trip is the explicit
+        // `add r shading=…` path (WordHandler.Add.Text.cs routes a run's
+        // `shading`/`shd` to rPr). Keep this run on the explicit-run path.
+        // Genuine paragraph-level shading (read from pPr onto the paragraph
+        // node, not the run) still rides on `add p` unaffected.
+        if (r.Format.Keys.Any(k => k.StartsWith("shading.", StringComparison.OrdinalIgnoreCase)))
+            return false;
         // BUG-FIELD-COLLAPSE: a synthetic field run carries `instruction=…` —
         // collapse would lose the field chain on replay.
         if (r.Type == "field") return false;
