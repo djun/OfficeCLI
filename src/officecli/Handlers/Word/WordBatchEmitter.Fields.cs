@@ -18,6 +18,13 @@ public static partial class WordBatchEmitter
     {
         "bold", "italic", "color", "size", "font", "font.latin", "font.ascii", "font.hAnsi",
         "underline", "strike",
+        // BUG-DUMP-FIELDVALIGN: field-wide vertical alignment (superscript /
+        // subscript) — the common case is a cross-reference citation mark
+        // ([1],[2]…) whose every run (begin/instr/sep/result/end) shares the
+        // same <w:vertAlign w:val="superscript"/>. The result run reflects it,
+        // so capturing it here (and applying it uniformly via AddField below)
+        // restores the superscript on round-trip.
+        "superscript", "subscript",
     };
 
     // AddField's --prop vocabulary for field-run formatting. A captured result
@@ -27,6 +34,10 @@ public static partial class WordBatchEmitter
     private static readonly HashSet<string> FieldAddSupportedFormatKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "bold", "color", "size", "font", "font.latin", "font.ascii", "font.hAnsi",
+        // BUG-DUMP-FIELDVALIGN: AddField applies vertAlign (superscript /
+        // subscript) uniformly to every rebuilt field run, so these are
+        // losslessly expressible through the typed `add field` path.
+        "superscript", "subscript",
     };
 
     private static bool FieldRunHasFormatting(DocumentNode run)
@@ -95,6 +106,21 @@ public static partial class WordBatchEmitter
             // result-run formatting per segment is rare; we capture the first
             // formatted display run, matching AddField's single-rPr model.)
             DocumentNode? firstFormattedResult = null;
+            // BUG-DUMP-FIELDVALIGN: field-wide vertical alignment (superscript /
+            // subscript) is uniform across EVERY run of the field — a citation
+            // mark whose begin/instr/separate/result/end runs all carry the same
+            // <w:vertAlign>. The post-separate `firstFormattedResult` capture
+            // misses two real shapes: (1) an empty result run that sits BEFORE
+            // the separator (Word emits a stray rPr-only run between instr and
+            // separate — its rPr still defines the field's vertAlign), and (2) a
+            // field whose post-separate result is empty (no text run to read).
+            // The begin/instr/sep/end marker NODES have their vertAlign stripped
+            // (TypographyOnlyKeys noise-suppression in RunToNode), so the only
+            // non-stripped carrier is a `run`/`r`-typed node anywhere in the
+            // chain. Scan ALL depth-1 result runs (regardless of sawSeparate or
+            // text content) for a vertAlign and stash it so it rides on the field
+            // op even when no formatted post-separate text run exists.
+            string? fieldVertAlign = null;
             for (int j = i + 1; j < children.Count; j++)
             {
                 var k = children[j];
@@ -152,6 +178,18 @@ public static partial class WordBatchEmitter
                     // to AddField (which applies it to the rebuilt field runs).
                     if (sawSeparate && firstFormattedResult == null && FieldRunHasFormatting(k))
                         firstFormattedResult = k;
+                    // BUG-DUMP-FIELDVALIGN: capture vertAlign from ANY result run
+                    // in the chain (independent of sawSeparate / text), so an
+                    // empty pre-separate rPr-only run or a field with an empty
+                    // post-separate result still carries the field-wide
+                    // superscript/subscript onto the op.
+                    if (fieldVertAlign == null)
+                    {
+                        if (k.Format.TryGetValue("superscript", out var supv) && supv is bool sb && sb)
+                            fieldVertAlign = "superscript";
+                        else if (k.Format.TryGetValue("subscript", out var subv) && subv is bool sbb && sbb)
+                            fieldVertAlign = "subscript";
+                    }
                 }
             }
             if (end < 0)
@@ -273,6 +311,19 @@ public static partial class WordBatchEmitter
                     if (FieldResultFormatKeys.Contains(fk))
                         synth.Format["_resultFmt." + fk] = fv;
                 }
+            }
+            // BUG-DUMP-FIELDVALIGN: forward the field-wide vertAlign captured
+            // from any result run in the chain. Stash it under the same
+            // `_resultFmt.` channel TryEmitFieldRun already drains so it maps
+            // onto the `add field` superscript/subscript prop — covering the
+            // empty-result / pre-separate-rPr-run shapes the post-separate
+            // firstFormattedResult scan misses. Only set when the
+            // firstFormattedResult path didn't already carry it (no override).
+            if (fieldVertAlign != null
+                && !synth.Format.ContainsKey("_resultFmt.superscript")
+                && !synth.Format.ContainsKey("_resultFmt.subscript"))
+            {
+                synth.Format["_resultFmt." + fieldVertAlign] = true;
             }
             // BUG-DUMP18-02: propagate hyperlink-scope hint from the begin
             // run so the field-emit branch can target the hyperlink parent

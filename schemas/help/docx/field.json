@@ -103,6 +103,16 @@
       "examples": ["--prop instruction=' DATE \\@ \"yyyy年MM月\" '"],
       "readback": "instrText element text content",
       "enforcement": "report"
+    },
+    "vertAlign": {
+      "type": "enum",
+      "values": ["superscript", "subscript", "baseline"],
+      "description": "field-wide vertical alignment applied uniformly to every run of the field (begin/instrText/separate/result/end). Common case: a superscript cross-reference citation mark ([1],[2]…). Accepts the boolean aliases superscript=true / subscript=true. Like the other run-format props the field add accepts (font/size/bold/color), this rides on the whole field rather than a single run.",
+      "aliases": ["vertalign", "superscript", "subscript"],
+      "add": true, "set": false, "get": false,
+      "examples": ["--prop vertAlign=superscript", "--prop superscript=true"],
+      "readback": "n/a (applied to the field's run properties)",
+      "enforcement": "report"
     }
   }
 }

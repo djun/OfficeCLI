@@ -992,9 +992,31 @@ public partial class WordHandler
         var fieldRunEnd = new Run(new FieldChar { FieldCharType = FieldCharValues.End });
 
         // Apply optional run formatting to all runs
+        // BUG-DUMP-FIELDVALIGN: vertAlign (superscript/subscript) on the field
+        // runs — a field whose every run (begin/instr/sep/result/end) shares the
+        // same <w:vertAlign> (e.g. a superscript cross-reference citation mark).
+        // Resolve it up-front so it gates fieldRProps creation alongside
+        // font/size/bold/color and is applied uniformly to all field runs below.
+        VerticalPositionValues? fieldVertAlign = null;
+        if (properties.TryGetValue("vertAlign", out var fVa) || properties.TryGetValue("vertalign", out fVa))
+        {
+            fieldVertAlign = fVa.ToLowerInvariant() switch
+            {
+                "superscript" or "super" => VerticalPositionValues.Superscript,
+                "subscript" or "sub" => VerticalPositionValues.Subscript,
+                "baseline" or "" => VerticalPositionValues.Baseline,
+                _ => (VerticalPositionValues?)null
+            };
+        }
+        if (fieldVertAlign == null && properties.TryGetValue("superscript", out var fSup) && IsTruthy(fSup))
+            fieldVertAlign = VerticalPositionValues.Superscript;
+        if (fieldVertAlign == null && properties.TryGetValue("subscript", out var fSub) && IsTruthy(fSub))
+            fieldVertAlign = VerticalPositionValues.Subscript;
+
         RunProperties? fieldRProps = null;
         if (properties.TryGetValue("font", out var fFont) || properties.TryGetValue("size", out _) ||
-            properties.TryGetValue("bold", out _) || properties.TryGetValue("color", out _))
+            properties.TryGetValue("bold", out _) || properties.TryGetValue("color", out _) ||
+            fieldVertAlign != null)
         {
             fieldRProps = new RunProperties();
             // CT_RPr schema order: rFonts → b → ... → color → sz
@@ -1012,6 +1034,12 @@ public partial class WordHandler
                 ApplyRunFormatting(fieldRProps, "color", fc);
             if (properties.TryGetValue("size", out var fs))
                 fieldRProps.AppendChild(new FontSize { Val = ((int)Math.Round(ParseFontSize(fs) * 2, MidpointRounding.AwayFromZero)).ToString() });
+            // BUG-DUMP-FIELDVALIGN: vertAlign sits late in CT_RPr (after sz);
+            // InsertRunPropInSchemaOrder isn't used here (this block builds the
+            // rPr in declaration order), and vertAlign is the last element we
+            // append, so AppendChild keeps it in valid schema position.
+            if (fieldVertAlign != null)
+                fieldRProps.AppendChild(new VerticalTextAlignment { Val = fieldVertAlign.Value });
         }
 
         // Final emitted-run ordering: begin → instr → [separate → result] → end
@@ -1265,6 +1293,12 @@ public partial class WordHandler
     {
         "fieldtype", "type", "instr", "instruction", "code",
         "text", "font", "size", "bold", "color",
+        // BUG-DUMP-FIELDVALIGN: field-wide vertical alignment (superscript /
+        // subscript) applies to ANY field type — the common case is a
+        // superscript cross-reference citation mark. Consumed by the
+        // fieldRProps builder, applied uniformly to all field runs; same
+        // universal-run-format class as font/size/bold/color above.
+        "vertalign", "vertAlign", "superscript", "subscript",
         "index", "after", "before",
         // BUG-R7A: `switches` carries residual general field switches
         // (`\* roman`, `\* MERGEFORMAT`, `\p`, `\h`, …) for every typed
