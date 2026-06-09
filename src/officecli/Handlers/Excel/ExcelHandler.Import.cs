@@ -40,28 +40,73 @@ public partial class ExcelHandler
         if (rows.Count == 0)
             return "No data to import";
 
+        int maxCols = 0;
+        for (int r = 0; r < rows.Count; r++)
+            if (rows[r].Count > maxCols) maxCols = rows[r].Count;
+
+        // DOS-hardening: reject imports that exceed Excel's sheet dimensions
+        // BEFORE writing anything. Without this an over-sized CSV (e.g. >XFD
+        // columns or >1048576 rows) spun indefinitely instead of erroring.
+        const int ExcelMaxRow = 1048576;
+        const int ExcelMaxCol = 16384; // XFD (ColumnNameToIndex is 1-based)
+        long endRowReq = (long)startRow + rows.Count - 1;
+        if (endRowReq > ExcelMaxRow)
+            throw new ArgumentException(
+                $"Import exceeds Excel's row limit: data would reach row {endRowReq} " +
+                $"(maximum {ExcelMaxRow}). Reduce the CSV or change the start cell.");
+        long endColIdx = (long)startColIdx + maxCols - 1;
+        if (endColIdx > ExcelMaxCol)
+            throw new ArgumentException(
+                $"Import exceeds Excel's column limit: data would reach column {endColIdx} " +
+                $"(maximum {ExcelMaxCol} / XFD). Reduce the CSV width or change the start cell.");
+
         // BUG-R11-import-dup-row BUG-11: import previously always appended a
         // brand-new <row r="N">, producing duplicate row entries when the
         // target rows already existed (Excel auto-repaired by keeping the
         // first one, silently losing imported data). Upsert by RowIndex —
-        // reuse an existing row, otherwise insert a new one in sorted
-        // position. For each cell, upsert by CellReference too.
-        int maxCols = 0;
+        // reuse an existing row, otherwise insert a new one in sorted position.
+        //
+        // PERF(dos-hardening): the previous implementation re-scanned the whole
+        // SheetData (LINQ FirstOrDefault) for every imported row AND every cell,
+        // making a bulk import O(rows*cells * existing) — a 100k-row CSV took
+        // 9+ minutes. Pre-index existing rows once and walk them with an
+        // ascending cursor for sorted insertion; build a per-row cell index
+        // only when reusing a pre-existing row. Bulk-append into a fresh sheet
+        // is now linear.
+        var existingRows = sheetData.Elements<Row>()
+            .Where(rr => rr.RowIndex?.Value != null)
+            .OrderBy(rr => rr.RowIndex!.Value)
+            .ToList();
+        var rowByIndex = new Dictionary<uint, Row>();
+        foreach (var er in existingRows)
+            rowByIndex[er.RowIndex!.Value] = er;
+        int exCursor = 0; // points at the first existing row with index > last processed
+
         for (int r = 0; r < rows.Count; r++)
         {
             var fields = rows[r];
-            if (fields.Count > maxCols) maxCols = fields.Count;
             var rowIdx = (uint)(startRow + r);
 
-            var row = sheetData.Elements<Row>()
-                .FirstOrDefault(rr => rr.RowIndex?.Value == rowIdx);
-            if (row == null)
+            Dictionary<string, Cell>? cellByRef = null;
+            if (rowByIndex.TryGetValue(rowIdx, out var row))
+            {
+                // Reused row may already hold cells — index them once for upsert.
+                cellByRef = new Dictionary<string, Cell>(StringComparer.OrdinalIgnoreCase);
+                foreach (var existingCell in row.Elements<Cell>())
+                    if (existingCell.CellReference?.Value is { } cr)
+                        cellByRef[cr] = existingCell;
+            }
+            else
             {
                 row = new Row { RowIndex = rowIdx };
-                var nextRow = sheetData.Elements<Row>()
-                    .FirstOrDefault(rr => rr.RowIndex?.Value > rowIdx);
-                if (nextRow != null)
-                    sheetData.InsertBefore(row, nextRow);
+                // Advance the cursor past existing rows that sort before rowIdx,
+                // then insert before the first existing row that sorts after it
+                // (or append when none remain). O(existing) total across all rows.
+                while (exCursor < existingRows.Count
+                       && existingRows[exCursor].RowIndex!.Value < rowIdx)
+                    exCursor++;
+                if (exCursor < existingRows.Count)
+                    sheetData.InsertBefore(row, existingRows[exCursor]);
                 else
                     sheetData.Append(row);
             }
@@ -70,8 +115,8 @@ public partial class ExcelHandler
             {
                 var colIdx = startColIdx + c;
                 var cellRef = $"{IndexToColumnName(colIdx)}{rowIdx}".ToUpperInvariant();
-                var cell = row.Elements<Cell>()
-                    .FirstOrDefault(cc => string.Equals(cc.CellReference?.Value, cellRef, StringComparison.OrdinalIgnoreCase));
+                Cell? cell = null;
+                cellByRef?.TryGetValue(cellRef, out cell);
                 if (cell == null)
                 {
                     cell = new Cell { CellReference = cellRef };
