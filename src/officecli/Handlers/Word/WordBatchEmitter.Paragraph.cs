@@ -312,6 +312,12 @@ public static partial class WordBatchEmitter
             return !string.IsNullOrEmpty(probe) && IsTextboxDrawing(probe);
         });
         string? sharedAttachPara = drawingBearingCount >= 2 ? paraTargetPath : null;
+        // BUG-R14B: hyperlink rows already emitted at this parent belong to
+        // earlier paragraphs (paraTargetPath is the same "/body/p[last()]"
+        // literal for every <w:p>). Capture that count so multi-run hyperlinks
+        // in THIS paragraph re-index from 1 — see EmitStructuredHyperlink.
+        int hlBaseline = items.Count(it => it.Type == "hyperlink"
+            && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
         foreach (var run in runs)
         {
             if (TryEmitBookmarkRun(run, paraTargetPath, items, ctx)) continue;
@@ -330,7 +336,7 @@ public static partial class WordBatchEmitter
             if (TryEmitOleRun(run, paraTargetPath, items, ctx, word)) continue;
             if (TryEmitPictureRun(word, run, paraTargetPath, parentPath, targetIndex, items, ctx, sharedAttachPara)) continue;
             if (TryEmitNoteRefRun(word, run, paraTargetPath, items, ctx)) continue;
-            EmitPlainOrHyperlinkRun(run, paraTargetPath, items, ctx);
+            EmitPlainOrHyperlinkRun(run, paraTargetPath, items, ctx, hlBaseline);
         }
     }
 
@@ -1699,7 +1705,7 @@ public static partial class WordBatchEmitter
         return NoteRefKind.None;
     }
 
-    private static void EmitPlainOrHyperlinkRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx = null)
+    private static void EmitPlainOrHyperlinkRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx = null, int hlBaseline = 0)
     {
         // BUG-R12A(BUG1): a hyperlink wrapper with >1 run or any per-run rPr was
         // stashed by CoalesceHyperlinkRuns with its original runs in Children.
@@ -1713,7 +1719,7 @@ public static partial class WordBatchEmitter
         if (run.Format.TryGetValue("_hlStructured", out var hlsObj) && hlsObj is bool hlsB && hlsB
             && run.Children is { Count: > 0 } hlRuns)
         {
-            EmitStructuredHyperlink(hlRuns, paraTargetPath, items, ctx);
+            EmitStructuredHyperlink(hlRuns, paraTargetPath, items, ctx, hlBaseline);
             return;
         }
         var rProps = FilterEmittableProps(run.Format);
@@ -1793,8 +1799,17 @@ public static partial class WordBatchEmitter
     // hyperlink[K] path (verified working — AddRun accepts a hyperlink parent
     // and preserves bold/color/size/font). hlIndex is the 1-based ordinal of
     // this hyperlink among the rows already emitted under the host paragraph.
+    // BUG-R14B: hlBaseline is the number of hyperlink rows already present
+    // at paraTargetPath *before this paragraph's own run-emit pass began*.
+    // paraTargetPath is the literal "/body/p[last()]" for every paragraph, so
+    // a raw items.Count() of hyperlink rows at that parent also tallies the
+    // hyperlinks from previously-emitted paragraphs — at replay time those
+    // live under earlier <w:p> elements, not the current last() paragraph, so
+    // the current paragraph's hyperlinks re-index from 1. Subtracting the
+    // baseline yields the wrapper's LIVE 1-based index inside this paragraph,
+    // which is what the trailing `add r` rows must target.
     private static void EmitStructuredHyperlink(List<DocumentNode> hlRuns, string paraTargetPath,
-                                                List<BatchItem> items, BodyEmitContext? ctx)
+                                                List<BatchItem> items, BodyEmitContext? ctx, int hlBaseline = 0)
     {
         // Build the wrapper add from the first run's props (url/anchor/tooltip/…
         // + the run's own rPr). Reuse the existing flat-emit logic by routing
@@ -1837,7 +1852,9 @@ public static partial class WordBatchEmitter
             }
             return;
         }
-        var hlPath = $"{paraTargetPath}/hyperlink[{hlAfter}]";
+        // BUG-R14B: live in-paragraph index = total hyperlink rows at this
+        // parent minus the count that belonged to earlier paragraphs.
+        var hlPath = $"{paraTargetPath}/hyperlink[{hlAfter - hlBaseline}]";
         for (int k = 1; k < hlRuns.Count; k++)
         {
             var rProps = FilterEmittableProps(hlRuns[k].Format);

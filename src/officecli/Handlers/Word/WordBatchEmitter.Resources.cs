@@ -927,7 +927,7 @@ public static partial class WordBatchEmitter
     // and rPr (italic/bold/color/size/font/…). Mirrors EmitPlainOrHyperlinkRun
     // for /body runs, minus the hyperlink/revision special-casing (comment
     // bodies don't carry those in the supported round-trip).
-    private static void EmitCommentRun(DocumentNode run, string paraTargetPath, List<BatchItem> items)
+    private static void EmitCommentRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, int hlBaseline = 0)
     {
         // BUG-R13A: a run flattened out of a <w:hyperlink> wrapper carries
         // url/anchor/isHyperlink (and _hyperlinkParent) Format keys that
@@ -942,7 +942,7 @@ public static partial class WordBatchEmitter
         if (run.Format.ContainsKey("url") || run.Format.ContainsKey("anchor")
             || run.Format.ContainsKey("isHyperlink"))
         {
-            EmitPlainOrHyperlinkRun(run, paraTargetPath, items);
+            EmitPlainOrHyperlinkRun(run, paraTargetPath, items, null, hlBaseline);
             return;
         }
         var rProps = FilterEmittableProps(run.Format);
@@ -966,8 +966,13 @@ public static partial class WordBatchEmitter
     // emit). Non-hyperlink runs pass through EmitCommentRun unchanged.
     private static void EmitContainerBodyRuns(List<DocumentNode> runs, string paraTargetPath, List<BatchItem> items)
     {
+        // BUG-R14B: capture the hyperlink baseline ONCE for this container body
+        // so multi-run hyperlinks re-index from 1 within it (mirrors the body
+        // walker; per-run capture would mis-reset a 2nd hyperlink to index 1).
+        int hlBaseline = items.Count(it => it.Type == "hyperlink"
+            && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
         foreach (var run in CoalesceHyperlinkRuns(runs))
-            EmitCommentRun(run, paraTargetPath, items);
+            EmitCommentRun(run, paraTargetPath, items, hlBaseline);
     }
 
     // BUG-R9A(BUG1): fold a run's rPr format keys into the `add comment` prop
