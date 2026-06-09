@@ -1017,14 +1017,32 @@ public static partial class WordBatchEmitter
     private static void EmitNoteReference(WordHandler word, string kind, int sourceNoteIdx,
                                           int targetNoteIdx, string carrierPath, List<BatchItem> items)
     {
+        // BUG-DUMP-ENDNOTE-ID: the source-side `/{kind}[N]` path resolves by
+        // note Id (== N), NOT by ordinal position among the user notes —
+        // /endnote[2] means "endnote whose w:id=2", not "the 2nd endnote". The
+        // 1-based document-order reference cursor (sourceNoteIdx) only equals the
+        // Id when the part's user notes start at id 1 (the convention Word and
+        // our own AddFootnote/AddEndnote use: separators at id -1/0, first user
+        // note at id 1). LibreOffice numbers endnote separators at id 0/1, so the
+        // first user endnote is id 2 and /endnote[1] resolves to the
+        // continuationSeparator (empty body) — every endnote body was silently
+        // dropped while the footnote path round-tripped by coincidence of id
+        // convention. Translate the ordinal cursor to the real source note Id by
+        // enumerating user notes (id > 0) in document order, then address the
+        // source by id-qualified path. The rebuilt-side targetNotePath stays
+        // positional: AddFootnote/AddEndnote always allocate ids 1..N, so on the
+        // rebuilt part ordinal == id.
+        int sourceNoteId = ResolveUserNoteId(word, kind, sourceNoteIdx);
+
         // Count the note's paragraphs from its raw XML (deterministic). A
         // depth-N note Get returns EMPTY children — it does not enumerate its
         // <w:p> grandchildren — and, inside the dump session, out-of-range
         // /<kind>[N]/p[K] does NOT reliably throw (it clamped, producing a flood
         // of empty paragraphs), so neither the children list nor a Get-until-
         // throw loop is a safe bound. The raw XML <w:p…> open-tag count is.
+        string sourceNotePath = $"/{kind}[@{kind}Id={sourceNoteId}]";
         int paraCount = 0;
-        var noteXml = word.GetElementXml($"/{kind}[{sourceNoteIdx}]");
+        var noteXml = word.GetElementXml(sourceNotePath);
         if (!string.IsNullOrEmpty(noteXml))
             paraCount = System.Text.RegularExpressions.Regex.Matches(noteXml, "<w:p[ >]").Count;
 
@@ -1035,7 +1053,7 @@ public static partial class WordBatchEmitter
         for (int pIdx = 1; pIdx <= paraCount; pIdx++)
         {
             DocumentNode? para;
-            try { para = word.Get($"/{kind}[{sourceNoteIdx}]/p[{pIdx}]", depth: 2); }
+            try { para = word.Get($"{sourceNotePath}/p[{pIdx}]", depth: 2); }
             catch { break; }
             if (para == null) break;
             bodyParas.Add(para);
@@ -1068,7 +1086,7 @@ public static partial class WordBatchEmitter
         else
         {
             string fallback = "";
-            try { fallback = word.Get($"/{kind}[{sourceNoteIdx}]").Text ?? ""; }
+            try { fallback = word.Get(sourceNotePath).Text ?? ""; }
             catch { /* leave empty */ }
             noteProps["text"] = fallback;
         }
@@ -1111,6 +1129,27 @@ public static partial class WordBatchEmitter
         }
     }
 
+    // BUG-DUMP-ENDNOTE-ID: map a 1-based document-order user-note ordinal to the
+    // real OOXML note Id. `query footnote`/`query endnote` returns user notes
+    // (id > 0, separators excluded) in document order with id-qualified paths
+    // (/endnote[@endnoteId=2]); this is the same set the reference cursor counts.
+    // The Nth reference therefore corresponds to the Nth entry's Id. Falls back
+    // to the ordinal itself (legacy id==ordinal assumption) when the path can't
+    // be parsed or the ordinal is out of range — preserves the prior behaviour
+    // for the well-formed Word-convention case rather than throwing.
+    private static int ResolveUserNoteId(WordHandler word, string kind, int ordinal)
+    {
+        var notes = word.Query(kind);
+        if (ordinal >= 1 && ordinal <= notes.Count)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(
+                notes[ordinal - 1].Path, $@"@{kind}Id=(-?\d+)");
+            if (m.Success && int.TryParse(m.Groups[1].Value, out var id))
+                return id;
+        }
+        return ordinal;
+    }
+
     // BUG-R12A(BUG3): a note-body run is round-trippable as a plain `add r` only
     // when it is a text-carrying run that is NOT the note reference mark
     // (<w:footnoteRef/> / <w:endnoteRef/>, which renders the superscript marker
@@ -1118,14 +1157,25 @@ public static partial class WordBatchEmitter
     // fields, nested notes) inside a note body is rare and out of scope — skip
     // such runs rather than mis-emit them as plain text. Mirrors
     // IsRoundTrippableCommentRun, plus the ref-mark exclusion.
+    //
+    // BUG-DUMP-ENDNOTE-ID: the ref-mark exclusion must reject only a *pure*
+    // ref-mark run (the <w:*Ref/> with no body text). Word emits the ref mark
+    // and the note text in SEPARATE runs, but LibreOffice fuses them into a
+    // single <w:r><w:*Ref/><w:t>body</w:t></w:r>. Rejecting any run that merely
+    // *contains* the ref child dropped that fused run's entire body text — the
+    // root of "endnote bodies silently dropped". Get's .Text already excludes
+    // the ref mark (it contributes no <w:t>), and AddFootnote/AddEndnote rebuilds
+    // the ref mark from scratch, so a fused run round-trips correctly as a plain
+    // text run; only a text-less ref mark is dropped.
     private static bool IsRoundTrippableNoteRun(WordHandler word, DocumentNode run)
     {
         if (run.Type != "run" && run.Type != "r") return false;
         var raw = word.GetElementXml(run.Path);
         if (!string.IsNullOrEmpty(raw)
             && (raw.Contains("footnoteRef", StringComparison.Ordinal)
-                || raw.Contains("endnoteRef", StringComparison.Ordinal)))
-            return false; // the reference mark — recreated by AddFootnote/AddEndnote
+                || raw.Contains("endnoteRef", StringComparison.Ordinal))
+            && string.IsNullOrEmpty(run.Text))
+            return false; // a pure reference mark — recreated by AddFootnote/AddEndnote
         return true;
     }
 
