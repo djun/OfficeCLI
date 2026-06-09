@@ -19,15 +19,32 @@ public partial class WordHandler
 
     private uint NextDocPropId()
     {
+        // BUG-R14A: drawing object ids (wp:docPr/@id) must be unique across the
+        // WHOLE document, not just the main body. A picture added into a
+        // footnote/endnote/comment is serialized to that part, where existing
+        // drawings (and the footnote/endnote separator drawings) carry their own
+        // docPr ids — scanning only the body let the new picture reuse id "1"
+        // and triggered an "id should be unique" semantic warning. Scan every
+        // part that can host a <w:drawing>.
+        var main = _doc.MainDocumentPart;
         uint maxId = 0;
-        var body = _doc.MainDocumentPart?.Document?.Body;
-        if (body != null)
+        void Scan(OpenXmlElement? root)
         {
-            foreach (var dp in body.Descendants<DW.DocProperties>())
+            if (root == null) return;
+            foreach (var dp in root.Descendants<DW.DocProperties>())
             {
                 if (dp.Id?.HasValue == true && dp.Id.Value > maxId)
                     maxId = dp.Id.Value;
             }
+        }
+        Scan(main?.Document?.Body);
+        if (main != null)
+        {
+            foreach (var hp in main.HeaderParts) Scan(hp.Header);
+            foreach (var fp in main.FooterParts) Scan(fp.Footer);
+            Scan(main.FootnotesPart?.Footnotes);
+            Scan(main.EndnotesPart?.Endnotes);
+            Scan(main.WordprocessingCommentsPart?.Comments);
         }
         return maxId + 1;
     }

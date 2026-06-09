@@ -227,34 +227,31 @@ public partial class WordHandler
         imgStream.Position = 0;
 
         var mainPart = _doc.MainDocumentPart!;
-        // CONSISTENCY(host-part-rel): mirror Add.Misc AddHyperlink and Add.Media OLE host-part
-        // resolution. When the parent paragraph lives in a HeaderPart/FooterPart, the ImagePart
-        // and its rel must be attached to that host part — otherwise the r:embed in headerN.xml
-        // points at a rel only present in document.xml.rels and Word reports a broken link.
-        OpenXmlPart imgHostPart = mainPart;
-        var imgHeaderAncestor = parent as Header ?? parent.Ancestors<Header>().FirstOrDefault();
-        if (imgHeaderAncestor != null)
-        {
-            var hp = mainPart.HeaderParts.FirstOrDefault(p => ReferenceEquals(p.Header, imgHeaderAncestor));
-            if (hp != null) imgHostPart = hp;
-        }
-        else
-        {
-            var imgFooterAncestor = parent as Footer ?? parent.Ancestors<Footer>().FirstOrDefault();
-            if (imgFooterAncestor != null)
-            {
-                var fp = mainPart.FooterParts.FirstOrDefault(p => ReferenceEquals(p.Footer, imgFooterAncestor));
-                if (fp != null) imgHostPart = fp;
-            }
-        }
+        // BUG-R14A: route through ResolveHostPart so the ImagePart and its
+        // r:embed relationship land on whatever part actually holds the
+        // <w:drawing> — header/footer AND footnote/endnote/comment. OOXML
+        // resolves r:embed against the rels of the part containing the
+        // drawing, so a picture added into a footnote/endnote/comment body
+        // must register its image rel on word/_rels/footnotes.xml.rels (etc.),
+        // not document.xml.rels — otherwise the blip dangles and validation
+        // fails ([Semantic] r:embed does not exist). Previously this path did
+        // its own Header/Footer-only resolution and defaulted footnote/endnote/
+        // comment to MainDocumentPart. Mirrors the comment-hyperlink-rel fix
+        // (BUG-R13B(BUG2)) that added the comments branch to ResolveHostPart.
+        OpenXmlPart imgHostPart = ResolveHostPart(parent);
 
-        // AddImagePart is defined on each concrete part type, not on OpenXmlPart base —
-        // dispatch by runtime type so the rel lands on the correct part.
+        // AddImagePart is a generic extension on parts implementing
+        // ISupportedRelationship<…, ImagePart> (MainDocument / Header / Footer /
+        // Footnotes / Endnotes / Comments). Dispatch by runtime type so the
+        // rel lands on the correct part.
         ImagePart AddImg(PartTypeInfo t) => imgHostPart switch
         {
             MainDocumentPart mdp => mdp.AddImagePart(t),
             HeaderPart hp => hp.AddImagePart(t),
             FooterPart fp => fp.AddImagePart(t),
+            FootnotesPart fnp => fnp.AddImagePart(t),
+            EndnotesPart enp => enp.AddImagePart(t),
+            WordprocessingCommentsPart cp => cp.AddImagePart(t),
             _ => throw new InvalidOperationException(
                 $"Host part type {imgHostPart.GetType().Name} does not support image parts"),
         };

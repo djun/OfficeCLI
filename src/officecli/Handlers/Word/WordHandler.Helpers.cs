@@ -36,30 +36,34 @@ public partial class WordHandler
     private OpenXmlPart ResolveHostPart(OpenXmlElement element)
     {
         var main = _doc.MainDocumentPart!;
-        // Walk to the part-root element (Header/Footer/Footnotes/Endnotes/Comments/Document)
-        var hdr = element.Ancestors<Header>().FirstOrDefault();
+        // Walk to the part-root element (Header/Footer/Footnotes/Endnotes/Comments/Document).
+        // BUG-R14A: use Self-or-ancestor — `element` may itself BE the part-root
+        // (e.g. a picture appended directly to /header[1] passes the Header as
+        // `element`), in which case Ancestors<Header>() would miss it and we'd
+        // wrongly fall through to MainDocumentPart.
+        var hdr = element as Header ?? element.Ancestors<Header>().FirstOrDefault();
         if (hdr != null)
         {
             var hp = main.HeaderParts.FirstOrDefault(p => ReferenceEquals(p.Header, hdr));
             if (hp != null) return hp;
         }
-        var ftr = element.Ancestors<Footer>().FirstOrDefault();
+        var ftr = element as Footer ?? element.Ancestors<Footer>().FirstOrDefault();
         if (ftr != null)
         {
             var fp = main.FooterParts.FirstOrDefault(p => ReferenceEquals(p.Footer, ftr));
             if (fp != null) return fp;
         }
         // Footnote/Endnote: parts live on MainDocumentPart.FootnotesPart / EndnotesPart
-        if (element.Ancestors<Footnote>().Any() && main.FootnotesPart != null)
+        if ((element is Footnote || element.Ancestors<Footnote>().Any()) && main.FootnotesPart != null)
             return main.FootnotesPart;
-        if (element.Ancestors<Endnote>().Any() && main.EndnotesPart != null)
+        if ((element is Endnote || element.Ancestors<Endnote>().Any()) && main.EndnotesPart != null)
             return main.EndnotesPart;
         // BUG-R13B(BUG2): a hyperlink added into a comment body must register its
         // external relationship on the comments part (word/_rels/comments.xml.rels),
         // not document.xml.rels — otherwise the w:hyperlink r:id living in
         // word/comments.xml dangles and the document fails validation. Mirrors the
         // footnote/endnote host-part resolution above.
-        if (element.Ancestors<Comment>().Any() && main.WordprocessingCommentsPart != null)
+        if ((element is Comment || element.Ancestors<Comment>().Any()) && main.WordprocessingCommentsPart != null)
             return main.WordprocessingCommentsPart;
         return main;
     }
