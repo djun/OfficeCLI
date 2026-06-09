@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Runtime.InteropServices;
@@ -179,6 +180,26 @@ internal static class UpdateChecker
             using (var fileStream = File.Create(partialPath))
             {
                 stream.CopyTo(fileStream);
+            }
+
+            // Integrity gate: verify the SHA256 of the downloaded asset against
+            // the release's SHA256SUMS BEFORE running it. This is the same file
+            // and verification install.sh performs; the self-updater previously
+            // skipped it and trusted magic-bytes + `--version` alone, which means
+            // an unauthenticated binary was executed during RunVersionVerify.
+            // The SHA256SUMS lives at the same version-pinned (immutable) path as
+            // the asset, so a corrupted/truncated CDN response or partial poison
+            // is rejected. (A fully compromised mirror can still serve a matching
+            // pair — defeating that needs a signature against a pinned key, which
+            // is a separate, larger change.) Missing/unparseable/mismatched →
+            // hard-fail: delete the partial and retry on the next daily check.
+            // Every current release ships SHA256SUMS, so this never blocks a
+            // legitimate update.
+            var checksumsUrl = $"{resolvedBase}/releases/download/v{latestVersion}/SHA256SUMS";
+            if (!VerifyChecksum(partialPath, assetName, checksumsUrl, downloadClient))
+            {
+                try { File.Delete(partialPath); } catch { }
+                return;
             }
 
             // Verify downloaded binary: magic bytes + smoke test
@@ -562,6 +583,64 @@ internal static class UpdateChecker
         var ua = $"OfficeCLI/{currentVersion}";
         if (IsInContainer()) ua += " (container)";
         client.DefaultRequestHeaders.Add("User-Agent", ua);
+    }
+
+    /// <summary>
+    /// Verify the SHA256 of the downloaded asset against the release's
+    /// <c>SHA256SUMS</c> manifest. Returns true only when the manifest is
+    /// fetched, the asset's line is present, and the hash matches exactly.
+    /// Any failure (network, missing line, mismatch) returns false so the
+    /// caller discards the download — never executes an unverified binary.
+    /// Mirrors the verification install.sh performs at install time.
+    /// </summary>
+    private static bool VerifyChecksum(string filePath, string assetName, string checksumsUrl, HttpClient client)
+    {
+        try
+        {
+            string manifest;
+            using (var resp = client.GetAsync(checksumsUrl).GetAwaiter().GetResult())
+            {
+                if (!resp.IsSuccessStatusCode) return false;
+                manifest = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            }
+            return MatchChecksumManifest(manifest, assetName, filePath);
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Pure (network-free) core of <see cref="VerifyChecksum"/>: given the text
+    /// of a <c>SHA256SUMS</c> manifest, return true iff it lists
+    /// <paramref name="assetName"/> and that hash matches the SHA256 of the file
+    /// at <paramref name="filePath"/>. Split out so the matching logic is unit
+    /// testable without an HTTP server.
+    /// </summary>
+    internal static bool MatchChecksumManifest(string manifest, string assetName, string filePath)
+    {
+        try
+        {
+            // SHA256SUMS lines are "<hex>  <filename>". Match the filename
+            // column exactly (not a substring) so e.g. "officecli-win-arm64"
+            // can't be satisfied by the "officecli-win-arm64.exe" line.
+            string? expected = null;
+            foreach (var line in manifest.Split('\n'))
+            {
+                var parts = line.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2 && string.Equals(parts[1], assetName, StringComparison.Ordinal))
+                {
+                    expected = parts[0];
+                    break;
+                }
+            }
+            if (string.IsNullOrEmpty(expected)) return false;
+
+            string actual;
+            using (var fs = File.OpenRead(filePath))
+                actual = Convert.ToHexString(SHA256.HashData(fs));
+
+            return string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
     }
 
     /// <summary>
