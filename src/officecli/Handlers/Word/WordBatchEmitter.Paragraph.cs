@@ -260,6 +260,19 @@ public static partial class WordBatchEmitter
         // BUG-DUMP4-06: emit inline SdtRun children before the runs loop.
         foreach (var sdt in inlineSdts)
         {
+            // BUG-R12A(BUG1): an inline/run-level <w:sdt> whose content carries
+            // more than one run OR any run-level rPr (bold/color/size/…) cannot
+            // round-trip through the flat `add sdt text=` path — AddSdt seeds a
+            // single unformatted run from `text`, so "FIRSTSECOND" comes back as
+            // one plain run and the bold+red is lost. Mirror the R11 block-SDT
+            // fix: raw-set the <w:sdt> verbatim into the just-emitted host
+            // paragraph (a run-level SDT has no inner <w:p>, so the rich-BLOCK
+            // detector doesn't apply; use a run-level richness check). Restricted
+            // to /body hosts + no external rels (same constraints as the inline
+            // textbox raw-set) so dangling r:id/r:embed can't be produced; other
+            // hosts fall back to the flat text emit.
+            if (parentPath == "/body" && TryEmitRichInlineSdt(word, sdt, items, ctx))
+                continue;
             var sdtProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var key in new[] { "type", "alias", "tag", "items", "format" })
             {
@@ -958,6 +971,43 @@ public static partial class WordBatchEmitter
             && nfs is bool nfsB && nfsB)
         {
             fieldProps["noSeparator"] = "true";
+        }
+        // BUG-R12A(BUG1): forward the captured cached-result-run formatting
+        // (stashed under `_resultFmt.` by CollapseFieldChains) onto the `add
+        // field` prop bag. AddField applies font/size/bold/color uniformly to
+        // every rebuilt field run, so a bold/red/20pt PAGE field round-trips
+        // styled instead of as a plain "1". Keys AddField can't express
+        // (italic/underline/strike) are surfaced as a warning — the field still
+        // round-trips (instruction + cached value preserved), only the extra
+        // emphasis is lost; raw-set field passthrough is a backlog item.
+        if (fieldProps != null)
+        {
+            var unsupportedFmt = new List<string>();
+            foreach (var (k, v) in run.Format)
+            {
+                if (v == null) continue;
+                if (!k.StartsWith("_resultFmt.", StringComparison.OrdinalIgnoreCase)) continue;
+                var bare = k["_resultFmt.".Length..];
+                if (!FieldAddSupportedFormatKeys.Contains(bare))
+                {
+                    unsupportedFmt.Add(bare);
+                    continue;
+                }
+                // Map font.latin/font.ascii/font.hAnsi onto AddField's `font`.
+                var target = bare.StartsWith("font.", StringComparison.OrdinalIgnoreCase) ? "font" : bare;
+                if (!fieldProps.ContainsKey(target))
+                {
+                    var s = v switch { bool b => b ? "true" : "false", _ => v.ToString() ?? "" };
+                    if (s.Length > 0) fieldProps[target] = s;
+                }
+            }
+            if (unsupportedFmt.Count > 0 && ctx != null)
+            {
+                ctx.Warnings.Add(new DocxUnsupportedWarning(
+                    Element: "field.resultFormat",
+                    Path: run.Path,
+                    Reason: $"cached field-result run formatting ({string.Join(", ", unsupportedFmt)}) cannot be expressed via add field; field instruction + bold/color/size/font preserved, extra emphasis dropped"));
+            }
         }
         var fldParent = paraTargetPath;
         string? candidateHlParent = null;
@@ -1677,6 +1727,21 @@ public static partial class WordBatchEmitter
 
     private static void EmitPlainOrHyperlinkRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx = null)
     {
+        // BUG-R12A(BUG1): a hyperlink wrapper with >1 run or any per-run rPr was
+        // stashed by CoalesceHyperlinkRuns with its original runs in Children.
+        // Emit the wrapper carrying the FIRST run's text + rPr, then one
+        // structured `add run` per remaining run targeting the hyperlink path so
+        // each run's bold/color/size/font survives round-trip (the flat
+        // `add hyperlink text=` path would flatten them into one unformatted run).
+        // Mirrors the R9 comment-body structured-add-run fix; raw-set is not an
+        // option here because the <w:hyperlink> r:id relationship can't be
+        // recreated by verbatim XML injection.
+        if (run.Format.TryGetValue("_hlStructured", out var hlsObj) && hlsObj is bool hlsB && hlsB
+            && run.Children is { Count: > 0 } hlRuns)
+        {
+            EmitStructuredHyperlink(hlRuns, paraTargetPath, items, ctx);
+            return;
+        }
         var rProps = FilterEmittableProps(run.Format);
         if (!string.IsNullOrEmpty(run.Text))
             rProps["text"] = run.Text!;
@@ -1747,6 +1812,144 @@ public static partial class WordBatchEmitter
         });
     }
 
+    // BUG-R12A(BUG1): emit a hyperlink wrapper + one structured `add run` per
+    // wrapped run so per-run rPr survives. The first run materializes the
+    // wrapper (AddHyperlink seeds the wrapper's first run from `text` + rPr
+    // props); subsequent runs are appended via `add r` targeting the
+    // hyperlink[K] path (verified working — AddRun accepts a hyperlink parent
+    // and preserves bold/color/size/font). hlIndex is the 1-based ordinal of
+    // this hyperlink among the rows already emitted under the host paragraph.
+    private static void EmitStructuredHyperlink(List<DocumentNode> hlRuns, string paraTargetPath,
+                                                List<BatchItem> items, BodyEmitContext? ctx)
+    {
+        // Build the wrapper add from the first run's props (url/anchor/tooltip/…
+        // + the run's own rPr). Reuse the existing flat-emit logic by routing
+        // the first run through EmitPlainOrHyperlinkRun with the structured flag
+        // cleared, so the theme-default scrubbing + bare-wrapper fallback stay
+        // identical.
+        var first = hlRuns[0];
+        var firstClone = new DocumentNode
+        {
+            Path = first.Path,
+            Type = first.Type,
+            Text = first.Text,
+            Format = new Dictionary<string, object?>(first.Format, StringComparer.OrdinalIgnoreCase),
+        };
+        firstClone.Format.Remove("_hlStructured");
+        int hlBefore = items.Count(it => it.Type == "hyperlink"
+            && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
+        EmitPlainOrHyperlinkRun(firstClone, paraTargetPath, items, ctx);
+        int hlAfter = items.Count(it => it.Type == "hyperlink"
+            && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
+        // If the first run did not materialize a hyperlink row (bare wrapper with
+        // no url/anchor/tooltip → AddHyperlink can't represent it, so it fell back
+        // to a plain run), the wrapper is gone — emit the remaining runs as plain
+        // runs too so their text/rPr still survive.
+        if (hlAfter == hlBefore)
+        {
+            for (int k = 1; k < hlRuns.Count; k++)
+            {
+                var clone = new DocumentNode
+                {
+                    Path = hlRuns[k].Path,
+                    Type = hlRuns[k].Type,
+                    Text = hlRuns[k].Text,
+                    Format = new Dictionary<string, object?>(hlRuns[k].Format, StringComparer.OrdinalIgnoreCase),
+                };
+                clone.Format.Remove("_hlStructured");
+                clone.Format.Remove("url");
+                clone.Format.Remove("anchor");
+                EmitPlainOrHyperlinkRun(clone, paraTargetPath, items, ctx);
+            }
+            return;
+        }
+        var hlPath = $"{paraTargetPath}/hyperlink[{hlAfter}]";
+        for (int k = 1; k < hlRuns.Count; k++)
+        {
+            var rProps = FilterEmittableProps(hlRuns[k].Format);
+            // The hyperlink-wrapper keys belong to the <w:hyperlink>, not its
+            // child runs — strip them so `add r` doesn't choke / re-wrap.
+            foreach (var wk in HyperlinkWrapperOnlyKeys) rProps.Remove(wk);
+            // Drop the theme-default echoes Get stamps on every hyperlink run;
+            // the wrapper's own run already carries the real Hyperlink style.
+            if (rProps.TryGetValue("color", out var c)
+                && string.Equals(c, "hyperlink", StringComparison.OrdinalIgnoreCase))
+                rProps.Remove("color");
+            if (rProps.TryGetValue("underline", out var u)
+                && string.Equals(u, "single", StringComparison.OrdinalIgnoreCase))
+                rProps.Remove("underline");
+            if (!string.IsNullOrEmpty(hlRuns[k].Text))
+                rProps["text"] = hlRuns[k].Text!;
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = hlPath,
+                Type = "r",
+                Props = rProps.Count > 0 ? rProps : null
+            });
+        }
+    }
+
+    // BUG-R12A(BUG1): raw-set a rich inline (run-level) <w:sdt> into the host
+    // paragraph so its per-run formatting survives. Returns true when it emitted
+    // a raw-set (or a warning + fall-through is desired); false when the SDT is
+    // simple enough for the flat `add sdt text=` fast path. The host paragraph
+    // was just added by EmitParagraph, so it is the last <w:p> in the body at
+    // replay time — the same last()-relative attach the inline-textbox raw-set
+    // uses.
+    private static bool TryEmitRichInlineSdt(WordHandler word, DocumentNode sdt,
+                                             List<BatchItem> items, BodyEmitContext? ctx)
+    {
+        var rawXml = word.RawElementXml(sdt.Path);
+        if (string.IsNullOrEmpty(rawXml) || !IsRichInlineSdt(rawXml!)) return false;
+        // External relationship references (hyperlink r:id, image r:embed/r:link)
+        // would dangle in the blank target — raw injection does not recreate the
+        // matching rels. Fall back to the flat text emit and surface the loss.
+        if (HasExternalRelRef(rawXml!))
+        {
+            ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                Element: "sdt.richContent",
+                Path: sdt.Path,
+                Reason: "inline content control with formatted runs AND external relationship references (hyperlinks/images) flattened to text on dump"));
+            return false;
+        }
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = "/document",
+            Xpath = "/w:document/w:body/w:p[last()]",
+            Action = "append",
+            Xml = rawXml
+        });
+        return true;
+    }
+
+    // A run-level <w:sdt> is "rich" when its sdtContent carries formatting the
+    // text-only typed emit can't reproduce: more than one run, any run-level
+    // <w:rPr>, a hyperlink/field, or an intra-run break/tab. Single plain run →
+    // flat `add sdt text=` stays lossless. (Distinct from IsRichBlockSdt, which
+    // keys on inner <w:p> count — a run-level SDT has no inner paragraph.)
+    private static bool IsRichInlineSdt(string sdtXml)
+    {
+        // More than one content run.
+        if (System.Text.RegularExpressions.Regex.Matches(sdtXml, "<w:r[ >]").Count > 1)
+            return true;
+        // Any run-level run properties (bold/color/size/font/…) inside content.
+        if (sdtXml.Contains("<w:rPr", StringComparison.Ordinal)
+            // exclude sdtPr/endPr-only rPr false positives: those live in
+            // <w:sdtPr>/<w:sdtEndPr><w:rPr>; a content rPr sits under <w:r>.
+            && System.Text.RegularExpressions.Regex.IsMatch(sdtXml, "<w:r[ >].*?<w:rPr"))
+            return true;
+        return sdtXml.Contains("<w:hyperlink", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:fldChar", StringComparison.Ordinal)
+            || sdtXml.Contains("w:instrText", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:fldSimple", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:drawing", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:br", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:tab", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:cr", StringComparison.Ordinal);
+    }
+
     // Collapse OOXML complex field chains (fldChar(begin) + instrText + …
     // + fldChar(end)) into a single synthetic "field" DocumentNode with
     // Format["instruction"] (raw code) and Text (cached display value).
@@ -1789,6 +1992,38 @@ public static partial class WordBatchEmitter
         return emittedHls >= kIdx ? rebased : paraTargetPath;
     }
 
+    // BUG-R12A(BUG1): hyperlink-wrapper keys + the theme defaults AddHyperlink
+    // re-applies on its own. A run carrying ONLY these keys has no per-run
+    // formatting worth preserving structurally, so the flat `add hyperlink
+    // text=` fast path stays lossless. Any OTHER key (bold, color≠hyperlink,
+    // size, font, …) means the run's rPr must survive — route to structured emit.
+    private static readonly HashSet<string> HyperlinkWrapperOnlyKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "url", "anchor", "tooltip", "tgtFrame", "tgtframe", "history",
+        "docLocation", "doclocation", "isHyperlink", "_hyperlinkParent",
+        "rStyle", "rstyle",
+    };
+
+    // True when a hyperlink-wrapped run carries run-level formatting (rPr) that
+    // AddHyperlink's flat `text=` path cannot reproduce. The theme-default
+    // color=hyperlink / underline=single echoes that Get stamps back are NOT
+    // real formatting (AddHyperlink re-applies them), so they don't count.
+    private static bool HyperlinkRunHasRunFormatting(DocumentNode run)
+    {
+        var props = FilterEmittableProps(run.Format);
+        foreach (var (k, v) in props)
+        {
+            if (HyperlinkWrapperOnlyKeys.Contains(k)) continue;
+            if (string.Equals(k, "text", StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.Equals(k, "color", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(v, "hyperlink", StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.Equals(k, "underline", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(v, "single", StringComparison.OrdinalIgnoreCase)) continue;
+            return true;
+        }
+        return false;
+    }
+
     private static List<DocumentNode> CoalesceHyperlinkRuns(List<DocumentNode> runs)
     {
         var result = new List<DocumentNode>(runs.Count);
@@ -1824,6 +2059,7 @@ public static partial class WordBatchEmitter
             // the same hyperlink-wrapper path. Differing `_hyperlinkParent`
             // values mark a hyperlink boundary even when URL/anchor match.
             int j = i + 1;
+            var group = new List<DocumentNode> { run };
             var sb = new System.Text.StringBuilder(run.Text ?? "");
             while (j < runs.Count)
             {
@@ -1838,25 +2074,31 @@ public static partial class WordBatchEmitter
                 if (!string.Equals(nUrl, url, StringComparison.Ordinal)) break;
                 if (!string.Equals(nAnchor, anchor, StringComparison.Ordinal)) break;
                 if (!string.Equals(nHlParent, hlParent, StringComparison.Ordinal)) break;
+                group.Add(next);
                 sb.Append(next.Text ?? "");
                 j++;
             }
-            if (j == i + 1)
+            // BUG-R12A(BUG1): the flat `add hyperlink text=Part1Part2` fast path
+            // drops every per-run rPr on the wrapped runs (a 2nd bold+red run
+            // round-trips as plain text). Keep the fast path ONLY for the lossless
+            // case: a single run with no run-level formatting. Otherwise stash the
+            // original group runs in Children and flag the node so
+            // EmitPlainOrHyperlinkRun emits the wrapper + structured `add run`
+            // rows (mirrors the R9 comment-body fix), preserving each run's rPr.
+            bool needsStructured = group.Count > 1 || group.Any(HyperlinkRunHasRunFormatting);
+            var merged = new DocumentNode
             {
-                // No coalescing — emit the single run as-is.
-                result.Add(run);
-            }
-            else
+                Path = run.Path,
+                Type = run.Type,
+                Text = sb.ToString(),
+                Format = new Dictionary<string, object?>(run.Format, StringComparer.OrdinalIgnoreCase),
+            };
+            if (needsStructured)
             {
-                var merged = new DocumentNode
-                {
-                    Path = run.Path,
-                    Type = run.Type,
-                    Text = sb.ToString(),
-                    Format = new Dictionary<string, object?>(run.Format, StringComparer.OrdinalIgnoreCase),
-                };
-                result.Add(merged);
+                merged.Format["_hlStructured"] = true;
+                merged.Children = group;
             }
+            result.Add(merged);
             i = j;
         }
         return result;

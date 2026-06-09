@@ -26,6 +26,10 @@ public static partial class WordBatchEmitter
         // propagated to synthetic field nodes) by Navigation. Consumed by the
         // field-emit branch only; never replayed as a Set/Add property.
         "_hyperlinkParent",
+        // BUG-R12A(BUG1): synthetic flag set by CoalesceHyperlinkRuns to route a
+        // multi-run / formatted hyperlink group through structured emit. Consumed
+        // by EmitPlainOrHyperlinkRun only; never replayed as an Add/Set property.
+        "_hlStructured",
         // BUG-DUMP26-01: Navigation stamps this flag when numId/numLevel come
         // from ResolveNumPrFromStyle (paragraph inherits numbering through its
         // style). EmitParagraph consumes the flag to drop the inherited

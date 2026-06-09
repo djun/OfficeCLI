@@ -8,6 +8,37 @@ namespace OfficeCli.Handlers;
 public static partial class WordBatchEmitter
 {
 
+    // BUG-R12A(BUG1): run-level formatting keys a cached field-result run may
+    // carry that are worth preserving on round-trip. AddField can apply
+    // font/size/bold/color uniformly to the rebuilt field runs; italic /
+    // underline are captured too so the raw-set fallback (when AddField can't
+    // express them) can be chosen. Keep narrow — paragraph-level/derived keys
+    // (effective.*, alignment, …) are NOT result-run formatting.
+    private static readonly HashSet<string> FieldResultFormatKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "bold", "italic", "color", "size", "font", "font.latin", "font.ascii", "font.hAnsi",
+        "underline", "strike",
+    };
+
+    // AddField's --prop vocabulary for field-run formatting. A captured result
+    // rPr made up exclusively of these keys round-trips losslessly through the
+    // typed `add field` path; anything else (italic/underline/strike/…) means
+    // the field needs a raw-set passthrough to keep full fidelity.
+    private static readonly HashSet<string> FieldAddSupportedFormatKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "bold", "color", "size", "font", "font.latin", "font.ascii", "font.hAnsi",
+    };
+
+    private static bool FieldRunHasFormatting(DocumentNode run)
+    {
+        foreach (var (k, v) in run.Format)
+        {
+            if (v == null) continue;
+            if (FieldResultFormatKeys.Contains(k)) return true;
+        }
+        return false;
+    }
+
     private static List<DocumentNode> CollapseFieldChains(List<DocumentNode> children)
     {
         var result = new List<DocumentNode>();
@@ -37,6 +68,14 @@ public static partial class WordBatchEmitter
             bool sawNestedField = false;
             int end = -1;
             int depth = 1;
+            // BUG-R12A(BUG1): capture run-level formatting on the cached result
+            // run(s). The flat `add field` path dropped it, so a bold/red/20pt
+            // PAGE field round-tripped as plain "1". AddField applies uniform
+            // font/size/bold/color to all field runs, so carrying the result
+            // run's rPr forward restores the styled field on replay. (Distinct
+            // result-run formatting per segment is rare; we capture the first
+            // formatted display run, matching AddField's single-rPr model.)
+            DocumentNode? firstFormattedResult = null;
             for (int j = i + 1; j < children.Count; j++)
             {
                 var k = children[j];
@@ -85,11 +124,15 @@ public static partial class WordBatchEmitter
                 else if ((k.Type == "run" || k.Type == "r") && depth == 1)
                 {
                     // Cached display segments after fldChar(separate). Concatenate
-                    // their text — formatting on the display run is dropped (the
-                    // field renders fresh on replay). At depth>1 the run belongs
-                    // to the nested field's cached display and is consumed by
-                    // its own collapse pass after the outer field is rolled back.
+                    // their text. At depth>1 the run belongs to the nested
+                    // field's cached display and is consumed by its own collapse
+                    // pass after the outer field is rolled back.
                     if (!string.IsNullOrEmpty(k.Text)) display += k.Text;
+                    // BUG-R12A(BUG1): remember the first display run that carries
+                    // real run-level formatting so TryEmitFieldRun can forward it
+                    // to AddField (which applies it to the rebuilt field runs).
+                    if (sawSeparate && firstFormattedResult == null && FieldRunHasFormatting(k))
+                        firstFormattedResult = k;
                 }
             }
             if (end < 0)
@@ -198,6 +241,20 @@ public static partial class WordBatchEmitter
             // phantom `text="1"` key that the source never had.
             if (!sawSeparate)
                 synth.Format["_noFieldSeparator"] = true;
+            // BUG-R12A(BUG1): carry the cached result run's run-level formatting
+            // (bold/italic/color/size/font/font.latin) under a `_resultFmt.`
+            // prefix so TryEmitFieldRun can map AddField-supported keys onto the
+            // `add field` prop bag. Forwarded verbatim — TryEmitFieldRun decides
+            // which keys AddField can honour and which need a raw-set fallback.
+            if (firstFormattedResult != null)
+            {
+                foreach (var (fk, fv) in firstFormattedResult.Format)
+                {
+                    if (fv == null) continue;
+                    if (FieldResultFormatKeys.Contains(fk))
+                        synth.Format["_resultFmt." + fk] = fv;
+                }
+            }
             // BUG-DUMP18-02: propagate hyperlink-scope hint from the begin
             // run so the field-emit branch can target the hyperlink parent
             // on replay.

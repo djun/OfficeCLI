@@ -1087,15 +1087,33 @@ public static partial class WordBatchEmitter
     }
 
     // A block SDT is "rich" when its content carries structure the text-only
-    // typed emit cannot reproduce: more than one paragraph, or any hyperlink /
-    // complex field / table / drawing. Such SDTs round-trip verbatim via
-    // raw-set; everything else (single text run, form-control pickers) stays on
-    // the introspectable typed `add sdt` path.
+    // typed emit cannot reproduce: more than one paragraph, more than one run,
+    // any run-level rPr, or any hyperlink / complex field / table / drawing /
+    // break / tab. Such SDTs round-trip verbatim via raw-set; everything else
+    // (single plain text run, form-control pickers) stays on the introspectable
+    // typed `add sdt` path.
     private static bool IsRichBlockSdt(string sdtXml)
     {
         // <w:p> / <w:p attr...> — but not <w:pPr>, <w:pict>, <w:proofErr> (the
         // char after "w:p" must be a space or '>').
         if (System.Text.RegularExpressions.Regex.Matches(sdtXml, "<w:p[ >]").Count > 1)
+            return true;
+        // BUG-R12A(BUG1b): a single-paragraph block SDT whose content carries
+        // multiple runs or any run-level formatting (bold/color/size/font/…)
+        // cannot round-trip through the flat `add sdt text=` path — AddSdt seeds
+        // one unformatted run from the concatenated text, so "FIRST"+"SECOND"
+        // (2nd bold/red) comes back as a single plain "FIRSTSECOND" run. The
+        // run-level richness check here was previously only applied to inline
+        // (run-level) SDTs (IsRichInlineSdt); body/cell/header/footer BLOCK
+        // SDTs flattened. Raw-set the SDT verbatim (no rels) so per-run rPr
+        // survives. Restrict the run-count probe to CONTENT runs by counting
+        // <w:r> opens — sdtPr/sdtEndPr carry no <w:r>, so no false positives.
+        if (System.Text.RegularExpressions.Regex.Matches(sdtXml, "<w:r[ >]").Count > 1)
+            return true;
+        // Any run-level rPr inside a content run (the rPr sits under <w:r>; a
+        // pPr's <w:rPr> paragraph-mark formatting is matched too, which is also
+        // worth preserving verbatim and the typed path can't express it).
+        if (sdtXml.Contains("<w:rPr", StringComparison.Ordinal))
             return true;
         return sdtXml.Contains("<w:hyperlink", StringComparison.Ordinal)
             || sdtXml.Contains("<w:fldChar", StringComparison.Ordinal)
