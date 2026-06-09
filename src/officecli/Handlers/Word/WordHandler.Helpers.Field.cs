@@ -418,6 +418,86 @@ public partial class WordHandler
         }
     }
 
+    /// <summary>
+    /// Build a map from every <c>w:moveFrom</c>/<c>w:moveTo</c> run's own
+    /// <c>w:id</c> to a single SHARED pairing id, grouping a moveFrom and its
+    /// corresponding moveTo by the <c>w:name</c> their bracketing range markers
+    /// share (<c>moveFromRangeStart</c>/<c>moveToRangeStart</c> carry the same
+    /// <c>w:name</c> — ECMA-376 §17.13.5.20-23). In the source XML the moveFrom
+    /// run and the moveTo run usually have DIFFERENT <c>w:id</c> values
+    /// (e.g. 4 and 6); the pairing lives only on the range-marker name. The CLI
+    /// representation of a move pair is instead a SHARED <c>revision.id</c> on
+    /// both halves (so <see cref="WrapRunAsMoveFrom"/>'s <c>Move_{id}</c> marker
+    /// name matches across the pair). The dump emitter consults this map to
+    /// rewrite both halves to one id, restoring the four range markers + shared
+    /// name on dump→batch replay. Returns an empty map when there are no
+    /// bracketed move pairs.
+    /// </summary>
+    internal Dictionary<string, string> BuildMovePairIdMap()
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var mainPart = _doc.MainDocumentPart;
+        if (mainPart == null) return result;
+
+        // name → list of move-run ids bracketed by a range with that name.
+        var byName = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var root in EnumerateRevisionRoots(mainPart))
+        {
+            // Active range-marker names keyed by their range id (a
+            // moveFrom and moveTo range nest independently but share the
+            // same w:name; track the set of names currently open).
+            var openNames = new List<string>();
+            foreach (var el in root.Descendants())
+            {
+                switch (el)
+                {
+                    case MoveFromRangeStart mfs when !string.IsNullOrEmpty(mfs.Name?.Value):
+                        openNames.Add(mfs.Name!.Value!);
+                        break;
+                    case MoveToRangeStart mts when !string.IsNullOrEmpty(mts.Name?.Value):
+                        openNames.Add(mts.Name!.Value!);
+                        break;
+                    case MoveFromRangeEnd:
+                    case MoveToRangeEnd:
+                        // Close the most recently opened range. The range
+                        // marker End carries the range id (not the name), so
+                        // pop the latest open name — move ranges don't
+                        // interleave across the same name in practice.
+                        if (openNames.Count > 0) openNames.RemoveAt(openNames.Count - 1);
+                        break;
+                    case MoveFromRun mf when openNames.Count > 0 && !string.IsNullOrEmpty(mf.Id?.Value):
+                        AddMoveRunId(byName, openNames[^1], mf.Id!.Value!);
+                        break;
+                    case MoveToRun mt when openNames.Count > 0 && !string.IsNullOrEmpty(mt.Id?.Value):
+                        AddMoveRunId(byName, openNames[^1], mt.Id!.Value!);
+                        break;
+                }
+            }
+        }
+
+        foreach (var (_, ids) in byName)
+        {
+            if (ids.Count == 0) continue;
+            // Pick the lexicographically-smallest numeric id as the shared
+            // pairing id (deterministic; mirrors the "lowest free value"
+            // convention used elsewhere for id reassignment).
+            var shared = ids
+                .OrderBy(v => long.TryParse(v, out var n) ? n : long.MaxValue)
+                .ThenBy(v => v, StringComparer.Ordinal)
+                .First();
+            foreach (var id in ids) result[id] = shared;
+        }
+        return result;
+    }
+
+    private static void AddMoveRunId(Dictionary<string, List<string>> byName, string name, string id)
+    {
+        if (!byName.TryGetValue(name, out var list))
+            byName[name] = list = new List<string>();
+        if (!list.Contains(id, StringComparer.OrdinalIgnoreCase)) list.Add(id);
+    }
+
     // ==================== SDT IDs (content controls) ====================
 
     /// <summary>

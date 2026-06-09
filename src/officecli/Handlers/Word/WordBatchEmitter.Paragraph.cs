@@ -1822,6 +1822,20 @@ public static partial class WordBatchEmitter
         var rProps = FilterEmittableProps(run.Format);
         if (!string.IsNullOrEmpty(run.Text))
             rProps["text"] = run.Text!;
+        // CONSISTENCY(move-range-markers): a moveFrom/moveTo run's own w:id in
+        // the source usually differs from its paired half (the pairing lives on
+        // the bracketing range markers' shared w:name, not on the run id). Rewrite
+        // both halves to one SHARED revision.id so AddRun's WrapRunAsMove* helpers
+        // synthesize Move_{id} range markers that pair the moveFrom to its moveTo.
+        if (ctx is { MovePairIds.Count: > 0 }
+            && rProps.TryGetValue("revision.type", out var mvType)
+            && (mvType.Equals("moveFrom", StringComparison.OrdinalIgnoreCase)
+                || mvType.Equals("moveTo", StringComparison.OrdinalIgnoreCase))
+            && rProps.TryGetValue("revision.id", out var mvId)
+            && ctx.MovePairIds.TryGetValue(mvId, out var sharedId))
+        {
+            rProps["revision.id"] = sharedId;
+        }
         // revision.beforeLost — see EmitParagraph counterpart. Strip from
         // the emitted props (AddRun would flag it UNSUPPORTED) and surface
         // a dump warning so the lost rPrChange snapshot is visible to the

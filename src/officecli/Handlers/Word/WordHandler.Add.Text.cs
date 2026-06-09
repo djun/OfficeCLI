@@ -2189,35 +2189,35 @@ public partial class WordHandler
                     + "moveFrom and moveTo must share the same id to be recognised as a "
                     + "pair by Word. Pass --prop revision.id=<n> on both sides.");
 
-            var parentEl = newRun.Parent;
-            if (parentEl != null)
+            // CONSISTENCY(move-range-markers): wrap via the same
+            // WrapRunAsMoveFrom / WrapRunAsMoveTo helpers the `set
+            // --prop revision.type=moveFrom` path uses, so the
+            // moveFrom/moveTo run is BRACKETED by
+            // moveFromRangeStart/End + moveToRangeStart/End carrying
+            // Name="Move_{id}". Previously this Add path emitted a bare
+            // <w:moveFrom>/<w:moveTo> wrapper with no range markers — on
+            // a dump→batch round-trip the four range markers and the
+            // shared w:name pairing were dropped, degrading the move to
+            // an unpaired moveFrom + moveTo that Word's reviewing pane
+            // can't pair (and that Word for Mac may refuse to open with
+            // "Word found unreadable content"). The moveFrom and its
+            // paired moveTo share one revision.id by design (see the
+            // contract above + WordBatchEmitter pairing), so Move_{id}
+            // matches across the two halves. Both wrappers keep <w:t>:
+            // per ECMA-376 §17.3.3.34 w:delText is only valid inside
+            // <w:del>, never inside <w:moveFrom>.
+            if (newRun.Parent != null)
             {
-                OpenXmlElement wrapper = trackChangeKind == "movefrom"
-                    ? new MoveFromRun()
-                    : new MoveToRun();
-                if (!string.IsNullOrEmpty(trackChangeAuthor))
-                {
-                    if (wrapper is MoveFromRun mfA) mfA.Author = trackChangeAuthor;
-                    else if (wrapper is MoveToRun mtA) mtA.Author = trackChangeAuthor;
-                }
-                // BUG-R4F-03: RoundtripKind keeps a …Z date in Utc (see above).
+                // BUG-R4F-03: RoundtripKind keeps a …Z date in Utc.
+                DateTime moveDate = DateTime.UtcNow;
                 if (!string.IsNullOrEmpty(trackChangeDate)
                     && DateTime.TryParse(trackChangeDate, null, System.Globalization.DateTimeStyles.RoundtripKind, out var mvDate))
-                {
-                    if (wrapper is MoveFromRun mfD) mfD.Date = mvDate;
-                    else if (wrapper is MoveToRun mtD) mtD.Date = mvDate;
-                }
-                if (wrapper is MoveFromRun mfI) mfI.Id = trackChangeId;
-                else if (wrapper is MoveToRun mtI) mtI.Id = trackChangeId;
-                // Both moveFrom and moveTo keep w:t. Per ECMA-376 §17.3.3.34,
-                // w:delText is only valid inside <w:del> (never inside
-                // <w:moveFrom>) — Word's strikethrough rendering for moveFrom
-                // content comes from the moveFrom wrapper, not from delText.
-                // Previously we converted t→delText inside moveFrom, which
-                // tripped Word's "found unreadable content" recovery on open
-                // (it re-wraps the orphan delText in a synthetic <w:del>).
-                parentEl.ReplaceChild(wrapper, newRun);
-                wrapper.AppendChild(newRun);
+                    moveDate = mvDate;
+                var moveAuthor = string.IsNullOrEmpty(trackChangeAuthor) ? "OfficeCLI" : trackChangeAuthor!;
+                if (trackChangeKind == "movefrom")
+                    WrapRunAsMoveFrom(newRun, moveAuthor, moveDate, trackChangeId!);
+                else
+                    WrapRunAsMoveTo(newRun, moveAuthor, moveDate, trackChangeId!);
             }
         }
 

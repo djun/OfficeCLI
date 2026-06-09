@@ -691,6 +691,7 @@ public static partial class WordBatchEmitter
             DeferredBookmarks: new List<BatchItem>(),
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             TableOrdinalBox: new int[1],
+            MovePairIds: word.BuildMovePairIdMap(),
             Warnings: warnings ?? new List<DocxUnsupportedWarning>());
         int pIdx = 0, tblIdx = 0;
         bool sawFirstPara = false;

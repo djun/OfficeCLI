@@ -149,6 +149,7 @@ public static partial class WordBatchEmitter
             DeferredBookmarks: new List<BatchItem>(),
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             TableOrdinalBox: new int[1],
+            MovePairIds: word.BuildMovePairIdMap(),
             Warnings: warnings);
 
         if (node.Type == "table")
@@ -436,6 +437,13 @@ public static partial class WordBatchEmitter
         // cell content, N is the stable 1-based `//w:tbl` document-order index
         // the cell-SDT raw-set resolves against at replay time.
         int[] TableOrdinalBox,
+        // CONSISTENCY(move-range-markers): map from each moveFrom/moveTo run's
+        // own w:id to the SHARED pairing id its bracketing range-marker w:name
+        // implies (see WordHandler.BuildMovePairIdMap). EmitPlainOrHyperlinkRun
+        // rewrites a moveFrom/moveTo run's revision.id through this map so both
+        // halves emit one shared id — AddRun then re-brackets each half with
+        // Move_{id} range markers and the moveFrom pairs with its moveTo.
+        Dictionary<string, string> MovePairIds,
         // R10-bug1: collected during the body walk whenever an emit helper
         // identifies content it cannot round-trip through the existing
         // handler vocabulary (OLE runs without a carrier for the embedded
@@ -504,6 +512,7 @@ public static partial class WordBatchEmitter
             DeferredBookmarks: new List<BatchItem>(),
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             TableOrdinalBox: new int[1],
+            MovePairIds: word.BuildMovePairIdMap(),
             Warnings: warnings);
 
         // Cross-paragraph fields (a real cached TOC, an IF/REF whose result
