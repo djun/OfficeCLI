@@ -181,6 +181,7 @@ internal static class RawXmlHelper
 
                 case "insertbefore" or "before":
                     if (xml == null) throw new ArgumentException("--xml is required for insertbefore");
+                    RequireParent(node, "insertbefore");
                     var beforeFragment = ParseFragment(xml, xDoc);
                     foreach (var el in beforeFragment.AsEnumerable().Reverse())
                         node.AddBeforeSelf(el);
@@ -189,6 +190,7 @@ internal static class RawXmlHelper
 
                 case "insertafter" or "after":
                     if (xml == null) throw new ArgumentException("--xml is required for insertafter");
+                    RequireParent(node, "insertafter");
                     var afterFragment = ParseFragment(xml, xDoc);
                     foreach (var el in afterFragment)
                         node.AddAfterSelf(el);
@@ -203,6 +205,7 @@ internal static class RawXmlHelper
                     break;
 
                 case "remove" or "delete":
+                    RequireParent(node, "remove");
                     node.Remove();
                     affected++;
                     break;
@@ -410,6 +413,20 @@ internal static class RawXmlHelper
         ["wp14"] = "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing",
         ["v"] = "urn:schemas-microsoft-com:vml",
     };
+
+    /// <summary>
+    /// Guard actions that need a parent element. An XPath like <c>//*</c> also
+    /// matches the document root, whose <see cref="XElement.Parent"/> is null;
+    /// calling Remove()/AddBeforeSelf()/AddAfterSelf() on it threw a raw
+    /// NullReferenceException. Surface a clear, actionable error instead.
+    /// </summary>
+    private static void RequireParent(XElement node, string action)
+    {
+        if (node.Parent == null)
+            throw new ArgumentException(
+                $"Cannot {action} the document root element <{node.Name.LocalName}>. " +
+                $"Target a child element with a more specific --xpath (the root has no parent).");
+    }
 
     private static List<XElement> ParseFragment(string xml, XDocument contextDoc)
     {

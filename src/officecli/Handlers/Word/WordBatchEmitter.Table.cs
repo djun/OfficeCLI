@@ -11,8 +11,14 @@ public static partial class WordBatchEmitter
     private static void EmitTable(WordHandler word, string sourcePath, int targetIndex,
                                   List<BatchItem> items, BodyEmitContext? ctx = null,
                                   string? parentTablePath = null,
-                                  string containerPath = "/body")
+                                  string containerPath = "/body",
+                                  int depth = 0)
     {
+        // CONSISTENCY(dos-hardening): nested-table emission recurses with no
+        // structural bound; a crafted deeply-nested table would otherwise hang
+        // (or overflow the stack) during `dump`. See DocumentLimits.
+        OfficeCli.Core.DocumentLimits.EnsureDepth(depth);
+
         // BUG-R11A(BUG1): bump the document-order table ordinal BEFORE the
         // empty-table early-return so the count never desyncs from the
         // `(//w:tbl)[N]` selectors used by cell-SDT raw-sets. EmitTable recurses
@@ -437,7 +443,7 @@ public static partial class WordBatchEmitter
                     {
                         nestedTblIdx++;
                         EmitTable(word, cc.Path, nestedTblIdx, items, ctx,
-                                  parentTablePath: cellTargetPath);
+                                  parentTablePath: cellTargetPath, depth: depth + 1);
                     }
                     else if (cc.Type == "sdt" && ctx != null)
                     {

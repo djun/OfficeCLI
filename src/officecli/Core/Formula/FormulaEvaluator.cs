@@ -203,6 +203,15 @@ internal partial class FormulaEvaluator
     private const int MaxSameSheetDepth = 1000;
     private int _sameSheetDepth;
 
+    // CONSISTENCY(dos-hardening): the expression parser is recursive-descent;
+    // every "(" re-enters ParseConcat, so a single formula like =(((…1…)))
+    // nested tens of thousands deep overflows the stack with an UNCATCHABLE
+    // StackOverflowException (process abort), independent of the cross-cell
+    // _sameSheetDepth guard above. Bound the per-formula parse recursion with a
+    // hard cap plus a runtime stack probe; over either, surface a visible
+    // #NUM! instead of crashing.
+    private int _parseDepth;
+
     // Number-format engine hook. TEXT(value, format) must apply Excel format
     // codes (incl. date/time/percent/currency) identically to the cell renderer.
     // That engine (ApplyNumberFormat) lives in the Handlers layer, which Core
@@ -629,12 +638,22 @@ internal partial class FormulaEvaluator
 
     private FormulaResult? ParseConcat(List<Token> t, ref int p)
     {
+        // Recursion re-entry point for every parenthesised sub-expression.
+        // Trip on excessive nesting / low stack before a StackOverflowException.
+        if (_parseDepth >= OfficeCli.Core.DocumentLimits.MaxRecursionDepth
+            || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
+            return FormulaResult.Error("#NUM!");
+        _parseDepth++;
+        try
+        {
         var left = ParseAddSub(t, ref p); if (left == null) return null;
         while (p < t.Count && t[p].Type == TT.Op && t[p].Value == "&")
         { p++; var right = ParseAddSub(t, ref p); if (right == null) return null;
           if (left.IsError) return left; if (right.IsError) return right;
           left = FormulaResult.Str(left.AsString() + right.AsString()); }
         return left;
+        }
+        finally { _parseDepth--; }
     }
 
     private FormulaResult? ParseAddSub(List<Token> t, ref int p)

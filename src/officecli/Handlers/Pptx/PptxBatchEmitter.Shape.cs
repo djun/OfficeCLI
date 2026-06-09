@@ -507,8 +507,14 @@ public static partial class PptxBatchEmitter
     }
 
     private static void EmitGroup(PowerPointHandler ppt, DocumentNode grpNode, string parentSlidePath,
-                                  string replayPath, List<BatchItem> items, SlideEmitContext ctx)
+                                  string replayPath, List<BatchItem> items, SlideEmitContext ctx,
+                                  int depth = 0)
     {
+        // CONSISTENCY(dos-hardening): nested-group emission recurses with no
+        // structural bound; a crafted deeply-nested grpSp would otherwise hang
+        // (or overflow the stack) during `dump`. See DocumentLimits.
+        OfficeCli.Core.DocumentLimits.EnsureDepth(depth);
+
         var full = ppt.Get(grpNode.Path);
         var props = FilterEmittableProps(full.Format);
         // CONSISTENCY(zorder): direct Get on /slide[N]/group[K] strips zorder
@@ -571,7 +577,7 @@ public static partial class PptxBatchEmitter
                     break;
                 case "group":
                     ord["group"] = ord.GetValueOrDefault("group", 0) + 1;
-                    EmitGroup(ppt, child, replayPath, $"{replayPath}/group[{ord["group"]}]", items, ctx);
+                    EmitGroup(ppt, child, replayPath, $"{replayPath}/group[{ord["group"]}]", items, ctx, depth: depth + 1);
                     break;
                 case "placeholder":
                     // CONSISTENCY(unified-shape-counter): placeholders and
