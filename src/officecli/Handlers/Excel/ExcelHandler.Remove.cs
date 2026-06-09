@@ -1033,7 +1033,8 @@ public partial class ExcelHandler
             worksheet, sheetName,
             refMapper: r => ShiftRowInRefDown(r, insertRow),
             formulaTextMapper: f => Core.FormulaRefShifter.Shift(
-                f, sheetName, sheetName, Core.FormulaShiftDirection.RowsDown, insertRow));
+                f, sheetName, sheetName, Core.FormulaShiftDirection.RowsDown, insertRow),
+            rowMarkerShift: m => m >= insertRow - 1 ? m + 1 : m);
     }
 
     /// <summary>
@@ -1080,7 +1081,8 @@ public partial class ExcelHandler
             worksheet, sheetName,
             refMapper: r => ShiftColInRefRight(r, insertColIdx),
             formulaTextMapper: f => Core.FormulaRefShifter.Shift(
-                f, sheetName, sheetName, Core.FormulaShiftDirection.ColumnsRight, insertColIdx));
+                f, sheetName, sheetName, Core.FormulaShiftDirection.ColumnsRight, insertColIdx),
+            colMarkerShift: m => m >= insertColIdx - 1 ? m + 1 : m);
     }
 
     private static string? ShiftRowInRefDown(string? refStr, int insertRow)
@@ -1160,7 +1162,8 @@ public partial class ExcelHandler
             worksheet, sheetName,
             refMapper: r => ShiftRowInRef(r, deletedRow),
             formulaTextMapper: f => Core.FormulaRefShifter.Shift(
-                f, sheetName, sheetName, Core.FormulaShiftDirection.RowsUp, deletedRow));
+                f, sheetName, sheetName, Core.FormulaShiftDirection.RowsUp, deletedRow),
+            rowMarkerShift: m => m > deletedRow - 1 ? m - 1 : m);
     }
 
     // ==================== Column shift ====================
@@ -1209,7 +1212,8 @@ public partial class ExcelHandler
             worksheet, sheetName,
             refMapper: r => ShiftColInRef(r, deletedColIdx),
             formulaTextMapper: f => Core.FormulaRefShifter.Shift(
-                f, sheetName, sheetName, Core.FormulaShiftDirection.ColumnsLeft, deletedColIdx));
+                f, sheetName, sheetName, Core.FormulaShiftDirection.ColumnsLeft, deletedColIdx),
+            colMarkerShift: m => m > deletedColIdx - 1 ? m - 1 : m);
     }
 
     // ==================== Shift helpers ====================

@@ -32,6 +32,7 @@
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using Xdr = DocumentFormat.OpenXml.Drawing.Spreadsheet;
 
 namespace OfficeCli.Handlers;
 
@@ -58,7 +59,9 @@ public partial class ExcelHandler
         WorksheetPart worksheet,
         string sheetName,
         Func<string, string?> refMapper,
-        Func<string, string>? formulaTextMapper)
+        Func<string, string>? formulaTextMapper,
+        Func<int, int>? rowMarkerShift = null,
+        Func<int, int>? colMarkerShift = null)
     {
         var ws = GetSheet(worksheet);
 
@@ -196,6 +199,43 @@ public partial class ExcelHandler
                 }
             }
             if (tblDirty) tbl.Save();
+        }
+
+        // 6b. drawing anchors (separate DrawingsPart). Pictures / shapes / charts
+        // anchor via twoCell/oneCell from+to markers whose <xdr:row>/<xdr:col>
+        // are 0-based indices — shift them so the object moves and resizes with
+        // the cells, the way Excel treats "move and size with cells" objects.
+        if (rowMarkerShift != null || colMarkerShift != null)
+        {
+            var wsDr = worksheet.DrawingsPart?.WorksheetDrawing;
+            if (wsDr != null)
+            {
+                bool drDirty = false;
+                var markers = wsDr.Descendants<Xdr.FromMarker>().Cast<OpenXmlCompositeElement>()
+                    .Concat(wsDr.Descendants<Xdr.ToMarker>());
+                foreach (var m in markers)
+                {
+                    if (rowMarkerShift != null)
+                    {
+                        var rid = m.GetFirstChild<Xdr.RowId>();
+                        if (rid != null && int.TryParse(rid.Text, out var r))
+                        {
+                            var nr = rowMarkerShift(r);
+                            if (nr != r) { rid.Text = nr.ToString(); drDirty = true; }
+                        }
+                    }
+                    if (colMarkerShift != null)
+                    {
+                        var cid = m.GetFirstChild<Xdr.ColumnId>();
+                        if (cid != null && int.TryParse(cid.Text, out var c))
+                        {
+                            var nc = colMarkerShift(c);
+                            if (nc != c) { cid.Text = nc.ToString(); drDirty = true; }
+                        }
+                    }
+                }
+                if (drDirty) wsDr.Save();
+            }
         }
 
         // 7. cell formulas (text + shared/array ref attribute)
