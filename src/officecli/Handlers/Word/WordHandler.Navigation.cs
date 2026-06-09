@@ -4445,6 +4445,16 @@ public partial class WordHandler
 
     private static void ReadRowProps(TableRow row, DocumentNode node)
     {
+        // BUG-DUMP-R24-4: per-row <w:tblPrEx> (table property exceptions) —
+        // border / jc / indent / layout / cellMar overrides that apply to THIS
+        // row only (rows that differ from the table default). Capture the
+        // verbatim element so every CT_TblPrEx child round-trips losslessly; the
+        // row apply path (SetElementTableRow) re-inserts it as the row's first
+        // child. Read before the trPr early-return so a row with tblPrEx but no
+        // trPr still round-trips its exceptions.
+        var tblPrEx = row.GetFirstChild<TablePropertyExceptions>();
+        if (tblPrEx != null && !string.IsNullOrEmpty(tblPrEx.InnerXml))
+            node.Format["tblPrEx"] = tblPrEx.OuterXml;
         var trPr = row.TableRowProperties;
         if (trPr == null) return;
         // trPrChange: `set row + trackChange.author` snapshots prior trPr.
@@ -4476,6 +4486,17 @@ public partial class WordHandler
             node.Format["header"] = true;
         if (trPr.GetFirstChild<CantSplit>() != null)
             node.Format["cantSplit"] = true;
+        // BUG-DUMP-R24-1: row-level <w:jc> in <w:trPr> horizontally positions
+        // the WHOLE ROW on the page (CT_TrPr). Distinct from table-level
+        // tblPr/jc and from cell/paragraph alignment — use canonical key
+        // `rowAlign` so it never collides with cell/para `alignment`.
+        var rowJc = trPr.GetFirstChild<TableJustification>();
+        if (rowJc?.Val?.Value is TableRowAlignmentValues rowAlignVal)
+        {
+            if (rowAlignVal == TableRowAlignmentValues.Center) node.Format["rowAlign"] = "center";
+            else if (rowAlignVal == TableRowAlignmentValues.Right) node.Format["rowAlign"] = "right";
+            else if (rowAlignVal == TableRowAlignmentValues.Left) node.Format["rowAlign"] = "left";
+        }
         // cnfStyle (conditional-formatting bitmask) — mirror the cell reader
         // at ~line 4131 so table-row conditional formatting round-trips.
         var rowCnf = trPr.GetFirstChild<ConditionalFormatStyle>();

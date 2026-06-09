@@ -722,6 +722,36 @@ public partial class WordHandler
                     newRowProps.AppendChild(new CantSplit());
             }
         }
+        // BUG-DUMP-R24-1: row-level <w:jc> (whole-row alignment). jc ranks
+        // after cantSplit/trHeight/tblHeader in CT_TrPr, so AppendChild keeps
+        // schema order. CONSISTENCY(add-set-symmetry): mirrors SetElementTableRow.
+        if (properties.TryGetValue("rowAlign", out var rowAlignVal)
+            || properties.TryGetValue("rowalign", out rowAlignVal))
+        {
+            if (!string.IsNullOrEmpty(rowAlignVal))
+            {
+                newRowProps ??= newRow.AppendChild(new TableRowProperties());
+                var rav = rowAlignVal.ToLowerInvariant() switch
+                {
+                    "left" => TableRowAlignmentValues.Left,
+                    "center" => TableRowAlignmentValues.Center,
+                    "right" => TableRowAlignmentValues.Right,
+                    _ => throw new ArgumentException(
+                        $"Invalid rowAlign '{rowAlignVal}': must be left, center, or right")
+                };
+                newRowProps.AppendChild(new TableJustification { Val = rav });
+            }
+        }
+
+        // BUG-DUMP-R24-4: per-row <w:tblPrEx> (table property exceptions),
+        // verbatim element captured by Navigation.ReadRowProps. Insert as the
+        // row's FIRST child (CT_Row order: tblPrEx?, trPr?, cells).
+        // CONSISTENCY(add-set-symmetry): mirrors SetElementTableRow.
+        if (properties.TryGetValue("tblPrEx", out var rowTblPrEx)
+            && !string.IsNullOrWhiteSpace(rowTblPrEx))
+        {
+            newRow.PrependChild(new TablePropertyExceptions(rowTblPrEx));
+        }
 
         for (int c = 0; c < newCols; c++)
         {

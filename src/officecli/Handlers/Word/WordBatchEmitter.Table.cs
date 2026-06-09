@@ -579,6 +579,10 @@ public static partial class WordBatchEmitter
     private static readonly HashSet<string> RowOnlyKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "header", "height", "cantSplit", "cnfStyle",
+        // BUG-DUMP-R24-1: row-level <w:jc> (whole-row alignment).
+        "rowAlign",
+        // BUG-DUMP-R24-4: per-row <w:tblPrEx> overrides (verbatim element).
+        "tblPrEx",
     };
 
     /// <summary>Read a string-valued key from a DocumentNode.Format dict

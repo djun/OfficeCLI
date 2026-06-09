@@ -1942,6 +1942,19 @@ public partial class WordHandler
     private List<string> SetElementTableRow(TableRow row, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();
+        // BUG-DUMP-R24-4: per-row <w:tblPrEx> (table property exceptions). The
+        // value is the verbatim <w:tblPrEx>…</w:tblPrEx> element captured by
+        // Navigation.ReadRowProps — parse and re-insert it as the row's FIRST
+        // child (CT_Row order: tblPrEx?, trPr?, cells). Handled before trPr
+        // creation so it lands ahead of any trPr. Round-trips every CT_TblPrEx
+        // child (borders / jc / indent / layout / cellMar / …) losslessly.
+        if (properties.TryGetValue("tblPrEx", out var tblPrExXml)
+            && !string.IsNullOrWhiteSpace(tblPrExXml))
+        {
+            row.GetFirstChild<TablePropertyExceptions>()?.Remove();
+            var newEx = new TablePropertyExceptions(tblPrExXml);
+            row.PrependChild(newEx);
+        }
         // CT_Row order is tblPrEx?, trPr?, cells — a new trPr must go AFTER any
         // existing tblPrEx (added by a table-level format-revision cascade), not
         // at the front. PrependChild put trPr before tblPrEx, producing
@@ -1958,6 +1971,10 @@ public partial class WordHandler
         {
             switch (key.ToLowerInvariant())
             {
+                case "tblprex":
+                    // Already applied above as the row's first child; skip the
+                    // generic-fallback default so it isn't flagged unsupported.
+                    break;
                 case "height":
                     trPr.GetFirstChild<TableRowHeight>()?.Remove();
                     trPr.AppendChild(new TableRowHeight { Val = ParseTwips(value), HeightType = HeightRuleValues.AtLeast });
@@ -2001,6 +2018,27 @@ public partial class WordHandler
                         cnf.Val = cnfVal;
                     break;
                 }
+                case "rowalign":
+                {
+                    // BUG-DUMP-R24-1: row-level <w:jc> (whole-row alignment) in
+                    // CT_TrPr. jc ranks after cantSplit/trHeight/tblHeader, so
+                    // AppendChild keeps schema order against the children this
+                    // setter creates (cnfStyle prepended, height/header appended).
+                    trPr.RemoveAllChildren<TableJustification>();
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        var rowAlignVal = value.ToLowerInvariant() switch
+                        {
+                            "left" => TableRowAlignmentValues.Left,
+                            "center" => TableRowAlignmentValues.Center,
+                            "right" => TableRowAlignmentValues.Right,
+                            _ => throw new ArgumentException(
+                                $"Invalid rowAlign '{value}': must be left, center, or right")
+                        };
+                        trPr.AppendChild(new TableJustification { Val = rowAlignVal });
+                    }
+                    break;
+                }
                 default:
                     // c1, c2, ... shorthand: set text of specific cell by index
                     if (key.Length >= 2 && key[0] == 'c' && int.TryParse(key.AsSpan(1), out var cIdx))
@@ -2021,7 +2059,7 @@ public partial class WordHandler
                     }
                     else if (!GenericXmlQuery.TryCreateTypedChild(trPr, key, value))
                         unsupported.Add(unsupported.Count == 0
-                            ? $"{key} (valid row props: height, height.exact, header, cantSplit, cnfStyle, c1, c2, ...)"
+                            ? $"{key} (valid row props: height, height.exact, header, cantSplit, cnfStyle, rowAlign, c1, c2, ...)"
                             : key);
                     break;
             }
