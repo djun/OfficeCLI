@@ -168,6 +168,15 @@ public static class PluginRegistry
 
         foreach (var dir in pathDirs)
         {
+            // Hardening: never resolve a plugin from a relative PATH entry
+            // (".", "", "src/bin", …) or a world-writable directory. Both are
+            // classic execution-hijack vectors — dropping `officecli-<ext>`
+            // into such a dir would otherwise run on the next document open.
+            // Legitimate plugin dirs (~/.officecli/plugins, brew/usr bins) are
+            // absolute and not world-writable, so this excludes only misconfig.
+            if (!Path.IsPathRooted(dir)) continue;
+            if (IsWorldWritableDir(dir)) continue;
+
             foreach (var stem in nameVariants)
             {
                 if (OperatingSystem.IsWindows())
@@ -181,6 +190,24 @@ public static class PluginRegistry
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// True if <paramref name="dir"/> is world-writable (Unix other-write bit).
+    /// Always false on Windows (uses ACLs, not mode bits) and on any error —
+    /// failing open here only means we don't add an extra skip, the directory
+    /// is still subject to normal File.Exists resolution.
+    /// </summary>
+    internal static bool IsWorldWritableDir(string dir)
+    {
+        if (OperatingSystem.IsWindows()) return false;
+        try
+        {
+            if (!Directory.Exists(dir)) return false;
+            var mode = File.GetUnixFileMode(dir);
+            return (mode & UnixFileMode.OtherWrite) != 0;
+        }
+        catch { return false; }
     }
 
     private static IEnumerable<string> EnumerateExecutablesUnder(string root)
