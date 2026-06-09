@@ -110,7 +110,7 @@ public partial class WordHandler
                     return true;
                 if (lower != "box")
                     throw new ArgumentException(
-                        $"Invalid pgBorders value: '{value}'. Valid: box, none.");
+                        $"Invalid pgBorders value: '{value}'. Valid: box, none, or per-side keys pgBorders.<top|left|bottom|right>=STYLE[;SIZE[;COLOR[;SPACE]]] and pgBorders.offsetFrom=page|text.");
                 var pb = new PageBorders
                 {
                     TopBorder    = new TopBorder    { Val = BorderValues.Single, Size = 4U, Color = "auto", Space = 24U },
@@ -119,6 +119,41 @@ public partial class WordHandler
                     RightBorder  = new RightBorder  { Val = BorderValues.Single, Size = 4U, Color = "auto", Space = 24U },
                 };
                 InsertSectPrChildInOrder(sectPr, pb);
+                return true;
+            }
+            // Per-side page border detail + position. Mirrors the paragraph/table
+            // per-side border vocabulary (pbdr.top / border.top with the
+            // STYLE;SIZE;COLOR;SPACE value form) so the dump→batch round-trip
+            // preserves source line style/weight/color/spacing instead of
+            // collapsing to the hardcoded box default. Each key materialises (or
+            // overlays onto an existing) <w:pgBorders> child; offsetFrom sets the
+            // position attribute.
+            case "pgborders.top" or "pgborders.left"
+                or "pgborders.bottom" or "pgborders.right":
+            {
+                var sectPr = EnsureSectionProperties();
+                var pb = EnsurePageBorders(sectPr);
+                var (style, size, color, space) = ParseBorderValue(value);
+                switch (key)
+                {
+                    case "pgborders.top":    pb.TopBorder    = MakeBorder<TopBorder>(style, size, color, space); break;
+                    case "pgborders.left":   pb.LeftBorder   = MakeBorder<LeftBorder>(style, size, color, space); break;
+                    case "pgborders.bottom": pb.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space); break;
+                    case "pgborders.right":  pb.RightBorder  = MakeBorder<RightBorder>(style, size, color, space); break;
+                }
+                return true;
+            }
+            case "pgborders.offsetfrom":
+            {
+                var sectPr = EnsureSectionProperties();
+                var pb = EnsurePageBorders(sectPr);
+                pb.OffsetFrom = value.ToLowerInvariant().Trim() switch
+                {
+                    "page" => PageBorderOffsetValues.Page,
+                    "text" => PageBorderOffsetValues.Text,
+                    _ => throw new ArgumentException(
+                        $"Invalid pgBorders.offsetFrom value: '{value}'. Valid: page, text.")
+                };
                 return true;
             }
             case "direction" or "dir" or "bidi":
@@ -405,5 +440,21 @@ public partial class WordHandler
     {
         var sectPr = EnsureSectionProperties();
         return EnsureSectPrChild<Columns>(sectPr);
+    }
+
+    // Get-or-create the sectPr's <w:pgBorders> child. Per-side pgBorders.<side>
+    // and pgBorders.offsetFrom keys overlay onto a single shared element so a
+    // multi-key dump replay (`set / --prop pgBorders.top=... --prop
+    // pgBorders.offsetFrom=page ...`) accumulates one <w:pgBorders> rather than
+    // resetting it per key. Inserted in CT_SectPr schema order.
+    private PageBorders EnsurePageBorders(SectionProperties sectPr)
+    {
+        var pb = sectPr.GetFirstChild<PageBorders>();
+        if (pb == null)
+        {
+            pb = new PageBorders();
+            InsertSectPrChildInOrder(sectPr, pb);
+        }
+        return pb;
     }
 }

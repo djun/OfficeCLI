@@ -950,6 +950,12 @@ public partial class WordHandler
         if (sectPr.GetFirstChild<TitlePage>() != null)
             secNode.Format["titlePage"] = true;
 
+        // Page borders — per-side detail + offsetFrom, mirroring the body
+        // sectPr readback in WordHandler.Navigation.cs so Get('/') and
+        // /section[N] surface the same pgBorders.<side>.* / pgBorders.offsetFrom
+        // keys.
+        ReadPageBorders(sectPr.GetFirstChild<PageBorders>(), secNode);
+
         // Section-level RTL (Arabic / Hebrew page direction).
         if (sectPr.GetFirstChild<BiDi>() != null)
             secNode.Format["direction"] = "rtl";

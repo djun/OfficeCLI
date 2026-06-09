@@ -1451,6 +1451,15 @@ public static partial class WordBatchEmitter
         {
             if (props.ContainsKey(gk)) props[gk] = gv;
         }
+        // pgBorders fold: Get emits pgBorders.<side> + pgBorders.<side>.sz/
+        // .color/.space as separate keys (mirrors pbdr.* / border.*). Set's
+        // pgborders.<side> case parses a single semicolon-encoded
+        // STYLE;SIZE;COLOR;SPACE value, so fold the sub-keys into the bare
+        // side key and drop them. pgBorders.offsetFrom passes through verbatim
+        // (it's a standalone Set key). Without folding, the 3-segment sub-keys
+        // hit UNSUPPORTED on replay and the per-side weight/color/space were
+        // lost — the page border collapsed to the box default.
+        FoldPgBordersProps(props);
         var (hasPgSz, hasPgMar) = word.BodySectionPageGeometryPresence();
         if (!hasPgSz) props["pageSize"] = "none";
         if (!hasPgMar) props["pageMargin"] = "none";
@@ -1461,6 +1470,62 @@ public static partial class WordBatchEmitter
             Path = "/",
             Props = props
         });
+    }
+
+    // Fold pgBorders.<side>.sz/.color/.space sub-keys into the bare
+    // pgBorders.<side> key as a STYLE;SIZE;COLOR;SPACE value (the form Set's
+    // pgborders.<side> case parses via ParseBorderValue). Mirrors the pbdr.* /
+    // border.* fold in WordBatchEmitter.Filters.cs. pgBorders.offsetFrom is a
+    // standalone Set key and is left untouched.
+    private static void FoldPgBordersProps(Dictionary<string, string> props)
+    {
+        var fold = new Dictionary<string, (string? style, string? sz, string? color, string? space)>(
+            StringComparer.OrdinalIgnoreCase);
+        var subKeys = new List<string>();
+        foreach (var (key, val) in props)
+        {
+            if (!key.StartsWith("pgBorders.", StringComparison.OrdinalIgnoreCase)) continue;
+            var parts = key.Split('.');
+            // parts[0]=pgBorders, parts[1]=side|offsetFrom
+            if (parts.Length < 2) continue;
+            // offsetFrom is a flat key — not a per-side border. Leave it alone.
+            if (parts.Length == 2 &&
+                string.Equals(parts[1], "offsetFrom", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var side = $"{parts[0]}.{parts[1]}"; // pgBorders.top
+            fold.TryGetValue(side, out var cur);
+            if (parts.Length == 2)
+            {
+                cur.style = val;
+            }
+            else if (parts.Length == 3)
+            {
+                switch (parts[2].ToLowerInvariant())
+                {
+                    case "sz": cur.sz = val; break;
+                    case "color": cur.color = val; break;
+                    case "space": cur.space = val; break;
+                }
+                subKeys.Add(key); // 3-segment sub-keys get dropped after folding
+            }
+            fold[side] = cur;
+        }
+        foreach (var sk in subKeys) props.Remove(sk);
+        foreach (var (side, folded) in fold)
+        {
+            if (folded.style == null) continue;
+            var sz = folded.sz ?? "";
+            var col = folded.color ?? "";
+            var sp = folded.space ?? "";
+            var v = folded.style;
+            if (folded.sz != null || folded.color != null || folded.space != null)
+                v += ";" + sz;
+            if (folded.color != null || folded.space != null)
+                v += ";" + col;
+            if (folded.space != null)
+                v += ";" + sp;
+            props[side] = v;
+        }
     }
 
     private static void EmitStyles(WordHandler word, List<BatchItem> items)

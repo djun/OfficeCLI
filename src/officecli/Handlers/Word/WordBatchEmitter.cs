@@ -355,6 +355,13 @@ public static partial class WordBatchEmitter
         // columns.equalWidth / columns.separator etc. roundtrip via the
         // canonical dotted form Get already emits.
         "columns.",
+        // Page-border per-side detail + offsetFrom. Get/Navigation surfaces
+        // pgBorders.<side> + pgBorders.<side>.sz/.color/.space + pgBorders.offsetFrom;
+        // EmitSection folds the per-side sub-keys into the colon... err,
+        // semicolon-encoded STYLE;SIZE;COLOR;SPACE form Set's pgborders.<side>
+        // case expects. Without this prefix the detailed keys were dropped and
+        // page borders collapsed to the box default on round-trip.
+        "pgBorders.",
     };
 
     // Captured once per process: blank doc's `Get("/")` root Format, normalized

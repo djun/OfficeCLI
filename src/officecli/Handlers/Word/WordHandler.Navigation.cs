@@ -248,17 +248,15 @@ public partial class WordHandler
             if (sectPr.GetFirstChild<TitlePage>() != null)
                 node.Format["titlePage"] = true;
 
-            // Surface pgBorders presence as the same shorthand the Set side
-            // accepts ('box' / 'none'). Without readback the value silently
-            // disappeared on get and never surfaced in dump, so a `set /
-            // --prop pgBorders=box` round-trip lost the borders. Match the
-            // Set encoding: any PageBorders element with at least one side
-            // surfaces as `box` — the set side only ever writes that exact
-            // shape (four single-line sides), so a present element implies
-            // it. Future encodings can refine this to expose width / style
-            // / color individually once Set grows beyond the shorthand.
-            if (sectPr.GetFirstChild<PageBorders>() != null)
-                node.Format["pgBorders"] = "box";
+            // Surface pgBorders per-side detail (val/sz/color/space) plus the
+            // offsetFrom position. Mirrors the paragraph/table per-side border
+            // convention (ReadBorder → key + key.sz/.color/.space), keyed under
+            // the pgBorders.<side> prefix. The earlier presence-only shorthand
+            // (`pgBorders=box`) discarded per-side line style/weight/color and
+            // the offsetFrom attribute, so a blue double 1.5pt page border
+            // round-tripped to a thin black single line. The `box`/`none`
+            // shorthand is still accepted on Set for backward-compat.
+            ReadPageBorders(sectPr.GetFirstChild<PageBorders>(), node);
 
             // Section-level RTL (Arabic / Hebrew page direction).
             if (sectPr.GetFirstChild<BiDi>() != null)
@@ -4328,6 +4326,26 @@ public partial class WordHandler
             if (rPr.Strike != null) node.Format["strike"] = true;
             if (rPr.Highlight?.Val != null) node.Format["highlight"] = rPr.Highlight.Val.InnerText;
         }
+    }
+
+    // Surface a <w:pgBorders> element as per-side detail keyed under the
+    // pgBorders.<side> prefix (mirrors ReadBorder for paragraph/table borders),
+    // plus the offsetFrom position attribute. Page borders have no insideH /
+    // insideV sides (CT_PageBorders is top/left/bottom/right only). The Set
+    // side re-materialises these into a PageBorders with real per-side
+    // val/sz/color/space + offsetFrom — see TrySetSectionLayout pgborders.*.
+    private static void ReadPageBorders(PageBorders? pgBorders, DocumentNode node)
+    {
+        if (pgBorders == null) return;
+        ReadBorder(pgBorders.TopBorder, "pgBorders.top", node);
+        ReadBorder(pgBorders.LeftBorder, "pgBorders.left", node);
+        ReadBorder(pgBorders.BottomBorder, "pgBorders.bottom", node);
+        ReadBorder(pgBorders.RightBorder, "pgBorders.right", node);
+        // offsetFrom: "page" (border measured from page edge) vs "text"
+        // (from text margin). Default in OOXML is "text" — surface only when
+        // present so a source that omits it round-trips without re-stamping.
+        if (pgBorders.OffsetFrom?.InnerText is { } off)
+            node.Format["pgBorders.offsetFrom"] = off;
     }
 
     private static void ReadBorder(BorderType? border, string key, DocumentNode node)
