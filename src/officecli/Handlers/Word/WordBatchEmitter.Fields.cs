@@ -298,6 +298,15 @@ public static partial class WordBatchEmitter
             // phantom `text="1"` key that the source never had.
             if (!sawSeparate)
                 synth.Format["_noFieldSeparator"] = true;
+            // BUG-DUMP-R24-2: source field HAS a separator (sawSeparate) but the
+            // cached result is empty (no result run between separate and end).
+            // Without an explicit signal, AddField fabricates a «name»
+            // placeholder for REF/MERGEFIELD/STYLEREF/DOCPROPERTY because
+            // `text` is absent from the prop bag. Flag the empty-but-present
+            // result so TryEmitFieldRun passes `text=""` — AddField then emits
+            // an empty result run, faithfully preserving "no cached result".
+            else if (string.IsNullOrEmpty(display))
+                synth.Format["_emptyFieldResult"] = true;
             // BUG-R12A(BUG1): carry the cached result run's run-level formatting
             // (bold/italic/color/size/font/font.latin) under a `_resultFmt.`
             // prefix so TryEmitFieldRun can map AddField-supported keys onto the

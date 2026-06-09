@@ -1336,6 +1336,16 @@ public static partial class WordBatchEmitter
         {
             fieldProps["noSeparator"] = "true";
         }
+        // BUG-DUMP-R24-2: source field had a separator but an empty cached
+        // result. Pass an explicit empty `text` so AddField emits an empty
+        // result run instead of fabricating a «name» placeholder.
+        if (fieldProps != null
+            && !fieldProps.ContainsKey("text")
+            && run.Format.TryGetValue("_emptyFieldResult", out var efr)
+            && efr is bool efrB && efrB)
+        {
+            fieldProps["text"] = "";
+        }
         // BUG-R12A(BUG1): forward the captured cached-result-run formatting
         // (stashed under `_resultFmt.` by CollapseFieldChains) onto the `add
         // field` prop bag. AddField applies font/size/bold/color uniformly to
