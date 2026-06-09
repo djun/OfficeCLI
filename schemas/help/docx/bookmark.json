@@ -14,7 +14,7 @@
     "stable":     ["/bookmark[@name=NAME]"],
     "positional": ["/bookmark[N]"]
   },
-  "note": "Bookmarks are BookmarkStart/End pairs. Name must be addressable: no whitespace, no '/[]\"', no leading '@' or single quote. Duplicate names rejected at Add.",
+  "note": "Bookmarks are BookmarkStart/End pairs. Name must be addressable: no whitespace, no '/[]\"', no leading '@' or single quote. Duplicate names are allowed at Add (Word permits them; the bookmark id stays unique) and emit a warning — /bookmark[@name=NAME] then resolves to the first match.",
   "properties": {
     "name": {
       "type": "string",
