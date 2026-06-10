@@ -86,6 +86,9 @@ internal static partial class ChartHelper
         bool needsSerAxis = false;
 
         var colors = ParseSeriesColors(properties);
+        // BUG-DUMP-R36-3: series whose dump carried per-point dPt styling but no
+        // series-level fill — suppress the default accent1 spPr for them.
+        var noFillSeries = SeriesWithNoCapturedFill(properties);
         // CONSISTENCY(chart-series-color): for single-series chart kinds
         // (pie/doughnut/stock), the merged `colors[]` is consumed as per-point
         // dPt overrides. A user typing `series1.color=#FF0000` expects the
@@ -130,11 +133,11 @@ internal static partial class ChartHelper
             }
             case "bar":
                 chartElement = BuildBarChart(C.BarDirectionValues.Bar, stacked, percentStacked,
-                    categories, seriesData, catAxisId, valAxisId, colors);
+                    categories, seriesData, catAxisId, valAxisId, colors, noFillSeries);
                 break;
             case "column":
                 chartElement = BuildBarChart(C.BarDirectionValues.Column, stacked, percentStacked,
-                    categories, seriesData, catAxisId, valAxisId, colors);
+                    categories, seriesData, catAxisId, valAxisId, colors, noFillSeries);
                 break;
             case "line" when is3D:
             {
@@ -147,7 +150,7 @@ internal static partial class ChartHelper
                 );
                 for (int i = 0; i < seriesData.Count; i++)
                 {
-                    var color = colors != null && i < colors.Length ? colors[i] : DefaultSeriesColors[i % DefaultSeriesColors.Length];
+                    var color = ResolveSeriesColor(colors, i, noFillSeries);
                     line3d.AppendChild(BuildLineSeries((uint)i, seriesData[i].name,
                         categories, seriesData[i].values, color));
                 }
@@ -160,7 +163,7 @@ internal static partial class ChartHelper
             }
             case "line":
                 chartElement = BuildLineChart(stacked, percentStacked,
-                    categories, seriesData, catAxisId, valAxisId, colors);
+                    categories, seriesData, catAxisId, valAxisId, colors, noFillSeries);
                 break;
             case "area" when is3D:
             {
@@ -173,7 +176,7 @@ internal static partial class ChartHelper
                 );
                 for (int i = 0; i < seriesData.Count; i++)
                 {
-                    var color = colors != null && i < colors.Length ? colors[i] : DefaultSeriesColors[i % DefaultSeriesColors.Length];
+                    var color = ResolveSeriesColor(colors, i, noFillSeries);
                     area3d.AppendChild(BuildAreaSeries((uint)i, seriesData[i].name,
                         categories, seriesData[i].values, color));
                 }
@@ -186,7 +189,7 @@ internal static partial class ChartHelper
             }
             case "area":
                 chartElement = BuildAreaChart(stacked, percentStacked,
-                    categories, seriesData, catAxisId, valAxisId, colors);
+                    categories, seriesData, catAxisId, valAxisId, colors, noFillSeries);
                 break;
             case "pie" when is3D:
             {
@@ -313,7 +316,7 @@ internal static partial class ChartHelper
                         gj++;
                     BuildComboGroup(t, plotArea, seriesData, categories,
                         startIdx: gi, endIdxExclusive: gj,
-                        catAxisId, valAxisId, colors);
+                        catAxisId, valAxisId, colors, noFillSeries);
                     gi = gj;
                 }
                 chartElement = null;
@@ -751,7 +754,8 @@ internal static partial class ChartHelper
         string[]? categories,
         int startIdx, int endIdxExclusive,
         uint catAxisId, uint valAxisId,
-        string[]? colors)
+        string[]? colors,
+        HashSet<int>? noFillSeries = null)
     {
         OpenXmlCompositeElement container = typeLabel switch
         {
@@ -776,8 +780,7 @@ internal static partial class ChartHelper
 
         for (int i = startIdx; i < endIdxExclusive; i++)
         {
-            var clr = colors != null && i < colors.Length ? colors[i]
-                : DefaultSeriesColors[i % DefaultSeriesColors.Length];
+            var clr = ResolveSeriesColor(colors, i, noFillSeries);
             OpenXmlCompositeElement ser = typeLabel switch
             {
                 "bar" or "column" => BuildBarSeries((uint)i, seriesData[i].name,
@@ -801,7 +804,8 @@ internal static partial class ChartHelper
     internal static C.BarChart BuildBarChart(
         C.BarDirectionValues direction, bool stacked, bool percentStacked,
         string[]? categories, List<(string name, double[] values)> seriesData,
-        uint catAxisId, uint valAxisId, string[]? colors = null)
+        uint catAxisId, uint valAxisId, string[]? colors = null,
+        HashSet<int>? noFillSeries = null)
     {
         var grouping = percentStacked ? C.BarGroupingValues.PercentStacked
             : stacked ? C.BarGroupingValues.Stacked
@@ -815,7 +819,7 @@ internal static partial class ChartHelper
 
         for (int i = 0; i < seriesData.Count; i++)
         {
-            var color = colors != null && i < colors.Length ? colors[i] : DefaultSeriesColors[i % DefaultSeriesColors.Length];
+            var color = ResolveSeriesColor(colors, i, noFillSeries);
             barChart.AppendChild(BuildBarSeries((uint)i, seriesData[i].name,
                 categories, seriesData[i].values, color));
         }
@@ -831,7 +835,8 @@ internal static partial class ChartHelper
     internal static C.LineChart BuildLineChart(
         bool stacked, bool percentStacked,
         string[]? categories, List<(string name, double[] values)> seriesData,
-        uint catAxisId, uint valAxisId, string[]? colors = null)
+        uint catAxisId, uint valAxisId, string[]? colors = null,
+        HashSet<int>? noFillSeries = null)
     {
         var grouping = percentStacked ? C.GroupingValues.PercentStacked
             : stacked ? C.GroupingValues.Stacked
@@ -844,7 +849,7 @@ internal static partial class ChartHelper
 
         for (int i = 0; i < seriesData.Count; i++)
         {
-            var color = colors != null && i < colors.Length ? colors[i] : DefaultSeriesColors[i % DefaultSeriesColors.Length];
+            var color = ResolveSeriesColor(colors, i, noFillSeries);
             lineChart.AppendChild(BuildLineSeries((uint)i, seriesData[i].name,
                 categories, seriesData[i].values, color));
         }
@@ -860,7 +865,8 @@ internal static partial class ChartHelper
     internal static C.AreaChart BuildAreaChart(
         bool stacked, bool percentStacked,
         string[]? categories, List<(string name, double[] values)> seriesData,
-        uint catAxisId, uint valAxisId, string[]? colors = null)
+        uint catAxisId, uint valAxisId, string[]? colors = null,
+        HashSet<int>? noFillSeries = null)
     {
         var grouping = percentStacked ? C.GroupingValues.PercentStacked
             : stacked ? C.GroupingValues.Stacked
@@ -873,7 +879,7 @@ internal static partial class ChartHelper
 
         for (int i = 0; i < seriesData.Count; i++)
         {
-            var color = colors != null && i < colors.Length ? colors[i] : DefaultSeriesColors[i % DefaultSeriesColors.Length];
+            var color = ResolveSeriesColor(colors, i, noFillSeries);
             areaChart.AppendChild(BuildAreaSeries((uint)i, seriesData[i].name,
                 categories, seriesData[i].values, color));
         }
@@ -1223,6 +1229,21 @@ internal static partial class ChartHelper
     // builder and the SVG preview renderer cannot drift apart.
     internal static readonly string[] DefaultSeriesColors =
         OfficeDefaultThemeColors.DefaultChartSeriesPalette;
+
+    // BUG-DUMP-R36-3: resolve the fill color for series i. An explicit color
+    // (positional `colors=` or `series{N}.color`) wins. Otherwise the default
+    // accent palette is used — EXCEPT for series the dump flagged as carrying
+    // per-point dPt styling with no series-level fill, which return null so
+    // BuildBarSeries/BuildLineSeries/... emit no series <c:spPr> (preserving the
+    // source's "no series fill, rely on dPt + varyColors" shape).
+    private static string? ResolveSeriesColor(string[]? colors, int i, HashSet<int>? noFillSeries)
+    {
+        if (colors != null && i < colors.Length && !string.IsNullOrEmpty(colors[i]))
+            return colors[i];
+        if (noFillSeries != null && noFillSeries.Contains(i))
+            return null;
+        return DefaultSeriesColors[i % DefaultSeriesColors.Length];
+    }
 
     // ==================== Series Color ====================
 

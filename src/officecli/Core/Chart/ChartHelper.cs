@@ -439,6 +439,45 @@ internal static partial class ChartHelper
         return catStr.Split(',').Select(c => c.Trim()).ToArray();
     }
 
+    // BUG-DUMP-R36-3: series indices (0-based) whose dump carried per-point
+    // <c:dPt> styling (and/or a verbatim series <c:spPr>) but NO series-level
+    // fill key (series{N}.color / .gradient / .spPr). For these the source had
+    // no series-level <c:spPr>; the chart builder must therefore NOT inject the
+    // Office accent1 default — doing so plants a spurious solidFill that a
+    // partial-dPt series would visibly show. Mirrors the spec "only emit a
+    // series spPr when one was actually captured". Fresh `add chart` (no dPt
+    // keys) is unaffected and keeps its default palette.
+    internal static HashSet<int> SeriesWithNoCapturedFill(Dictionary<string, string> properties)
+    {
+        var result = new HashSet<int>();
+        foreach (var kv in properties)
+        {
+            var k = kv.Key;
+            if (!k.StartsWith("series", StringComparison.OrdinalIgnoreCase)) continue;
+            int dot = k.IndexOf('.');
+            if (dot <= 6) continue;
+            var mid = k.Substring(6, dot - 6);
+            if (!int.TryParse(mid, out var idx1) || idx1 < 1) continue;
+            var sub = k.Substring(dot + 1);
+            // A series carrying verbatim per-point styling (dPt) or a verbatim
+            // series spPr is the replay signal. We only flag it for default
+            // suppression when it does NOT also carry a series-level fill key.
+            if (!sub.Equals("dPt", StringComparison.OrdinalIgnoreCase)
+                && !sub.Equals("spPr", StringComparison.OrdinalIgnoreCase)) continue;
+            int idx0 = idx1 - 1;
+            // A series{N}.spPr key IS a captured series fill — keep it (the
+            // verbatim spPr is applied post-build), so do not flag spPr-bearing
+            // series. Only dPt-only series (no series-level fill) get flagged.
+            if (sub.Equals("spPr", StringComparison.OrdinalIgnoreCase)) continue;
+            bool hasSeriesFill =
+                properties.ContainsKey($"series{idx1}.color")
+                || properties.ContainsKey($"series{idx1}.gradient")
+                || properties.ContainsKey($"series{idx1}.spPr");
+            if (!hasSeriesFill) result.Add(idx0);
+        }
+        return result;
+    }
+
     internal static string[]? ParseSeriesColors(Dictionary<string, string> properties)
     {
         // CONSISTENCY(chart-series-color): Add path accepts both the
