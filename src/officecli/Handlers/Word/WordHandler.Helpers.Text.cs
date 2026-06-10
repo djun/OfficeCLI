@@ -249,6 +249,14 @@ public partial class WordHandler
                     return false; // an inner <w:rt>/<w:rubyBase> run
                 return true;
             })
+            // BUG-DUMP-R42-9: a <w:bdo> (bidirectional override — forces visual
+            // RTL/LTR character ordering of its wrapped runs) is a run-container,
+            // not a run. Its inner <w:r>s are paragraph Descendant Runs; drop them
+            // here so they don't flatten into sequential plain runs, dropping the
+            // <w:bdo> wrapper (which carries the load-bearing w:val direction).
+            // The wrapper is surfaced separately as a "bdo" paragraph child whose
+            // verbatim XML the emitter raw-sets — mirrors the ruby path above.
+            .Where(r => r.Ancestors<BidirectionalOverride>().FirstOrDefault() == null)
             // BUG-DUMP4-06: skip runs nested inside an inline SdtRun. Those
             // runs are surfaced separately as a typed `sdt` paragraph child so
             // alias/tag/type metadata round-trips. Without this filter the

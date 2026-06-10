@@ -4400,9 +4400,17 @@ public partial class WordHandler
                     && r.Ancestors<InsertedRun>().FirstOrDefault() == null
                     && r.Ancestors<DeletedRun>().FirstOrDefault() == null)
                 .ToList();
+            // BUG-DUMP-R42-9: <w:bdo> (bidirectional override) is a run-container
+            // — surface each as a "bdo" kind in the DOM-ordered merge so the
+            // emitter re-inserts the verbatim <w:bdo>…</w:bdo> via raw-set,
+            // preserving the w:val direction and the wrapped runs. GetAllRuns
+            // already drops the inner runs (so they don't double-emit as plain
+            // runs). Mirrors the ruby raw-set path.
+            var paraBdos = para.Elements<BidirectionalOverride>().ToList();
             var ordered = runs.Where(r => r.GetFirstChild<Ruby>() == null)
                 .Select(r => (pos: descendantPos.TryGetValue(r, out var p) ? p : int.MaxValue, kind: "run", el: (OpenXmlElement)r))
                 .Concat(paraRubyRuns.Select(r => (pos: descendantPos.TryGetValue(r, out var p) ? p : int.MaxValue, kind: "ruby", el: (OpenXmlElement)r)))
+                .Concat(paraBdos.Select(b => (pos: descendantPos.TryGetValue(b, out var p) ? p : int.MaxValue, kind: "bdo", el: (OpenXmlElement)b)))
                 .Concat(inlineEqsAll.Select(e => (pos: descendantPos.TryGetValue(e, out var p) ? p : int.MaxValue, kind: "eq", el: (OpenXmlElement)e)))
                 .Concat(bareFieldUnknowns.Select(u => (pos: descendantPos.TryGetValue(u, out var p) ? p : int.MaxValue, kind: u.LocalName == "fldChar" ? "fieldChar" : "instrText", el: (OpenXmlElement)u)))
                 .Concat(paraBookmarks.Select(b => (pos: descendantPos.TryGetValue(b, out var p) ? p : int.MaxValue, kind: "bookmark", el: (OpenXmlElement)b)))
@@ -4478,6 +4486,28 @@ public partial class WordHandler
                     };
                     rubyNode.Format["_rawRubyXml"] = rubyRun.OuterXml;
                     node.Children.Add(rubyNode);
+                    runIdx++;
+                }
+                else if (entry.kind == "bdo")
+                {
+                    // BUG-DUMP-R42-9: emit the <w:bdo> bidirectional-override
+                    // wrapper at its DOM position. The node carries the verbatim
+                    // outer XML (stashed under _rawBdoXml) so the emitter re-inserts
+                    // the <w:bdo>…</w:bdo> via a raw-set append, preserving the
+                    // w:val direction and the wrapped runs' visual char ordering.
+                    // Inner-run text surfaces in Text so view/readback isn't empty.
+                    var bdoEl = (BidirectionalOverride)entry.el;
+                    var bdoText = string.Concat(bdoEl.Descendants<Text>().Select(t => t.Text));
+                    var bdoNode = new DocumentNode
+                    {
+                        Type = "bdo",
+                        Text = bdoText,
+                        Path = $"{path}/r[{runIdx + 1}]",
+                    };
+                    bdoNode.Format["_rawBdoXml"] = bdoEl.OuterXml;
+                    if (bdoEl.Val?.HasValue == true)
+                        bdoNode.Format["bdo.val"] = bdoEl.Val.InnerText;
+                    node.Children.Add(bdoNode);
                     runIdx++;
                 }
                 else if (entry.kind == "bookmark")

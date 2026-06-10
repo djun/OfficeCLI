@@ -177,6 +177,9 @@ public static partial class WordBatchEmitter
                 // BUG-DUMP-RUBY: ruby (phonetic guide) child surfaces the
                 // verbatim <w:r><w:ruby> XML for a raw-set append.
                 || c.Type == "ruby"
+                // BUG-DUMP-R42-9: bdo (bidirectional override) child surfaces the
+                // verbatim <w:bdo> wrapper XML for a raw-set append.
+                || c.Type == "bdo"
                 // R10-bug1: include ole children so TryEmitOleRun can fire
                 // a warning instead of letting them be silently filtered
                 // out of the run list (full round-trip is a backlog item).
@@ -400,6 +403,7 @@ public static partial class WordBatchEmitter
             if (TryEmitDateFieldRun(word, run, parentPath, items, ctx)) continue;
             if (TryEmitHyphenRun(word, run, parentPath, items, ctx)) continue;
             if (TryEmitRubyRun(run, parentPath, paraTargetPath, items, ctx)) continue;
+            if (TryEmitBdoRun(run, parentPath, items, ctx)) continue;
             if (TryEmitBreakRun(word, run, parentPath, paraTargetPath, items, ctx)) continue;
             if (TryEmitTabRun(run, paraTargetPath, items)) continue;
             if (TryEmitPtabRun(run, paraTargetPath, items)) continue;
@@ -1162,6 +1166,42 @@ public static partial class WordBatchEmitter
                 Element: "ruby",
                 Path: run.Path,
                 Reason: "ruby (phonetic guide) inside a header/footer/table cell could not be serialized for round-trip; the base text is lost from the replayed document"));
+            return true;
+        }
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = "/document",
+            Xpath = "/w:document/w:body/w:p[last()]",
+            Action = "append",
+            Xml = rawXml!
+        });
+        return true;
+    }
+
+    private static bool TryEmitBdoRun(DocumentNode run, string parentPath, List<BatchItem> items, BodyEmitContext? ctx)
+    {
+        // BUG-DUMP-R42-9: a <w:bdo> (bidirectional override — forces the visual
+        // RTL/LTR character ordering of its wrapped runs) has no scalar add/set
+        // representation; the typed `add r` path drops the wrapper, losing the
+        // load-bearing w:val direction. Re-insert the captured <w:bdo>…</w:bdo>
+        // verbatim via a raw-set append, mirroring the ruby/pgNum raw-set
+        // fallback (same shape: append the wrapper's outer XML to the just-
+        // emitted host paragraph at /w:document/w:body/w:p[last()]).
+        if (run.Type != "bdo") return false;
+        var rawXml = run.Format.TryGetValue("_rawBdoXml", out var rx) ? rx?.ToString() : null;
+        if (string.IsNullOrEmpty(rawXml))
+            return true; // nothing to emit (shouldn't happen) — consumed anyway
+        // The verbatim raw-set targets /w:document/w:body/w:p[last()]; only a
+        // body host has that addressable last() paragraph. A bdo inside a
+        // header/footer/cell would need a different anchor — flag the loss
+        // rather than mis-anchoring (same conservatism as the ruby fallback).
+        if (parentPath != "/body")
+        {
+            ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                Element: "bdo",
+                Path: run.Path,
+                Reason: "bidirectional override (w:bdo) inside a header/footer/table cell could not be serialized for round-trip; the wrapped runs survive flattened but the forced character ordering is lost from the replayed document"));
             return true;
         }
         items.Add(new BatchItem
