@@ -201,6 +201,21 @@
       "readback": "presence of <w:locked/>",
       "enforcement": "report"
     },
+    "customStyle": {
+      "type": "bool",
+      "aliases": [
+        "customstyle"
+      ],
+      "description": "mark the style as user-authored rather than one of Word's built-ins (<w:customStyle/>). Carried verbatim through dump->batch so a built-in style renamed to a short id (Normal->'a') is NOT mis-flagged as custom on rebuild. Omitted from `add`/`set` falls back to inferring built-in-ness from the styleId.",
+      "add": true,
+      "set": false,
+      "get": true,
+      "examples": [
+        "--prop customStyle=true"
+      ],
+      "readback": "CustomStyle.Val (always emitted, true or false)",
+      "enforcement": "report"
+    },
     "align": {
       "type": "enum",
       "values": [

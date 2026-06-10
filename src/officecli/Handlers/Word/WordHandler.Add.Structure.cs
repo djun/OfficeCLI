@@ -888,7 +888,25 @@ public partial class WordHandler
             Type = styleType,
             StyleId = styleId,
         };
-        if (!isBuiltIn)
+        // BUG-DUMP-R30-1: when the caller carries an explicit customStyle prop
+        // (dump→batch round-trip — see ReadStyleLatentFlags), honor it verbatim
+        // instead of re-deriving built-in-ness from styleId. The styleId
+        // discriminator is wrong for docs that rename built-in styles to short
+        // ids (Normal→"a", Heading1→"1"): those ids aren't in
+        // builtInIdsForUpsert, so the old code stamped customStyle=true on a
+        // renamed Normal. Word then stops resolving that style against its
+        // built-in Normal table, changing CJK/Latin justification fitting and
+        // reflowing every justified line. With the prop present we emit
+        // customStyle only when the source had it (true) and leave it absent
+        // otherwise — exactly the source shape. Interactive `add style` with no
+        // customStyle prop still falls back to the styleId derivation below.
+        if (properties.TryGetValue("customStyle", out var sCustomStyle)
+            || properties.TryGetValue("customstyle", out sCustomStyle))
+        {
+            if (IsTruthy(sCustomStyle))
+                newStyle.CustomStyle = true;
+        }
+        else if (!isBuiltIn)
             newStyle.CustomStyle = true;
         // w:default="1" — designate this as the document's default style for its
         // type (paragraph/character/table/numbering). Lets the dump round-trip a

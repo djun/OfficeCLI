@@ -3368,6 +3368,16 @@ public partial class WordHandler
     // builders (single /styles/Id read and the query-list fallback).
     private static void ReadStyleLatentFlags(Style style, DocumentNode node)
     {
+        // BUG-DUMP-R30-1: round-trip w:customStyle faithfully. Built-in
+        // discrimination by styleId (AddStyle's isBuiltIn) is wrong for docs
+        // that rename built-in styles to short ids (Normal→"a", Heading1→"1").
+        // Capturing the source's customStyle bit and replaying it verbatim
+        // means AddStyle never has to re-derive built-in-ness — so a renamed
+        // Normal keeps w:customStyle absent, and Word still resolves it
+        // against its built-in Normal table (justification / CJK fitting).
+        // Emit both true and false explicitly: a missing key would let
+        // AddStyle fall back to styleId derivation, re-introducing the bug.
+        node.Format["customStyle"] = style.CustomStyle?.Value == true;
         if (style.UIPriority?.Val?.Value is int uip) node.Format["uiPriority"] = uip;
         if (style.GetFirstChild<SemiHidden>() != null) node.Format["semiHidden"] = true;
         if (style.GetFirstChild<UnhideWhenUsed>() != null) node.Format["unhideWhenUsed"] = true;
