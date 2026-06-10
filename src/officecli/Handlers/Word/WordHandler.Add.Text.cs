@@ -233,6 +233,14 @@ public partial class WordHandler
                 || properties.TryGetValue("font.complexscript", out ntFontCs)
                 || properties.TryGetValue("font.complex", out ntFontCs))
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "font.cs", ntFontCs);
+            // BUG-DUMP-R31-2: the no-text ¶-mark hoist applied every rFonts slot
+            // (latin/ea/cs/themes) EXCEPT the <w:hint> font-slot selector, so an
+            // empty paragraph whose source mark rPr carried w:hint="eastAsia"
+            // lost it on the dump → batch round-trip. Route font.hint onto the
+            // mark rPr the same way the other slots go (ApplyRunFormatting's
+            // font.hint case writes RunFonts.Hint).
+            if (properties.TryGetValue("font.hint", out var ntFontHint))
+                ApplyRunFormatting(EnsureNoTextMarkRPr(), "font.hint", ntFontHint);
             // BUG-DUMP33-02a: theme-font slots on no-text paragraph hoist.
             // Mirrors the text-run path (font.asciiTheme / font.hAnsiTheme /
             // font.eaTheme / font.csTheme) so `add p --prop font.eaTheme=...`
@@ -692,8 +700,17 @@ public partial class WordHandler
                 rfEaTheme = fEAT;
             if (properties.TryGetValue("font.csTheme", out var fCST) || properties.TryGetValue("font.cstheme", out fCST))
                 rfCsTheme = fCST;
+            // BUG-DUMP-R31-2: <w:rFonts w:hint> font-slot selector on the
+            // implicit text run. A single-run paragraph collapses to `add p
+            // {font.hint=eastAsia text=…}`; without binding the hint to the
+            // implicit run's RunFonts the round-trip dropped it (the dump now
+            // captures it on the paragraph node via the firstRun hoist, but the
+            // text-run path never applied it). w:hint selects which font slot
+            // renders boundary CJK glyphs.
+            string? rfHint = properties.TryGetValue("font.hint", out var fHint) ? fHint : null;
             if (rfAscii != null || rfHAnsi != null || rfEa != null || rfCs != null
-                || rfAsciiTheme != null || rfHAnsiTheme != null || rfEaTheme != null || rfCsTheme != null)
+                || rfAsciiTheme != null || rfHAnsiTheme != null || rfEaTheme != null || rfCsTheme != null
+                || rfHint != null)
             {
                 var rFonts = new RunFonts();
                 if (rfAscii != null) rFonts.Ascii = rfAscii;
@@ -708,6 +725,17 @@ public partial class WordHandler
                     rFonts.EastAsiaTheme = new EnumValue<ThemeFontValues>(new ThemeFontValues(rfEaTheme));
                 if (rfCsTheme != null)
                     rFonts.ComplexScriptTheme = new EnumValue<ThemeFontValues>(new ThemeFontValues(rfCsTheme));
+                if (rfHint != null)
+                {
+                    var hintLower = rfHint.Trim().ToLowerInvariant();
+                    rFonts.Hint = hintLower switch
+                    {
+                        "eastasia" => FontTypeHintValues.EastAsia,
+                        "cs" => FontTypeHintValues.ComplexScript,
+                        "default" => FontTypeHintValues.Default,
+                        _ => rFonts.Hint
+                    };
+                }
                 rProps.AppendChild(rFonts);
             }
             // BUG-R6-03 / F-3: rStyle binds the paragraph mark above (so the
@@ -1662,8 +1690,17 @@ public partial class WordHandler
             nrEaTheme = rfEAT;
         if (properties.TryGetValue("font.csTheme", out var rfCST) || properties.TryGetValue("font.cstheme", out rfCST))
             nrCsTheme = rfCST;
+        // BUG-DUMP-R31-2: <w:rFonts w:hint> font-slot selector on an explicit
+        // `add r` run. Bind it on the SAME curated RunFonts as the other slots
+        // (not via the generic TypedAttributeFallback at the tail) so a run
+        // carrying ONLY a hint (no ea/ascii/…) still materializes a <w:rFonts>
+        // — TypedAttributeFallback's generic binding for a hint-only run is
+        // fragile (project CLAUDE.md: schema reflection is a last-resort fallback,
+        // not the canonical path). The hint composes with ascii/hAnsi/ea/cs.
+        string? nrHint = properties.TryGetValue("font.hint", out var rfHintVal) ? rfHintVal : null;
         if (nrAscii != null || nrHAnsi != null || nrEa != null || nrCs != null
-            || nrAsciiTheme != null || nrHAnsiTheme != null || nrEaTheme != null || nrCsTheme != null)
+            || nrAsciiTheme != null || nrHAnsiTheme != null || nrEaTheme != null || nrCsTheme != null
+            || nrHint != null)
         {
             var nrFonts = new RunFonts();
             if (nrAscii != null) nrFonts.Ascii = nrAscii;
@@ -1678,6 +1715,18 @@ public partial class WordHandler
                 nrFonts.EastAsiaTheme = new EnumValue<ThemeFontValues>(new ThemeFontValues(nrEaTheme));
             if (nrCsTheme != null)
                 nrFonts.ComplexScriptTheme = new EnumValue<ThemeFontValues>(new ThemeFontValues(nrCsTheme));
+            if (nrHint != null)
+            {
+                var nrHintLower = nrHint.Trim().ToLowerInvariant();
+                var nrHintEnum = nrHintLower switch
+                {
+                    "eastasia" => (FontTypeHintValues?)FontTypeHintValues.EastAsia,
+                    "cs" or "complexscript" or "complex" => FontTypeHintValues.ComplexScript,
+                    "default" => FontTypeHintValues.Default,
+                    _ => null,
+                };
+                if (nrHintEnum.HasValue) nrFonts.Hint = nrHintEnum.Value;
+            }
             newRProps.AppendChild(nrFonts);
         }
         if (properties.TryGetValue("size", out var rSize) || properties.TryGetValue("font.size", out rSize) || properties.TryGetValue("fontsize", out rSize))
@@ -2046,6 +2095,10 @@ public partial class WordHandler
                 case "font.eatheme":
                 case "font.eastasiatheme":
                 case "font.cstheme":
+                // BUG-DUMP-R31-2: font.hint consumed by the curated RunFonts
+                // block above; skip the typed-attr fallback so it isn't
+                // re-applied or flagged UNSUPPORTED.
+                case "font.hint":
                 // CS run flags (<w:bCs/> / <w:iCs/> / <w:szCs/>) — the
                 // run-add block above writes them through ApplyRunFormatting;
                 // dotted-fallback can't resolve the dotted name into the

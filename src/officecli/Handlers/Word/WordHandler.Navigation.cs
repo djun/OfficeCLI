@@ -3906,6 +3906,18 @@ public partial class WordHandler
                     node.Format["font.eaTheme"] = pRunFonts.EastAsiaTheme.InnerText;
                 if (pRunFonts.ComplexScriptTheme?.HasValue == true && !node.Format.ContainsKey("font.csTheme"))
                     node.Format["font.csTheme"] = pRunFonts.ComplexScriptTheme.InnerText;
+                // BUG-DUMP-R31-2: the bare-key firstRun/empty-¶ fallback emitted
+                // every rFonts slot (latin/ea/themes) EXCEPT the <w:hint> font-
+                // slot selector. An empty paragraph whose ¶-mark rPr carried
+                // <w:rFonts w:hint="eastAsia"/> (and, by the same path, a single-
+                // run paragraph hoisting its first run's rFonts) therefore lost
+                // the hint on dump → it never round-tripped. w:hint selects which
+                // font slot renders boundary CJK glyphs; dropping it can rebind
+                // the glyph to the wrong physical font. Mirror the dotted-markRPr
+                // and RunToNode emits — AddParagraph's bare-key path routes
+                // font.hint back through ApplyRunFormatting on replay.
+                if (pRunFonts.Hint?.HasValue == true && !node.Format.ContainsKey("font.hint"))
+                    node.Format["font.hint"] = pRunFonts.Hint.InnerText;
             }
 
             var fsVal = rp?.FontSize?.Val?.Value ?? markRp?.GetFirstChild<FontSize>()?.Val?.Value;
