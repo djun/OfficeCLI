@@ -348,7 +348,7 @@ public partial class WordHandler
                         if (cropVal.HasValue)
                             RenderCroppedImage(imgHtml, dataUri, widthPx, heightPx, cropVal.Value.l, cropVal.Value.t, cropVal.Value.r, cropVal.Value.b, HtmlEncodeAttr(alt), fc);
                         else
-                            imgHtml.Append($"<img src=\"{dataUri}\" alt=\"{HtmlEncodeAttr(alt)}\" width=\"{widthPx}\" height=\"{heightPx}\" style=\"max-width:100%;height:auto;{fc}\">");
+                            imgHtml.Append($"<img src=\"{dataUri}\" alt=\"{HtmlEncodeAttr(alt)}\" width=\"{widthPx}\" height=\"{heightPx}\" style=\"max-width:100%;height:{heightPx}px;{fc}\">");
                         var markerId = $"TOP_ANCHOR_{_ctx.TopAnchoredImages.Count}";
                         _ctx.TopAnchoredImages.Add((markerId, imgHtml.ToString()));
                         sb.Append($"<!--{markerId}-->");
@@ -368,9 +368,15 @@ public partial class WordHandler
             var contentWidthPt = pgLayout.WidthPt - pgLayout.MarginLeftPt - pgLayout.MarginRightPt;
             var imgWidthPt = widthPx * 72.0 / 96.0; // 96 DPI → pt
             var overflows = widthPx > 0 && imgWidthPt > contentWidthPt;
+            // When the drawing carries an explicit extent (cx/cy), Word renders
+            // at exactly that size even if it distorts the source aspect ratio.
+            // Pin the height in px so the browser honors the declared dimensions;
+            // `height:auto` would let it recompute height from the source ratio.
+            var hasExplicitSize = widthPx > 0 && heightPx > 0;
+            var heightStyle = hasExplicitSize ? $"height:{heightPx}px" : "height:auto";
             var styleParts = overflows
-                ? new List<string> { $"width:{imgWidthPt:0.#}pt", "height:auto" }
-                : new List<string> { "max-width:100%", "height:auto" };
+                ? new List<string> { $"width:{imgWidthPt:0.#}pt", heightStyle }
+                : new List<string> { "max-width:100%", heightStyle };
             if (!string.IsNullOrEmpty(floatCss)) styleParts.Add(floatCss);
 
             // Picture effects from pic:spPr — rotation, flip, border, shadow

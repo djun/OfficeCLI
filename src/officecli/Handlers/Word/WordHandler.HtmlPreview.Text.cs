@@ -629,9 +629,11 @@ public partial class WordHandler
         {
             var widthAttr = widthPx > 0 ? $" width=\"{widthPx}\"" : "";
             var heightAttr = heightPx > 0 ? $" height=\"{heightPx}\"" : "";
-            var sizeStyle = widthPx > 0
-                ? $"max-width:100%;width:{widthPx}px;height:auto"
-                : "max-width:100%";
+            var sizeStyle = widthPx > 0 && heightPx > 0
+                ? $"max-width:100%;width:{widthPx}px;height:{heightPx}px"
+                : widthPx > 0
+                    ? $"max-width:100%;width:{widthPx}px;height:auto"
+                    : "max-width:100%";
             sb.Append($"<img src=\"{dataUri}\" alt=\"Embedded object\"{widthAttr}{heightAttr} style=\"{sizeStyle}\">");
         }
         else
