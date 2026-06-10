@@ -318,7 +318,7 @@ public partial class WordHandler
             // `data` (inline cell content), like rows/cols/colwidths, is fully
             // consumed earlier (TryGetValue("data") above) — skip it here so the
             // tblPr switch default doesn't falsely flag it as unsupported_property.
-            if (tkl is "rows" or "cols" or "columns" or "colwidths" or "gridcols" or "skiptblw" or "data" || tkl.StartsWith("border")) continue;
+            if (tkl is "rows" or "cols" or "columns" or "colwidths" or "gridcols" or "skiptblw" or "skipdefaultborders" or "data" || tkl.StartsWith("border")) continue;
             // ACCOUNTING(handler-as-truth): see AddStyle. ContainsKey only
             // when the switch will consume this key — otherwise typos would
             // leak past UnusedKeys detection.
@@ -1177,6 +1177,10 @@ public partial class WordHandler
             var keyLower = key.ToLowerInvariant();
             if (keyLower is "fill" or "shd" or "shading")
             {
+                // foreach uses the base Dictionary enumerator (bypasses the
+                // TrackingPropertyDictionary override) — register the key so the
+                // consumed shading prop isn't a false unsupported_property.
+                properties.ContainsKey(key);
                 var tcPrFill = newCell.GetFirstChild<TableCellProperties>()
                     ?? newCell.PrependChild(new TableCellProperties());
                 var shd = new Shading();
@@ -1204,6 +1208,34 @@ public partial class WordHandler
                 }
                 tcPrFill.Shading = shd;
             }
+        }
+
+        // BUG-WB-ADD-CELL-RUN: bare run-level props (bold/italic/color/size/
+        // font/underline/strike/highlight) on AddCell were silently dropped and
+        // falsely warned, while Set on a cell applies them (SetElementTableCell
+        // run-prop branch). CONSISTENCY(add-set-symmetry): fan out across the
+        // cell's runs, or — when the cell has no text run — hoist onto the
+        // paragraph-mark rPr so a future run inherits, mirroring AddParagraph's
+        // no-text hoist and Set's !hasRuns branch.
+        foreach (var (rkey, rvalue) in properties)
+        {
+            var rkl = rkey.ToLowerInvariant();
+            if (rkl is not ("font" or "size" or "fontsize" or "bold" or "italic"
+                or "color" or "highlight" or "underline" or "underline.color"
+                or "underlinecolor" or "strike"))
+                continue;
+            // Register the key with the tracking comparer (foreach bypasses it).
+            properties.ContainsKey(rkey);
+            bool cellHasRuns = false;
+            foreach (var existingRun in cellParagraph.Elements<Run>())
+            {
+                cellHasRuns = true;
+                ApplyRunFormatting(EnsureRunProperties(existingRun), rkey, rvalue);
+            }
+            var rPProps = cellParagraph.ParagraphProperties ?? cellParagraph.PrependChild(new ParagraphProperties());
+            var rMarkRPr = rPProps.ParagraphMarkRunProperties ?? rPProps.AppendChild(new ParagraphMarkRunProperties());
+            ApplyRunFormatting(rMarkRPr, rkey, rvalue);
+            if (!cellHasRuns && rMarkRPr.ChildElements.Count == 0) rMarkRPr.Remove();
         }
 
         // CONSISTENCY(add-set-symmetry): mirror Set's noWrap / hideMark cases

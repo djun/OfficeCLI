@@ -591,6 +591,10 @@ public partial class WordHandler
         var markRPr = pProps.ParagraphMarkRunProperties ?? pProps.AppendChild(new ParagraphMarkRunProperties());
         foreach (var (key, value) in properties)
         {
+            // foreach iterates the base Dictionary enumerator, which bypasses the
+            // TrackingPropertyDictionary override — register each iterated key so
+            // genuinely-consumed props aren't reported as false unsupported_property.
+            properties.ContainsKey(key);
             if (key.Equals("text", StringComparison.OrdinalIgnoreCase)) continue;
             // BUG-DUMP-R42-1: `referenceStyle` is consumed at note-creation time
             // (AddFootnote/AddEndnote stamps it as the ref-mark run's <w:rStyle>).
@@ -645,6 +649,9 @@ public partial class WordHandler
         var markRPr = pProps.ParagraphMarkRunProperties ?? pProps.AppendChild(new ParagraphMarkRunProperties());
         foreach (var (key, value) in properties)
         {
+            // Register each iterated key with the tracking comparer (foreach uses
+            // the base Dictionary enumerator, bypassing the tracking override).
+            properties.ContainsKey(key);
             var lk = key.ToLowerInvariant();
             if (lk == "text" || lk == "author" || lk == "initials" || lk == "date") continue;
             // BUG-DUMP-R45-3: explicit paragraph-mark-only formatting (the dotted
