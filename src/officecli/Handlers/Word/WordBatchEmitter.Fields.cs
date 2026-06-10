@@ -262,15 +262,25 @@ public static partial class WordBatchEmitter
             }
             if (sawNestedField)
             {
-                // Nested-field branch: the AddField rebuild path cannot
-                // represent IF/REF/MERGEFIELD with embedded child fields.
-                // Round-trip through a raw-set passthrough so the nested
-                // structure survives byte-for-byte. The host paragraph's
-                // emit already creates the paragraph; the raw-set append
-                // is wired below in TryEmitFieldRun via the
-                // `_rawFieldSlice` Format hint. Synthesize a sentinel
-                // entry that the field-emit branch routes to raw-set
-                // instead of AddField.
+                // BUG-DUMP-R43-5: nested-field branch — the AddField rebuild
+                // path rebuilds a FLAT begin/instr/sep/display/end chain and
+                // cannot represent IF/REF/MERGEFIELD with an embedded child
+                // field. Previously this synth only warned + emitted the cached
+                // display text, so a field whose instruction contains a complete
+                // nested field (outer IF wrapping an inner PAGE) collapsed to its
+                // cached "1" and every fldChar/instrText was dropped — the live
+                // field gone, no longer recomputable. Round-trip the WHOLE
+                // begin..end run slice verbatim via a raw-set passthrough so the
+                // nested structure survives byte-for-byte. The slice runs each
+                // carry a resolvable source Path; stash them so TryEmitFieldRun
+                // re-reads their OuterXml and appends them to the rebuilt
+                // paragraph (mirrors EmitCrossParagraphFieldMember's raw-pass).
+                var slicexPaths = new List<string>();
+                for (int s = i; s <= end; s++)
+                {
+                    var p = children[s].Path;
+                    if (!string.IsNullOrEmpty(p)) slicexPaths.Add(p);
+                }
                 var rawSynth = new DocumentNode
                 {
                     Path = c.Path,
@@ -282,6 +292,7 @@ public static partial class WordBatchEmitter
                         ["_nestedField"] = true,
                         ["_fieldChildStart"] = i,
                         ["_fieldChildEnd"] = end,
+                        ["_nestedFieldSlicePaths"] = slicexPaths,
                     }
                 };
                 result.Add(rawSynth);

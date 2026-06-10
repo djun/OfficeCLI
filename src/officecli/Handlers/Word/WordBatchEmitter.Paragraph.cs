@@ -1669,12 +1669,48 @@ public static partial class WordBatchEmitter
         }
         if (run.Format.TryGetValue("_nestedField", out var nfObj) && nfObj is bool nfB && nfB)
         {
+            // BUG-DUMP-R43-5: round-trip the nested field's begin..end run slice
+            // verbatim via raw-set so the full fldChar/instrText sequence (and the
+            // inner field) survives, instead of collapsing to cached display text.
+            // Each slice run carries a resolvable source Path; concatenate their
+            // OuterXml and append to the just-emitted host paragraph at
+            // /w:document/w:body/w:p[last()] (the same last()-relative attach the
+            // ruby/bdo raw-set fallbacks use). Only a /body host has an
+            // addressable last() paragraph — a nested field inside a header/footer/
+            // cell falls back to the legacy warning+cached-text path.
+            var slicePaths = run.Format.TryGetValue("_nestedFieldSlicePaths", out var nfSpObj)
+                ? nfSpObj as List<string> : null;
+            if (parentPath == "/body" && slicePaths is { Count: > 0 })
+            {
+                var sb = new System.Text.StringBuilder();
+                bool allResolved = true;
+                foreach (var sp in slicePaths)
+                {
+                    var rx = word.GetElementXml(sp);
+                    if (string.IsNullOrEmpty(rx)) { allResolved = false; break; }
+                    sb.Append(rx);
+                }
+                if (allResolved && sb.Length > 0)
+                {
+                    items.Add(new BatchItem
+                    {
+                        Command = "raw-set",
+                        Part = "/document",
+                        Xpath = "/w:document/w:body/w:p[last()]",
+                        Action = "append",
+                        Xml = sb.ToString()
+                    });
+                    return true;
+                }
+            }
+            // Fallback (non-body host or unresolvable slice): preserve the cached
+            // display and flag the loss, as before.
             if (ctx != null)
             {
                 ctx.Warnings.Add(new DocxUnsupportedWarning(
                     Element: "field.nested",
                     Path: run.Path,
-                    Reason: "nested field (begin inside a field's branch) cannot round-trip through add field; cached display preserved but inner field codes dropped"));
+                    Reason: "nested field (begin inside a field's branch) inside a header/footer/table cell could not be serialized for round-trip; cached display preserved but inner field codes dropped"));
             }
             // Still emit the cached display so the paragraph isn't empty.
             if (!string.IsNullOrEmpty(run.Text))
