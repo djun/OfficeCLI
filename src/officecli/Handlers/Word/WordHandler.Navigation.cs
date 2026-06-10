@@ -302,10 +302,13 @@ public partial class WordHandler
                 node.Format["noEndnote"] = true;
 
             // BUG-DUMP-SECT-FORMPROT: <w:formProt/> locks the section's content
-            // except form fields. Bare on/off toggle (no val attr) — surface as
-            // canonical formProt=true so dump→batch round-trips the flag.
-            if (sectPr.GetFirstChild<FormProtection>() != null)
-                node.Format["formProt"] = true;
+            // except form fields. BUG-DUMP-R40-4: ST_OnOff — bare = ON,
+            // <w:formProt w:val="false"/> = OFF. Surface the actual value (was a
+            // presence-only test that emitted true for an explicit-false source,
+            // flipping protection false→true on round-trip).
+            var formProtN = sectPr.GetFirstChild<FormProtection>();
+            if (formProtN != null)
+                node.Format["formProt"] = formProtN.Val == null || formProtN.Val.Value;
 
             var lnNum = sectPr.GetFirstChild<LineNumberType>();
             if (lnNum != null)
@@ -3698,9 +3701,12 @@ public partial class WordHandler
                 }
 
                 // BUG-DUMP-SECT-FORMPROT: <w:formProt/> on a mid-document section
-                // carrier. Bare on/off toggle — surface as sectionBreak.formProt.
-                if (inlineSectPr.GetFirstChild<FormProtection>() != null)
-                    node.Format["sectionBreak.formProt"] = true;
+                // carrier. BUG-DUMP-R40-4: ST_OnOff — surface the actual on/off
+                // value (presence-only test flipped an explicit-false to true on
+                // round-trip; AddSection omits the element on a falsey value).
+                var inlineFormProt = inlineSectPr.GetFirstChild<FormProtection>();
+                if (inlineFormProt != null)
+                    node.Format["sectionBreak.formProt"] = inlineFormProt.Val == null || inlineFormProt.Val.Value;
 
                 // BUG-DUMP9-06: Columns / VerticalTextAlignmentOnPage on
                 // an inline sectPr carrier were silently dropped — only

@@ -1003,10 +1003,18 @@ public partial class WordHandler
             secNode.Format["noEndnote"] = true;
 
         // BUG-DUMP-SECT-FORMPROT: <w:formProt/> locks section content except
-        // form fields. Bare on/off toggle. Mirror the body sectPr readback so
-        // Get('/') and /section[N] surface the same formProt=true key.
-        if (sectPr.GetFirstChild<FormProtection>() != null)
-            secNode.Format["formProt"] = true;
+        // form fields. Mirror the body sectPr readback so Get('/') and
+        // /section[N] surface the same formProt key.
+        // BUG-DUMP-R40-4: formProt is ST_OnOff — a bare <w:formProt/> means ON,
+        // but <w:formProt w:val="false"/> means OFF. The old readback surfaced
+        // formProt=true for BOTH (presence-only test), so an explicit-false
+        // source emitted formProt=true, Add/Set wrote a bare <w:formProt/>, and
+        // the round-trip silently flipped protection false→true (form-locked the
+        // doc). Surface the actual on/off value; Add/Set omit the element on a
+        // falsey value, so absent==false==off round-trips correctly.
+        var formProt = sectPr.GetFirstChild<FormProtection>();
+        if (formProt != null)
+            secNode.Format["formProt"] = formProt.Val == null || formProt.Val.Value;
 
         // Header / footer references — expose so users can debug inheritance
         var mainPart = _doc.MainDocumentPart;
