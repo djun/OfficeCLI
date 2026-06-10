@@ -505,6 +505,28 @@ internal static partial class ChartHelper
         if (catAxisOutline != null && catAxisOutline.GetFirstChild<Drawing.NoFill>() == null)
             ReadOutlineDetail(catAxisOutline, node, "catAxisLine");
 
+        // BUG-DUMP-R34-1: capture the value-axis line, category-axis line, and
+        // plot-area border/fill as VERBATIM <c:spPr> OuterXml (same robust
+        // approach as the R33 series/dPt/dLbls styling). The granular
+        // valAxisLine/catAxisLine/plotArea.border readback above used the
+        // strict typed C.ChartShapeProperties accessor, which the SDK
+        // deserializes as the plain C.ShapeProperties form after a reload — so
+        // the value-axis line and the plot-area border (a <a:ln> living
+        // alongside the gradFill that `plotFill` already captures) were
+        // silently dropped on dump→batch. GetSpPrChildXml reads the spPr child
+        // by LOCAL NAME (works for both typed forms) and only emits when the
+        // spPr carries meaningful styling (a:ln / fill / a:effectLst), so plain
+        // charts stay clean. The verbatim key supersedes the lossy granular
+        // keys on replay (the emitter drops them when the verbatim form is
+        // present). These fragments reference theme colours (round-tripped via
+        // the theme part) and carry NO external relationships.
+        var valAxSpPrXml = GetSpPrChildXml(valAxis);
+        if (valAxSpPrXml != null) node.Format["valAx.spPr"] = valAxSpPrXml;
+        var catAxSpPrXml = GetSpPrChildXml(catAxis);
+        if (catAxSpPrXml != null) node.Format["catAx.spPr"] = catAxSpPrXml;
+        var plotAreaSpPrXml = GetSpPrChildXml(plotArea);
+        if (plotAreaSpPrXml != null) node.Format["plotArea.spPr"] = plotAreaSpPrXml;
+
         // Axis visibility (c:delete)
         var valAxisDelete = valAxis?.GetFirstChild<C.Delete>();
         if (valAxisDelete?.Val?.HasValue == true && valAxisDelete.Val.Value)
@@ -1227,6 +1249,31 @@ internal static partial class ChartHelper
         return spPr.GetFirstChild<Drawing.Outline>() != null
             || spPr.GetFirstChild<Drawing.EffectList>() != null
             || spPr.GetFirstChild<Drawing.GradientFill>() != null;
+    }
+
+    /// <summary>
+    /// BUG-DUMP-R34-1: return the verbatim OuterXml of an element's <c:spPr>
+    /// child when it carries meaningful styling — an outline (<a:ln>), any fill
+    /// (<a:solidFill>/<a:gradFill>/<a:pattFill>/<a:blipFill>/<a:noFill>), or an
+    /// effect list (<a:effectLst>). The spPr is located by LOCAL NAME so it
+    /// works whether the SDK exposes it as the typed C.ChartShapeProperties
+    /// (freshly built) or the plain C.ShapeProperties (after a part reload) —
+    /// the strict typed accessors used elsewhere miss the reloaded form and
+    /// silently drop the value-axis line / plot-area border. Returns null when
+    /// there is no spPr or it holds nothing worth round-tripping verbatim, so
+    /// plain charts emit no key.
+    /// </summary>
+    private static string? GetSpPrChildXml(OpenXmlElement? parent)
+    {
+        if (parent == null) return null;
+        var spPr = parent.ChildElements
+            .FirstOrDefault(e => e.LocalName == "spPr"
+                && e.NamespaceUri == "http://schemas.openxmlformats.org/drawingml/2006/chart");
+        if (spPr == null) return null;
+        bool meaningful = spPr.ChildElements.Any(c =>
+            c.LocalName is "ln" or "solidFill" or "gradFill" or "pattFill"
+                or "blipFill" or "noFill" or "effectLst" or "effectDag");
+        return meaningful ? spPr.OuterXml : null;
     }
 
     /// <summary>

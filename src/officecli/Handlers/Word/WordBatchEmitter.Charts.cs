@@ -17,6 +17,38 @@ public static partial class WordBatchEmitter
         props.Remove("id");
         props.Remove("seriesCount");
 
+        // BUG-DUMP-R34-1: the chart-level verbatim axis-line / plot-area spPr
+        // fragments (valAx.spPr / catAx.spPr / plotArea.spPr) are the source of
+        // truth for the value-axis line, category-axis line, and plot-area
+        // border/fill. When present, drop the lossy granular keys they
+        // supersede so replay doesn't re-derive a second, conflicting outline
+        // or fill on top of the verbatim XML:
+        //   - plotArea.spPr carries the gradFill AND the border <a:ln> ->
+        //     drop plotFill + plotArea.border[.*].
+        //   - valAx.spPr / catAx.spPr carry the axis line -> drop
+        //     valAxisLine[.*] / catAxisLine[.*].
+        // The verbatim keys themselves flow through to SetChartProperties (they
+        // are deferred + handled there). Plain charts emit none of these, so
+        // this is a no-op for them.
+        if (props.ContainsKey("plotArea.spPr"))
+        {
+            props.Remove("plotFill");
+            foreach (var k in props.Keys
+                .Where(k => k.StartsWith("plotArea.border", StringComparison.OrdinalIgnoreCase))
+                .ToList())
+                props.Remove(k);
+        }
+        if (props.ContainsKey("valAx.spPr"))
+            foreach (var k in props.Keys
+                .Where(k => k.StartsWith("valAxisLine", StringComparison.OrdinalIgnoreCase))
+                .ToList())
+                props.Remove(k);
+        if (props.ContainsKey("catAx.spPr"))
+            foreach (var k in props.Keys
+                .Where(k => k.StartsWith("catAxisLine", StringComparison.OrdinalIgnoreCase))
+                .ToList())
+                props.Remove(k);
+
         // Build data="Name:v1,v2;..." from series children, plus the per-series
         // dotted props AddChart honors (series{N}.color, series{N}.dataLabels).
         // N is 1-based over the EMITTED (non-reference-line) series, matching how

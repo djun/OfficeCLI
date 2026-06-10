@@ -1485,6 +1485,58 @@ internal static partial class ChartHelper
     }
 
     /// <summary>
+    /// BUG-DUMP-R34-1: replace (or insert) an axis's <c:spPr> at the schema-
+    /// correct position. CT_CatAx / CT_ValAx / CT_DateAx share the same tail
+    /// after tickLblPos: spPr?, txPr?, crossAx, crosses?/crossesAt?,
+    /// crossBetween?, …, lblAlgn?, lblOffset?, tickLblSkip?, tickMarkSkip?,
+    /// noMultiLvlLbl?, extLst?. spPr therefore precedes txPr and every cross*
+    /// / label* element. AppendChild lands it after crossAx (always present)
+    /// and Word silently ignores the out-of-order spPr — so the axis line never
+    /// renders. Any existing spPr (typed C.ChartShapeProperties OR the plain
+    /// C.ShapeProperties form the SDK produces after a reload) is removed first
+    /// so a verbatim replace is idempotent.
+    /// </summary>
+    internal static void SetAxisSpPr(OpenXmlCompositeElement axis, OpenXmlElement spPr)
+    {
+        foreach (var existing in axis.ChildElements
+            .Where(e => e.LocalName == "spPr").ToList())
+            existing.Remove();
+        string[] insertBeforeNames =
+        [
+            "txPr", "crossAx", "crosses", "crossesAt", "crossBetween",
+            "majorUnit", "minorUnit", "dispUnits",
+            "auto", "lblAlgn", "lblOffset", "tickLblSkip", "tickMarkSkip",
+            "noMultiLvlLbl", "baseTimeUnit", "majorTimeUnit", "minorTimeUnit",
+            "extLst"
+        ];
+        foreach (var sibling in axis.ChildElements)
+        {
+            if (insertBeforeNames.Contains(sibling.LocalName))
+            {
+                axis.InsertBefore(spPr, sibling);
+                return;
+            }
+        }
+        axis.AppendChild(spPr);
+    }
+
+    /// <summary>
+    /// BUG-DUMP-R34-1: replace (or insert) the plot-area's <c:spPr> at the
+    /// schema-correct position. CT_PlotArea tail: …(chart-group)+, (axis)*,
+    /// dTable?, spPr?, extLst?. spPr is therefore the last child before extLst.
+    /// Any existing spPr (typed or post-reload plain form) is removed first.
+    /// </summary>
+    internal static void SetPlotAreaSpPr(OpenXmlCompositeElement plotArea, OpenXmlElement spPr)
+    {
+        foreach (var existing in plotArea.ChildElements
+            .Where(e => e.LocalName == "spPr").ToList())
+            existing.Remove();
+        var extLst = plotArea.ChildElements.FirstOrDefault(e => e.LocalName == "extLst");
+        if (extLst != null) plotArea.InsertBefore(spPr, extLst);
+        else plotArea.AppendChild(spPr);
+    }
+
+    /// <summary>
     /// Insert a child into the CT_Chart element at the correct schema position.
     /// Schema: title?, autoTitleDeleted?, pivotFmts?, view3D?, floor?, sideWall?,
     /// backWall?, plotArea, legend?, plotVisOnly?, dispBlanksAs?, showDLblsOverMax?, extLst?.

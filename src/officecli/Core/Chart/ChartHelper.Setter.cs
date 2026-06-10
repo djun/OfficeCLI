@@ -2675,6 +2675,43 @@ internal static partial class ChartHelper
                     break;
                 }
 
+                // BUG-DUMP-R34-1: inject the Reader's verbatim axis-line /
+                // plot-area <c:spPr> fragments. value is the captured OuterXml;
+                // parse it back into the typed SDK element and splice it in at
+                // the schema-correct position (axis: after tickLblPos, before
+                // txPr/crossAx; plotArea: last child before extLst). The
+                // fragments carry their own a:/c: namespace declarations (taken
+                // from live elements on the Reader side), so the SDK string
+                // constructor round-trips them losslessly. Out-of-order
+                // injection makes Word silently ignore the line — hence the
+                // dedicated SetAxisSpPr / SetPlotAreaSpPr helpers.
+                case "valax.sppr":
+                {
+                    if (string.IsNullOrWhiteSpace(value)) break;
+                    var valAx = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>();
+                    if (valAx == null) { unsupported.Add(key); break; }
+                    SetAxisSpPr(valAx, new C.ChartShapeProperties(value));
+                    break;
+                }
+                case "catax.sppr":
+                {
+                    if (string.IsNullOrWhiteSpace(value)) break;
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    var catAx = (OpenXmlCompositeElement?)plotArea2?.GetFirstChild<C.CategoryAxis>()
+                        ?? plotArea2?.GetFirstChild<C.DateAxis>();
+                    if (catAx == null) { unsupported.Add(key); break; }
+                    SetAxisSpPr(catAx, new C.ChartShapeProperties(value));
+                    break;
+                }
+                case "plotarea.sppr":
+                {
+                    if (string.IsNullOrWhiteSpace(value)) break;
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    SetPlotAreaSpPr(plotArea2, new C.ShapeProperties(value));
+                    break;
+                }
+
                 // ==================== Advanced Features ====================
 
                 case "referenceline" or "refline" or "targetline":

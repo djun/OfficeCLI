@@ -598,6 +598,11 @@ internal static partial class ChartHelper
         "plotarea.border", "plotborder", "chartarea.border", "chartborder",
         "gapwidth", "gap", "overlap",
         "axisline", "axis.line", "cataxisline", "valaxisline",
+        // BUG-DUMP-R34-1: verbatim axis-line / plot-area spPr fragments,
+        // injected post-build by SetChartProperties at the schema-correct
+        // position inside CT_ValAx / CT_CatAx / CT_PlotArea. (plotarea.sppr
+        // also matches the "plotarea." deferred prefix; listed for symmetry.)
+        "valax.sppr", "catax.sppr", "plotarea.sppr",
         // R24 — dotted subkeys mirroring Reader emit.
         "valaxisline.color", "valaxisline.width", "valaxisline.dash",
         "cataxisline.color", "cataxisline.width", "cataxisline.dash",
