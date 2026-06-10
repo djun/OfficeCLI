@@ -336,6 +336,16 @@ public partial class WordHandler
         var sections = CollectSections(body);
         var sectRegex = new Regex(@"<!--SECT:(\d+)-->");
         var activeLayout = pgLayout;
+        // Document-level page background (<w:background w:color="RRGGBB"/>).
+        // Real Word fills the whole page area; emit background-color on the
+        // .page div behind body/margins. Color is ST_HexColor (bare RRGGBB).
+        string pageBgCss = "";
+        var docBg = _doc.MainDocumentPart?.Document?.GetFirstChild<DocumentBackground>();
+        if (docBg?.Color?.Value is { Length: > 0 } bgColor
+            && !bgColor.Equals("auto", StringComparison.OrdinalIgnoreCase))
+        {
+            pageBgCss = $"background-color:{ParseHelpers.FormatHexColor(bgColor)};";
+        }
         // #10: per-section pgNumType — w:start resets the displayed page
         // counter at the section boundary; w:fmt swaps the number format
         // (decimalZero, upperRoman, …) applied to PAGE/NUMPAGES substitutions.
@@ -379,7 +389,8 @@ public partial class WordHandler
                 $"padding:{activeLayout.MarginTopPt.ToString("0.#", ci)}pt " +
                 $"{activeLayout.MarginRightPt.ToString("0.#", ci)}pt " +
                 $"{activeLayout.MarginBottomPt.ToString("0.#", ci)}pt " +
-                $"{activeLayout.MarginLeftPt.ToString("0.#", ci)}pt";
+                $"{activeLayout.MarginLeftPt.ToString("0.#", ci)}pt;" +
+                pageBgCss;
             // #1: lnNumType — read per-section line-number settings and
             // expose them as data-* attributes so the JS paginator can
             // inject line numbers after layout settles. Only applies when
