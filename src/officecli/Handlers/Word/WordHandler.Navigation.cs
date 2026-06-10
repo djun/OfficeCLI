@@ -4837,6 +4837,17 @@ public partial class WordHandler
                 node.Format["hideMark"] = true;
             if (tcPr.GetFirstChild<TableCellFitText>() != null)
                 node.Format["tcFitText"] = true;
+            // BUG-DUMP-R32-3: <w:cellMerge> is a tracked-change marker (a cell
+            // split/merge made under Track Changes) carrying
+            // vMerge/vMergeOrig/id/author/date. It's neither a curated tcPr key
+            // nor reachable through any FillUnknownChildProps fallback, so it was
+            // dropped SILENTLY on dump→batch — a tracked-change loss (unlike
+            // pPrChange/rPrChange which warn). Surface its verbatim OuterXml so
+            // the Table emitter can re-apply it via a raw-set into the cell's
+            // tcPr. Schema: cellMerge has no typed val/attr the curated setters
+            // model, so the raw XML is the faithful round-trip carrier.
+            if (tcPr.GetFirstChild<CellMerge>() is { } cellMergeEl)
+                node.Format["cellMerge.xml"] = cellMergeEl.OuterXml;
         }
         // BUG-R4-05: when no per-cell tcW is set, synthesize width from the
         // parent table's tblGrid/gridCol so Get always exposes a unit-qualified

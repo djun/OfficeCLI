@@ -434,6 +434,53 @@ public static partial class WordBatchEmitter
                     });
                 }
 
+                // BUG-DUMP-R32-3: re-apply a <w:cellMerge> tracked-change marker
+                // (cell split/merge under Track Changes) verbatim. It is not a
+                // curated tcPr Set key, so it round-trips via raw-set into the
+                // cell's <w:tcPr>. The SDK reorders tcPr children to schema order
+                // on save, so appending is safe regardless of insertion point.
+                // When the cell already got a tcPr from the cellProps `set` above
+                // (emitted earlier in item order), append into that existing
+                // tcPr; otherwise wrap the marker in a fresh <w:tcPr> appended to
+                // the cell. Guarded to body-hosted tables (cellRawXPath != null),
+                // matching the cell-SDT raw-set restriction; header/footer cells
+                // emit a warning instead so the loss is never silent.
+                if (cellNode.Format.TryGetValue("cellMerge.xml", out var cellMergeRaw)
+                    && cellMergeRaw?.ToString() is { Length: > 0 } cellMergeXml)
+                {
+                    if (cellRawXPath != null)
+                    {
+                        bool tcPrExists = cellProps.Count > 0 || cellHadRevision;
+                        items.Add(tcPrExists
+                            ? new BatchItem
+                            {
+                                Command = "raw-set",
+                                Part = "/document",
+                                Xpath = $"{cellRawXPath}/w:tcPr",
+                                Action = "append",
+                                Xml = cellMergeXml,
+                            }
+                            : new BatchItem
+                            {
+                                Command = "raw-set",
+                                Part = "/document",
+                                Xpath = cellRawXPath,
+                                Action = "append",
+                                Xml = $"<w:tcPr>{cellMergeXml}</w:tcPr>",
+                            });
+                    }
+                    else
+                    {
+                        ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                            Element: "cellMerge",
+                            Path: cells[c].Path,
+                            Reason: "A <w:cellMerge> tracked-change marker (cell split/merge "
+                            + "under Track Changes) in a header/footer-hosted table "
+                            + "cell was dropped on rebuild (cell raw-set targeting is "
+                            + "limited to body tables)."));
+                    }
+                }
+
                 // Each cell carries auto-generated paragraphs (Add table seeds
                 // one empty paragraph per cell). Update the first one in place
                 // and append further paragraphs as fresh adds. Nested tables
