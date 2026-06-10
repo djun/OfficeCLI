@@ -53,6 +53,7 @@ public static partial class WordBatchEmitter
         "/word/commentsExtended.xml",    // BUG-DUMP-R26-4: reply threading — EmitComments raw-set
         "/word/footnotes.xml",
         "/word/endnotes.xml",
+        "/word/fontTable.xml",           // BUG-DUMP-R42-3: EmitFontTableRaw round-trips faces + altName subs
         // OPC auto-managed
         "/docProps/core.xml",            // restamped by OfficeCliMetadata
         "/docProps/app.xml",             // restamped by OfficeCliMetadata
@@ -86,7 +87,6 @@ public static partial class WordBatchEmitter
         ("/word/commentsIds.xml",      "commentsIds",            "modern-comment durable-id metadata dropped on dump"),
         ("/word/commentsExtensible.xml","commentsExtensible",    "modern-comment extension metadata dropped on dump"),
         ("/word/webSettings.xml",      "webSettings",            "web-publishing settings dropped on dump"),
-        ("/word/fontTable.xml",        "fontTable",              "embedded-font table dropped on dump"),
         ("/word/fonts/",               "embeddedFont",           "embedded font binary (.odttf) dropped on dump"),
         ("/word/vbaProject.bin",       "vbaProject",             "VBA macro project dropped on dump"),
         ("/word/vbaData.xml",          "vbaData",                "VBA macro metadata dropped on dump"),

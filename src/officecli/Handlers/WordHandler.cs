@@ -404,6 +404,11 @@ public partial class WordHandler : IDocumentHandler
             "/numbering" => mainPart.NumberingDefinitionsPart?.Numbering?.OuterXml ?? "(no numbering)",
             "/comments" => mainPart.WordprocessingCommentsPart?.Comments?.OuterXml ?? "(no comments)",
             "/theme" => mainPart.ThemePart?.Theme?.OuterXml ?? "(no theme)",
+            // BUG-DUMP-R42-3: word/fontTable.xml declares font faces +
+            // altName substitutions (e.g. 方正小标宋简体 altName=方正舒体).
+            // Without it Word substitutes different faces — a real visual
+            // change. FontTablePart has a typed Fonts root we read verbatim.
+            "/fonttable" => mainPart.FontTablePart?.Fonts?.OuterXml ?? "(no fontTable)",
             _ when partPath.StartsWith("/header") => GetHeaderRawXml(partPath),
             _ when partPath.StartsWith("/footer") => GetFooterRawXml(partPath),
             _ when partPath.StartsWith("/chart") => GetChartRawXml(partPath),
@@ -486,6 +491,25 @@ public partial class WordHandler : IDocumentHandler
                 themePart.Theme.Save();
             }
             rootElement = themePart.Theme;
+        }
+        else if (lowerPath is "/fonttable")
+        {
+            // BUG-DUMP-R42-3: round-trip word/fontTable.xml (font-face
+            // declarations + altName substitutions). The blank rebuild template
+            // has no FontTablePart; lazily create one with an empty <w:fonts>
+            // root so RawXmlHelper.Execute can match /w:fonts and replace it
+            // with the dumped XML. The emitter strips any embedded-font
+            // references (w:embedRegular/Bold/Italic/BoldItalic r:id) first, so
+            // no dangling rel survives (the .odttf binaries are not round-tripped).
+            // CONSISTENCY(raw-set-create-missing-part): mirrors the /theme +
+            // /numbering branches.
+            var fontTablePart = mainPart.FontTablePart ?? mainPart.AddNewPart<FontTablePart>();
+            if (fontTablePart.Fonts == null)
+            {
+                fontTablePart.Fonts = new DocumentFormat.OpenXml.Wordprocessing.Fonts();
+                fontTablePart.Fonts.Save();
+            }
+            rootElement = fontTablePart.Fonts;
         }
         else if (lowerPath.StartsWith("/header"))
         {

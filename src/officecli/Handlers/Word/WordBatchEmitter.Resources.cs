@@ -524,6 +524,73 @@ public static partial class WordBatchEmitter
         });
     }
 
+    // BUG-DUMP-R42-3: round-trip word/fontTable.xml. The part declares font
+    // faces (panose/charset/family/pitch/sig) plus <w:altName> substitutions
+    // (e.g. 方正小标宋简体 altName=方正舒体). Dropping it makes Word substitute a
+    // different face — a real visual change (a title rendered cursive/brush in
+    // the source renders plain in the rebuild). Mirror the theme/numbering raw
+    // round-trip: emit a `raw-set /fontTable` replace carrying the verbatim
+    // <w:fonts> XML.
+    //
+    // IMPORTANT: fontTable.xml may reference embedded font binaries
+    // (w:embedRegular/w:embedBold/w:embedItalic/w:embedBoldItalic, each
+    // carrying an r:id → font/*.odttf). The .odttf binaries and the part's
+    // rels are NOT round-tripped, so preserving those r:ids would dangle. Strip
+    // the embed elements (keeping the face declarations + altName subs — the
+    // rendering-relevant part) so the rebuilt part validates with no dangling
+    // rel. A doc with NO fontTable emits nothing.
+    private static void EmitFontTableRaw(WordHandler word, List<BatchItem> items,
+                                         List<DocxUnsupportedWarning>? warnings = null)
+    {
+        string xml;
+        try { xml = word.Raw("/fonttable"); }
+        catch { return; }
+        if (string.Equals(xml.Trim(), "(no fontTable)", StringComparison.Ordinal))
+            return; // source had no fontTable — emit nothing
+        xml = CanonicalizeRawXml(xml);
+        if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<") || !xml.Contains("<w:font"))
+            return; // empty <w:fonts/> — nothing rendering-relevant to carry
+
+        xml = StripDanglingEmbeddedFontRefs(xml, out var embedStripped);
+        if (embedStripped)
+            warnings?.Add(new DocxUnsupportedWarning(
+                Element: "fontTable.embeddedFont",
+                Path: "/fontTable",
+                Reason: "embedded font binary reference (w:embedRegular/Bold/Italic/BoldItalic r:id → font/*.odttf) dropped — embedded-font round-trip is not supported; the font-face declarations and altName substitutions are preserved"));
+
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = "/fontTable",
+            Xpath = "/w:fonts",
+            Action = "replace",
+            Xml = xml
+        });
+    }
+
+    // BUG-DUMP-R42-3: strip <w:embedRegular>/<w:embedBold>/<w:embedItalic>/
+    // <w:embedBoldItalic> elements (each carries an r:id pointing at a
+    // font/*.odttf binary that the dump does not round-trip). Removing them
+    // keeps the rebuilt fontTable rel-clean while preserving the face +
+    // altName declarations. Regex-level (tolerant of attribute order /
+    // self-closing forms) — no XML parser, matching the StripDangling* family.
+    private static string StripDanglingEmbeddedFontRefs(string xml, out bool stripped)
+    {
+        var before = xml;
+        // Self-closing or paired forms of each embed element.
+        xml = System.Text.RegularExpressions.Regex.Replace(
+            xml,
+            @"<w:embed(?:Regular|Bold|Italic|BoldItalic)\b[^>]*?/>",
+            string.Empty);
+        xml = System.Text.RegularExpressions.Regex.Replace(
+            xml,
+            @"<w:embed(?:Regular|Bold|Italic|BoldItalic)\b[^>]*?>.*?</w:embed(?:Regular|Bold|Italic|BoldItalic)>",
+            string.Empty,
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        stripped = !string.Equals(before, xml, StringComparison.Ordinal);
+        return xml;
+    }
+
     // BUG-DUMP-R28-3: a source <w:lvl> may store its children in an order that
     // is tolerated by Word but violates the CT_Lvl schema sequence — most
     // commonly <w:legacy> emitted BEFORE <w:suff>/<w:lvlText> (legacy list

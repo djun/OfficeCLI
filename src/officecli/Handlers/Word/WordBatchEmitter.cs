@@ -87,6 +87,7 @@ public static partial class WordBatchEmitter
             case "/theme": EmitThemeRaw(word, items, warnings); return (items, warnings);
             case "/settings": EmitSettingsRaw(word, items); return (items, warnings);
             case "/numbering": EmitNumberingRaw(word, items, warnings); return (items, warnings);
+            case "/fonttable": EmitFontTableRaw(word, items, warnings); return (items, warnings);
             case "/styles": EmitStyles(word, items); return (items, warnings);
             case "/body":
                 EmitBody(word, items, warnings, new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
@@ -188,6 +189,10 @@ public static partial class WordBatchEmitter
         EmitDocDefaultsRaw(word, items);
         EmitThemeRaw(word, items, warnings);
         EmitSettingsRaw(word, items);
+        // BUG-DUMP-R42-3: round-trip word/fontTable.xml (font-face + altName
+        // substitutions). No ordering dependency on body refs; emit alongside
+        // the other raw resource parts.
+        EmitFontTableRaw(word, items, warnings);
         EmitSection(word, items);
         // Headers/footers run AFTER body: multi-section docs now emit
         // `add header parent="/section[N]"` (see EmitHeaderFooterPart), and
