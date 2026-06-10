@@ -897,8 +897,24 @@ public static partial class WordBatchEmitter
         // Collapsing into `add p` would fold the base text into a plain run
         // and drop the <w:ruby>/<w:rt>/<w:rubyBase> wrapper.
         if (r.Type == "ruby") return false;
+        // BUG-DUMP-R42-9: a sole <w:bdo> (bidirectional override) child must stay
+        // on the explicit-run path so TryEmitBdoRun raw-sets the wrapper verbatim.
+        // Collapsing into `add p` would fold the inner text into a plain run and
+        // drop the <w:bdo> wrapper (and its load-bearing w:val direction).
+        if (r.Type == "bdo") return false;
         // BUG-DUMP7-03: inline equation must emit `add equation` explicitly.
         if (r.Type == "equation") return false;
+        // BUG-DUMP-R42-5: a sole run carrying its own reading direction
+        // (<w:rPr><w:rtl/></w:rtl>, surfaced as Format["direction"]) must NOT
+        // collapse into `add p`. The run-prop hoist would copy `direction` into
+        // the paragraph prop bag, and AddParagraph routes `direction` through
+        // ApplyDirectionCascade — stamping a paragraph-level <w:bidi/> AND a ¶
+        // mark <w:rtl/>, flipping the whole paragraph's base direction. rtl is a
+        // RUN-level property; keep it on the explicit-run path so it re-emits as
+        // `add r --prop direction=…` (run rPr only). A genuine paragraph-level
+        // <w:bidi/> rides on the paragraph node's own `direction` key (read from
+        // pPr.BiDi) and is unaffected.
+        if (r.Format.ContainsKey("direction")) return false;
         return true;
     }
 
