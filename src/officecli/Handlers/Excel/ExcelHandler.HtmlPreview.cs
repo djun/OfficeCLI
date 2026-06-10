@@ -619,8 +619,21 @@ public partial class ExcelHandler
                     if (hiddenRows.Contains(r)) continue;
                     heightPt += rowHeights.TryGetValue(r, out var rh2) ? rh2 : defaultRowHeightPt;
                 }
-                if (widthPt < 100) widthPt = 400; // fallback min size
-                if (heightPt < 50) heightPt = 250;
+                // Chart-container min-size fallback. Pictures (xdr:pic) must
+                // reflect their true anchor span, not the chart default, so a
+                // small-span picture isn't ballooned to 400x250.
+                bool isPicture = html.Contains("xlsx-picture");
+                if (!isPicture)
+                {
+                    if (widthPt < 100) widthPt = 400; // fallback min size
+                    if (heightPt < 50) heightPt = 250;
+                }
+                else
+                {
+                    // Picture floor so a zero-span anchor still renders visibly.
+                    if (widthPt < 1) widthPt = defaultColWidthPt;
+                    if (heightPt < 1) heightPt = defaultRowHeightPt;
+                }
 
                 sb.AppendLine($"<div style=\"position:absolute;left:{leftPt:0.##}pt;top:{topPt:0.##}pt;width:{widthPt:0.##}pt;height:{heightPt:0.##}pt;z-index:10;pointer-events:auto\" data-from-col=\"{fromCol}\" data-from-row=\"{fromRow}\">");
                 sb.Append(html);
