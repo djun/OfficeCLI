@@ -499,6 +499,28 @@ public partial class WordHandler : IDocumentHandler
                 ?? throw new ArgumentException($"chart[{idx}] not found");
             rootElement = chartPart.ChartSpace ?? throw new InvalidOperationException($"Corrupt file: chart[{idx}] data missing");
         }
+        else if (lowerPath is "/commentsextended")
+        {
+            // BUG-DUMP-R26-4: round-trip word/commentsExtended.xml (modern
+            // comment-reply threading; w15:commentEx paraIdParent links a reply
+            // to its parent comment, keyed by the comment paragraphs' w14:paraId).
+            // The part has no clean typed-root API across SDK versions, so feed
+            // the whole part stream directly. `replace` (the only action the dump
+            // emits) overwrites the part body verbatim; the part is lazily created
+            // on a blank rebuilt doc. The linkage stays valid because EmitComments
+            // now preserves the comment paragraphs' source w14:paraId.
+            var exPart = mainPart.WordprocessingCommentsExPart
+                ?? mainPart.AddNewPart<WordprocessingCommentsExPart>();
+            if (!string.Equals(action, "replace", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException(
+                    $"/commentsExtended supports only the 'replace' action (got '{action}').");
+            if (string.IsNullOrEmpty(xml))
+                throw new ArgumentException("/commentsExtended replace requires XML.");
+            using (var ms = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml)))
+                exPart.FeedData(ms);
+            EnsureAllParaIds();
+            return;
+        }
         else
             throw new ArgumentException($"Unknown part: {partPath}. Available: /document, /styles, /settings, /numbering, /header[n], /footer[n], /chart[n]");
 
@@ -530,6 +552,22 @@ public partial class WordHandler : IDocumentHandler
         // their own structured message. Writing here pollutes batch --json
         // output (extra stdout lines escaped into result.message strings).
         _ = affected;
+    }
+
+    /// <summary>
+    /// BUG-DUMP-R26-4: read word/commentsExtended.xml verbatim for the dump
+    /// emitter, or null when the part is absent. The part carries modern
+    /// comment-reply threading (w15:commentEx paraIdParent) keyed by comment
+    /// paragraph w14:paraId; EmitComments raw-sets this XML back on replay and
+    /// preserves the comment paraIds so the linkage survives round-trip.
+    /// </summary>
+    internal string? GetCommentsExtendedXml()
+    {
+        var exPart = _doc.MainDocumentPart?.WordprocessingCommentsExPart;
+        if (exPart == null) return null;
+        using var reader = new System.IO.StreamReader(exPart.GetStream(System.IO.FileMode.Open, System.IO.FileAccess.Read));
+        var xml = reader.ReadToEnd();
+        return string.IsNullOrWhiteSpace(xml) ? null : xml;
     }
 
     public List<ValidationError> Validate() => RawXmlHelper.ValidateDocument(_doc, _filePath);

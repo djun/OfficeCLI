@@ -691,6 +691,7 @@ public static partial class WordBatchEmitter
             DeferredBookmarks: new List<BatchItem>(),
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             TableOrdinalBox: new int[1],
+            CurrentCellXPathBox: new string?[1],
             MovePairIds: word.BuildMovePairIdMap(),
             Warnings: warnings ?? new List<DocxUnsupportedWarning>());
         int pIdx = 0, tblIdx = 0;
@@ -805,6 +806,19 @@ public static partial class WordBatchEmitter
                 ? bodyParas[0].Children.Where(IsRoundTrippableCommentRun).ToList()
                 : new List<DocumentNode>();
 
+            // BUG-DUMP-R26-4: preserve the comment's first-paragraph w14:paraId.
+            // commentsExtended.xml threads replies via w15:commentEx paraIdParent,
+            // keyed by these paraIds — regenerating them (EnsureAllParaIds stamps
+            // a fresh id on the AddComment-built body) would silently break the
+            // reply link even when the threading part itself is preserved. Forward
+            // the source paraId so AddComment stamps it onto the comment body.
+            if (bodyParas.Count > 0
+                && bodyParas[0].Format.TryGetValue("paraId", out var cpid)
+                && cpid != null && !string.IsNullOrEmpty(cpid.ToString()))
+            {
+                props["commentParaId"] = cpid.ToString()!;
+            }
+
             // BUG-R6B(BUG1): always emit `text`, even when empty. An empty
             // comment (no inline text, or only an empty table) is valid OOXML;
             // omitting `text` produced a dump op that AddComment refused to
@@ -855,6 +869,17 @@ public static partial class WordBatchEmitter
             // paragraph-level emit so the wire format stays uniform with
             // the existing parent-resolution logic — replay can switch on
             // runStart later without changing the schema.
+            // BUG-DUMP-R26-3: when the comment range END lives in a DIFFERENT
+            // paragraph than its start, the range spans paragraphs. The old
+            // single-op `add comment` crammed rangeStart+rangeEnd+ref into the
+            // start paragraph, collapsing the span to one paragraph. Detect the
+            // multi-paragraph case and emit a two-marker round-trip: the `add
+            // comment` carries rangeOpen=true (places only the start), then a
+            // follow-up `add comment rangeEnd=true` closes the range at the end
+            // paragraph. Resolved end target path is stashed for after the
+            // `add comment` op is appended (replay order: start then end).
+            string? rangeEndParent = null;
+            int rangeEndRunIdx = 0;
             if (c.Format.TryGetValue("id", out var cid) && cid != null)
             {
                 var runStart = word.FindCommentAnchorRunIndex(cid.ToString()!);
@@ -867,7 +892,40 @@ public static partial class WordBatchEmitter
                 // replays a reference-only run instead of synthesizing a
                 // spurious range — preserving the point comment's identity.
                 if (!word.CommentHasRange(cid.ToString()!))
+                {
                     props["range"] = "false";
+                }
+                else if (word.FindCommentRangeEnd(cid.ToString()!) is { } endInfo)
+                {
+                    // Resolve the END paragraph to the same target-index space
+                    // the start anchor uses. Table-cell paths pass through
+                    // verbatim (positionally stable); body paras map via paraId.
+                    string? endTarget = null;
+                    if (endInfo.path.Contains("/tbl[", StringComparison.OrdinalIgnoreCase))
+                        endTarget = endInfo.path;
+                    else
+                    {
+                        var endPid = ExtractParaId(endInfo.path);
+                        if (endPid != null && paraIdToTargetIdx.TryGetValue(endPid, out var eIdx))
+                            endTarget = $"/body/p[{eIdx}]";
+                        // Positional fallback: a source paragraph with no
+                        // w14:paraId surfaces as /body/p[N]. Top-level body
+                        // paragraphs replay 1:1 positionally in EmitBody, so the
+                        // positional path is a valid target anchor as-is.
+                        else if (System.Text.RegularExpressions.Regex.IsMatch(
+                                     endInfo.path, @"^/body/p\[\d+\]$"))
+                            endTarget = endInfo.path;
+                    }
+                    // Only split into a two-marker op when the end paragraph is
+                    // genuinely different from the start paragraph. A single-
+                    // paragraph range still round-trips through the one-op path.
+                    if (endTarget != null && endTarget != parentTarget)
+                    {
+                        props["rangeOpen"] = "true";
+                        rangeEndParent = endTarget;
+                        rangeEndRunIdx = endInfo.runIndex;
+                    }
+                }
             }
             // The comment id is allocated by AddComment on the target side;
             // do not propagate the source id (would conflict on replay).
@@ -885,6 +943,27 @@ public static partial class WordBatchEmitter
                 Type = "comment",
                 Props = props
             });
+
+            // BUG-DUMP-R26-3: close a multi-paragraph comment range at its end
+            // paragraph. The `add comment rangeOpen=true` above placed only the
+            // CommentRangeStart; this op places the CommentRangeEnd + reference
+            // run at the (different) end paragraph so the comment scopes the
+            // full span. Emitted immediately after the open so the LIFO match in
+            // AddComment pairs them correctly.
+            if (rangeEndParent != null)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add",
+                    Parent = rangeEndParent,
+                    Type = "comment",
+                    Props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["rangeEnd"] = "true",
+                        ["runEnd"] = rangeEndRunIdx.ToString(),
+                    }
+                });
+            }
 
             // BUG-R9A(BUG1): structural emit of the remainder of the comment
             // body. The target comment is rebuilt at /comments/comment[N]
@@ -918,6 +997,22 @@ public static partial class WordBatchEmitter
                 // the (pi+1)-th paragraph of the comment.
                 EmitContainerBodyRuns(runs, $"{targetCommentPath}/p[{pi + 1}]", items);
             }
+        }
+
+        // BUG-DUMP-R26-4: round-trip word/commentsExtended.xml (modern comment-
+        // reply threading). Emitted once, AFTER every `add comment` so all the
+        // comment paragraphs (with their preserved w14:paraId) exist on the
+        // target before the threading part references them. Whole-part replace.
+        var commentsExXml = word.GetCommentsExtendedXml();
+        if (!string.IsNullOrEmpty(commentsExXml))
+        {
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = "/commentsExtended",
+                Action = "replace",
+                Xml = commentsExXml,
+            });
         }
     }
 

@@ -15,6 +15,59 @@ public partial class WordHandler
         var body = _doc.MainDocumentPart?.Document?.Body
             ?? throw new InvalidOperationException("Document body not found");
 
+        var commentRun = parent as Run;
+        var commentPara = commentRun?.Parent as Paragraph ?? parent as Paragraph
+            ?? throw new ArgumentException("Comments must be added to a paragraph or run: /body/p[N] or /body/p[N]/r[M]");
+
+        // BUG-DUMP-R26-3: `rangeEnd=true` closes an already-open comment range
+        // (a CommentRangeStart with no matching CommentRangeEnd, created by an
+        // earlier `add comment` carrying rangeOpen=true) at THIS paragraph,
+        // placing the CommentRangeEnd + reference run here. This is the second
+        // half of the two-marker round-trip for a multi-paragraph comment range
+        // — mirrors the bookmark `open=true`/`end=true` span handling. No new
+        // comment is created; we reuse the open range's id. Match the most-
+        // recently-opened range (LIFO) so nested ranges close correctly.
+        if (IsTruthy(properties.GetValueOrDefault("rangeEnd", "")))
+        {
+            var openStart = body.Descendants<CommentRangeStart>()
+                .Where(rs => rs.Id?.Value != null
+                    && !body.Descendants<CommentRangeEnd>().Any(re => re.Id?.Value == rs.Id!.Value))
+                .LastOrDefault();
+            if (openStart == null)
+                throw new ArgumentException(
+                    "comment rangeEnd has no matching open comment range " +
+                    "(add the comment with rangeOpen=true first)");
+            var openId = openStart.Id!.Value!;
+            var endMarker = new CommentRangeEnd { Id = openId };
+            var endRef = new Run(new CommentReference { Id = openId });
+            // Place endMarker after the requested run (runEnd, 1-based; 0 =
+            // paragraph start), then the reference run after it — matching the
+            // source <w:commentRangeEnd/><w:r><w:commentReference/></w:r> shape.
+            int runEndIdx = 0;
+            if ((properties.TryGetValue("runEnd", out var reRaw)
+                 || properties.TryGetValue("runend", out reRaw))
+                && int.TryParse(reRaw, out var reN))
+                runEndIdx = reN;
+            OpenXmlElement? anchorRunE = null;
+            if (runEndIdx >= 1)
+            {
+                var runs = commentPara.Elements<Run>().ToList();
+                if (runEndIdx <= runs.Count)
+                    anchorRunE = runs[runEndIdx - 1];
+            }
+            if (anchorRunE != null)
+            {
+                anchorRunE.InsertAfterSelf(endMarker);
+                endMarker.InsertAfterSelf(endRef);
+            }
+            else
+            {
+                commentPara.AppendChild(endMarker);
+                commentPara.AppendChild(endRef);
+            }
+            return $"/comments/comment[@id={openId}]/rangeEnd";
+        }
+
         // BUG-R6B(BUG1): accept an empty/whitespace comment text. An empty
         // comment is valid OOXML; rejecting it broke the dump→batch round-trip
         // for comments whose inline text is empty (or whose only content is an
@@ -24,10 +77,6 @@ public partial class WordHandler
         // a comment with an empty paragraph.
         if (!properties.TryGetValue("text", out var commentText))
             throw new ArgumentException("'text' property is required for comment type");
-
-        var commentRun = parent as Run;
-        var commentPara = commentRun?.Parent as Paragraph ?? parent as Paragraph
-            ?? throw new ArgumentException("Comments must be added to a paragraph or run: /body/p[N] or /body/p[N]/r[M]");
 
         var author = properties.GetValueOrDefault("author", "officecli");
         var initials = properties.GetValueOrDefault("initials", author[..1]);
@@ -64,6 +113,16 @@ public partial class WordHandler
         var commentBody = string.IsNullOrEmpty(commentText)
             ? new Paragraph()
             : new Paragraph(new Run(new Text(commentText) { Space = SpaceProcessingModeValues.Preserve }));
+        // BUG-DUMP-R26-4: preserve the source comment's first-paragraph
+        // w14:paraId so commentsExtended.xml reply threading (keyed by paraId)
+        // round-trips. EnsureAllParaIds only assigns when paraId is empty, so a
+        // pre-stamped id survives. textId is left for the global pass to fill.
+        if ((properties.TryGetValue("commentParaId", out var cpId)
+             || properties.TryGetValue("commentparaid", out cpId))
+            && !string.IsNullOrEmpty(cpId))
+        {
+            commentBody.ParagraphId = cpId;
+        }
         var commentEl = new Comment(commentBody)
         {
             Id = commentId, Author = author, Initials = initials,
@@ -101,6 +160,13 @@ public partial class WordHandler
                  && IsExplicitFalseAddOverride(rngRaw))
             pointRef = true;
 
+        // BUG-DUMP-R26-3: `rangeOpen=true` marks a multi-paragraph comment range
+        // whose CommentRangeEnd + reference run live in a LATER paragraph. Place
+        // only the CommentRangeStart here; a follow-up `add comment rangeEnd=true`
+        // closes the range at the end paragraph. Without this the rangeEnd/refRun
+        // were crammed into the start paragraph and the comment scoped only it.
+        bool rangeOpen = !pointRef && IsTruthy(properties.GetValueOrDefault("rangeOpen", ""));
+
         if (pointRef)
         {
             // Reference-only: place a single <w:commentReference> run at the
@@ -135,8 +201,12 @@ public partial class WordHandler
         else if (commentRun != null)
         {
             commentRun.InsertBeforeSelf(rangeStart);
-            commentRun.InsertAfterSelf(rangeEnd);
-            rangeEnd.InsertAfterSelf(refRun);
+            // BUG-DUMP-R26-3: rangeOpen defers the end/ref to a later paragraph.
+            if (!rangeOpen)
+            {
+                commentRun.InsertAfterSelf(rangeEnd);
+                rangeEnd.InsertAfterSelf(refRun);
+            }
         }
         else
         {
@@ -145,7 +215,11 @@ public partial class WordHandler
             // clamps forward (pPr must stay first child).
             if (index.HasValue)
             {
-                InsertIntoParagraph(commentPara, new OpenXmlElement[] { rangeStart, rangeEnd, refRun }, index);
+                InsertIntoParagraph(commentPara,
+                    rangeOpen
+                        ? new OpenXmlElement[] { rangeStart }
+                        : new OpenXmlElement[] { rangeStart, rangeEnd, refRun },
+                    index);
             }
             else
             {
@@ -175,8 +249,13 @@ public partial class WordHandler
                     if (after != null) after.InsertAfterSelf(rangeStart);
                     else commentPara.InsertAt(rangeStart, 0);
                 }
-                commentPara.AppendChild(rangeEnd);
-                commentPara.AppendChild(refRun);
+                // BUG-DUMP-R26-3: rangeOpen defers the end/ref to a later
+                // paragraph (closed by a follow-up `add comment rangeEnd=true`).
+                if (!rangeOpen)
+                {
+                    commentPara.AppendChild(rangeEnd);
+                    commentPara.AppendChild(refRun);
+                }
             }
         }
 

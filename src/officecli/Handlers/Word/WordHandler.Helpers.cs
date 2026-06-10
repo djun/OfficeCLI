@@ -180,6 +180,41 @@ public partial class WordHandler
     }
 
     /// <summary>
+    /// BUG-DUMP-R26-3: locate the paragraph that holds the
+    /// <c>CommentRangeEnd</c> for <paramref name="commentId"/>, returning its
+    /// semantic body path plus the 1-based run index after which the end marker
+    /// sits (0 = before all runs). Returns null when the comment has no range
+    /// end (point comment) or it can't be resolved. Mirrors the
+    /// FindCommentAnchorRunIndex / FindCommentAnchorPath pair for the START side
+    /// so a multi-paragraph comment range round-trips its full span instead of
+    /// collapsing into the start paragraph.
+    /// </summary>
+    public (string path, int runIndex)? FindCommentRangeEnd(string commentId)
+    {
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body == null) return null;
+        foreach (var para in body.Descendants<Paragraph>())
+        {
+            var re = para.Descendants<CommentRangeEnd>()
+                .FirstOrDefault(r => r.Id?.Value == commentId);
+            if (re == null) continue;
+            // Count Run elements before the CommentRangeEnd in document order,
+            // excluding the comment-reference run itself (it is inserted after
+            // the end marker on replay, so it must not shift the index).
+            int runCount = 0;
+            foreach (var el in para.Descendants())
+            {
+                if (ReferenceEquals(el, re)) break;
+                if (el is Run r && r.GetFirstChild<CommentReference>() == null) runCount++;
+            }
+            var p = BuildBodyParagraphFullPath(body, para);
+            if (p == null) return null;
+            return (p, runCount);
+        }
+        return null;
+    }
+
+    /// <summary>
     /// BUG-DUMP-COMMENT-POINTREF: true when the comment with
     /// <paramref name="commentId"/> has a span — i.e. a CommentRangeStart marker
     /// exists in the body. A reference-only (zero-width / point) comment carries

@@ -50,6 +50,7 @@ public static partial class WordBatchEmitter
         "/word/numbering.xml",
         "/word/settings.xml",
         "/word/comments.xml",
+        "/word/commentsExtended.xml",    // BUG-DUMP-R26-4: reply threading — EmitComments raw-set
         "/word/footnotes.xml",
         "/word/endnotes.xml",
         // OPC auto-managed
@@ -82,7 +83,6 @@ public static partial class WordBatchEmitter
         ("/customXml/",                "customXml",              "customXml part dropped on dump"),
         ("/word/glossary/",            "glossary",               "Building Blocks / AutoText repository dropped on dump"),
         ("/word/people.xml",           "people",                 "modern-comment author metadata dropped on dump"),
-        ("/word/commentsExtended.xml", "commentsExtended",       "modern-comment threading metadata dropped on dump"),
         ("/word/commentsIds.xml",      "commentsIds",            "modern-comment durable-id metadata dropped on dump"),
         ("/word/commentsExtensible.xml","commentsExtensible",    "modern-comment extension metadata dropped on dump"),
         ("/word/webSettings.xml",      "webSettings",            "web-publishing settings dropped on dump"),
