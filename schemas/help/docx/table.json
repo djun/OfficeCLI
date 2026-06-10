@@ -191,6 +191,19 @@
       ],
       "readback": "integer value",
       "enforcement": "report"
+    },
+    "tblLook": {
+      "type": "string",
+      "description": "conditional-formatting bitmask (<w:tblLook> @w:val, 4-digit hex) selecting which facets of a conditional/banded table style apply: 0x0020 firstRow, 0x0040 lastRow, 0x0080 firstColumn, 0x0100 lastColumn, 0x0200 noHBand, 0x0400 noVBand. The w:val hex is authoritative (Word also reads the decomposed boolean attributes; w:val wins). Get emits the source hex (e.g. 0620) so dump→batch round-trips every bit; the default 04A0 (firstRow+firstColumn) is only seeded when a table style is applied and no explicit tblLook is given. Decomposed facets also settable as firstRow/lastRow/firstColumn/lastColumn/bandRow/bandCol (or the tblLook.<facet> compound form).",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop tblLook=0620",
+        "--prop tblLook.firstRow=true --prop tblLook.firstColumn=false"
+      ],
+      "readback": "4-digit uppercase hex bitmask",
+      "enforcement": "report"
     }
   }
 }

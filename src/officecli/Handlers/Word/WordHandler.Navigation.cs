@@ -2778,6 +2778,56 @@ public partial class WordHandler
             // get and is round-trip safe with the dump/replay pipeline.
             if (tp.TableLayout?.Type?.Value != null)
                 node.Format["layout"] = tp.TableLayout.Type.Value == TableLayoutValues.Fixed ? "fixed" : "autofit";
+            // BUG-DUMP-R40-5: <w:tblLook> conditional-formatting bitmask
+            // (firstRow/lastRow/firstColumn/lastColumn/noHBand/noVBand) controls
+            // which banded/conditional table-style facets apply. Previously
+            // dropped on dump→batch, so AddTable's default seed (04A0 = firstRow +
+            // firstColumn) leaked onto every table — wrongly enabling first-column
+            // bold/shading under conditional styles. The combined w:val hex is the
+            // authoritative form (Word reads both w:val and the decomposed boolean
+            // attrs, but w:val wins). Surface the verbatim hex so EmitTable/AddTable
+            // round-trip every bit. Walk children by local name (CT_TblPr orders
+            // tblLook last; a producer emitting attrs the SDK can't type still
+            // exposes them via GetAttributes). If the source had NO tblLook, emit
+            // no key — AddTable then suppresses the default seed.
+            foreach (var tpChild in tp.ChildElements)
+            {
+                if (tpChild.LocalName != "tblLook") continue;
+                string? lookVal = null;
+                foreach (var a in tpChild.GetAttributes())
+                    if (a.LocalName == "val") { lookVal = a.Value; break; }
+                if (!string.IsNullOrEmpty(lookVal))
+                {
+                    // Normalize to 4-digit uppercase hex (Word writes "0620").
+                    if (int.TryParse(lookVal, System.Globalization.NumberStyles.HexNumber,
+                            System.Globalization.CultureInfo.InvariantCulture, out var lookBits))
+                        node.Format["tblLook"] = lookBits.ToString("X4", System.Globalization.CultureInfo.InvariantCulture);
+                    else
+                        node.Format["tblLook"] = lookVal;
+                }
+                else
+                {
+                    // No w:val — reconstruct the bitmask from the decomposed
+                    // boolean attributes so the round-trip is still lossless.
+                    int bits = 0;
+                    foreach (var a in tpChild.GetAttributes())
+                    {
+                        bool on = a.Value == "1" || a.Value == "true";
+                        if (!on) continue;
+                        switch (a.LocalName)
+                        {
+                            case "firstRow": bits |= 0x0020; break;
+                            case "lastRow": bits |= 0x0040; break;
+                            case "firstColumn": bits |= 0x0080; break;
+                            case "lastColumn": bits |= 0x0100; break;
+                            case "noHBand": bits |= 0x0200; break;
+                            case "noVBand": bits |= 0x0400; break;
+                        }
+                    }
+                    node.Format["tblLook"] = bits.ToString("X4", System.Globalization.CultureInfo.InvariantCulture);
+                }
+                break;
+            }
             // Direction (CT_TblPrBase / w:bidiVisual). Mirrors paragraph
             // direction vocabulary; presence-only readback (no bidiVisual
             // means no key — LTR is the default).

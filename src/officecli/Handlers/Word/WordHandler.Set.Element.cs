@@ -2227,6 +2227,22 @@ public partial class WordHandler
                     tblPr.Shading = tShd;
                     break;
                 }
+                case "tbllook":
+                {
+                    // BUG-DUMP-R40-5: bare hex tblLook bitmask (w:val). Mirrors
+                    // AddTable's `tblLook=04A0` passthrough so the dump→batch
+                    // round-trip can carry the exact source bits on a `set table`
+                    // step too. The w:val hex is authoritative; we set it
+                    // verbatim and leave the decomposed boolean attrs untouched.
+                    var tblLook = tblPr.GetFirstChild<TableLook>();
+                    if (tblLook == null)
+                    {
+                        tblLook = new TableLook();
+                        InsertTblPrChildInOrder(tblPr, tblLook);
+                    }
+                    tblLook.Val = value;
+                    break;
+                }
                 case "firstrow":
                 case "lastrow":
                 case "firstcol" or "firstcolumn":

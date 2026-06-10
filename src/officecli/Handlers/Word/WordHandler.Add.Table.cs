@@ -15,6 +15,33 @@ namespace OfficeCli.Handlers;
 
 public partial class WordHandler
 {
+    // BUG-DUMP-R40-5: true when the caller supplied an explicit <w:tblLook>
+    // value (bare hex form or any decomposed boolean facet, including the
+    // `tblLook.` compound-key prefix). Used to suppress the default 04A0 seed
+    // that the `style` case would otherwise force, so a source whose table had
+    // no tblLook (or a non-default one) round-trips faithfully.
+    private static bool TableHasExplicitTblLook(Dictionary<string, string> properties)
+    {
+        foreach (var k in properties.Keys)
+        {
+            var kl = k.ToLowerInvariant();
+            if (kl.StartsWith("tbllook")) return true; // tbllook + tbllook.*
+            switch (kl)
+            {
+                case "firstrow":
+                case "lastrow":
+                case "firstcol" or "firstcolumn":
+                case "lastcol" or "lastcolumn":
+                case "bandrow" or "bandedrows" or "bandrows":
+                case "bandcol" or "bandedcols" or "bandcols":
+                case "nohband" or "nohorizontalband":
+                case "novband" or "noverticalband":
+                    return true;
+            }
+        }
+        return false;
+    }
+
     private string AddTable(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         var table = new Table();
@@ -254,6 +281,14 @@ public partial class WordHandler
             "overlap", "caption", "description",
             // BUG-DUMP-R36-2: band stripe widths.
             "rowbandsize", "colbandsize", "columnbandsize",
+            // BUG-DUMP-R40-5: tblLook bitmask + decomposed facets. Without these
+            // in the consumed set, the access-accounting never marks them and the
+            // round-trip `tableLook=…` key surfaced as a spurious UNSUPPORTED
+            // warning even though the switch below applies it.
+            "tbllook", "firstrow", "lastrow", "firstcol", "firstcolumn",
+            "lastcol", "lastcolumn", "bandrow", "bandedrows", "bandrows",
+            "bandcol", "bandedcols", "bandcols", "nohband", "nohorizontalband",
+            "novband", "noverticalband",
         };
         foreach (var (tk, tv) in properties)
         {
@@ -409,8 +444,21 @@ public partial class WordHandler
                     // AppendChild produced schema-invalid order when those
                     // higher-ranked elements existed first (and was the root
                     // cause of issue #105 when combined with `padding`).
-                    tblProps.RemoveAllChildren<TableLook>();
-                    InsertTblPrChildInOrder(tblProps, new TableLook { Val = "04A0" });
+                    // BUG-DUMP-R40-5: only seed the default 04A0 when the caller
+                    // did NOT supply an explicit tblLook (bare hex `tableLook=…`
+                    // or a decomposed `firstRow`/`tblLook.firstRow`/… key). The
+                    // dump→batch round-trip emits `tableLook=<source hex>`; force-
+                    // seeding 04A0 here (firstRow+firstColumn) leaked first-column
+                    // conditional formatting onto tables whose source tblLook had
+                    // it off. The tblLook case below applies the explicit value
+                    // (it runs after this case regardless of prop order, so the
+                    // seed it builds would be the authoritative hex anyway — but
+                    // suppressing the default keeps a no-tblLook source clean).
+                    if (!TableHasExplicitTblLook(properties))
+                    {
+                        tblProps.RemoveAllChildren<TableLook>();
+                        InsertTblPrChildInOrder(tblProps, new TableLook { Val = "04A0" });
+                    }
                     break;
                 case "shd" or "shading":
                     {
