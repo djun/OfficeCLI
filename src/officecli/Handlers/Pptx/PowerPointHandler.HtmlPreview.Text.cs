@@ -147,7 +147,13 @@ public partial class PowerPointHandler
                 int n = autoNumCounters.TryGetValue(schemeKey, out var c) ? c : 0;
                 int index = (n == 0 ? startAt : startAt + n);
                 autoNumCounters[schemeKey] = n + 1;
-                autoNumGlyph = FormatAutoNumberGlyph(bulletAuto.Type?.HasValue == true ? bulletAuto.Type.Value : Drawing.TextAutoNumberSchemeValues.ArabicPeriod, index);
+                // Use the OOXML *value* (e.g. "alphaLcPeriod"), not the C# enum
+                // member name ("AlphaLowerCharacterPeriod") — they differ, and the
+                // glyph mapping keys off the OOXML token.
+                string schemeToken = bulletAuto.Type?.HasValue == true && !string.IsNullOrEmpty(bulletAuto.Type.InnerText)
+                    ? bulletAuto.Type.InnerText
+                    : "arabicPeriod";
+                autoNumGlyph = FormatAutoNumberGlyph(schemeToken, index);
             }
             else
             {
@@ -533,11 +539,14 @@ public partial class PowerPointHandler
     // Format an auto-numbered bullet glyph (e.g. "1.", "(a)", "iv)") for a given
     // OOXML scheme and 1-based index. Covers the common schemes emitted by
     // ApplyListStyle; unsupported schemes fall back to "N." arabic-period.
-    private static string FormatAutoNumberGlyph(Drawing.TextAutoNumberSchemeValues scheme, int n)
+    private static string FormatAutoNumberGlyph(string key, int n)
     {
-        string key = scheme.ToString();
-        // Decompose the scheme name — it's of form "{alpha|AlphaUc|romanLc|RomanUc|arabic|...}{Period|ParenBoth|ParenR|Plain|Minus}"
-        // Use InnerText style match when possible
+        // `key` is the OOXML buAutoNum value, of form
+        // "{alphaLc|alphaUc|romanLc|romanUc|arabic|...}{Period|ParenBoth|ParenR|Plain|Minus}".
+        // Match on this token directly — NOT the C# enum member name
+        // (TextAutoNumberSchemeValues.AlphaLowerCharacterPeriod.ToString() yields
+        // "AlphaLowerCharacterPeriod", which never matched "alphaLc" and silently
+        // fell through to decimal for every non-arabic scheme).
         string body;
         if (key.StartsWith("alphaLc", StringComparison.OrdinalIgnoreCase) || key.StartsWith("AlphaLc", StringComparison.OrdinalIgnoreCase))
             body = ToAlpha(n, upper: false);
