@@ -1994,14 +1994,43 @@ public partial class WordHandler
             // combine group (a semantic grouping). Curated reader emitted
             // vert/combine/vertCompress/combineBrackets but dropped w:id on
             // dump→batch round-trip. Set side already accepts eastAsianLayout.id.
-            if (eal.Id?.HasValue == true) node.Format["eastAsianLayout.id"] = eal.Id.InnerText;
-            if (eal.Vertical?.Value == true) node.Format["eastAsianLayout.vert"] = "1";
-            if (eal.Combine?.Value == true) node.Format["eastAsianLayout.combine"] = "1";
-            if (eal.VerticalCompress?.HasValue == true)
-                node.Format["eastAsianLayout.vertCompress"] = eal.VerticalCompress.InnerText;
-            if (eal.CombineBrackets?.HasValue == true)
-                node.Format["eastAsianLayout.combineBrackets"] = eal.CombineBrackets.InnerText;
+            // BUG-DUMP-R32-1: read eastAsianLayout attrs as RAW strings, never
+            // the strongly-typed SDK accessors. w:combine / w:vert are declared
+            // ST_OnOff in the schema, but Word's "Combine Characters" feature
+            // writes w:combine="lines" / "letters" (and brackets variants), which
+            // the typed getter (eal.Combine.Value) parses as ST_OnOff and THROWS
+            // ("text value invalid… only true/false/on/off/0/1"), aborting the
+            // ENTIRE dump. GetAttribute returns whatever string the source had so
+            // we round-trip "lines"/"letters"/"1"/etc. verbatim.
+            string? RawEalAttr(string localName) =>
+                eal.GetAttributes().FirstOrDefault(a =>
+                    a.LocalName.Equals(localName, StringComparison.Ordinal)).Value;
+            var ealId             = RawEalAttr("id");
+            var ealVert           = RawEalAttr("vert");
+            var ealCombine        = RawEalAttr("combine");
+            var ealVertCompress   = RawEalAttr("vertCompress");
+            var ealCombineBracket = RawEalAttr("combineBrackets");
+            if (!string.IsNullOrEmpty(ealId)) node.Format["eastAsianLayout.id"] = ealId;
+            // vert / combine are ST_OnOff but Word may emit non-boolean values
+            // (combine="lines"/"letters"). Emit "1" for the truthy boolean forms
+            // (keeps the prior dotted-key contract) and pass any other value
+            // through verbatim so the rebuild reproduces the source attribute.
+            if (!string.IsNullOrEmpty(ealVert))
+                node.Format["eastAsianLayout.vert"] = NormalizeEalOnOff(ealVert);
+            if (!string.IsNullOrEmpty(ealCombine))
+                node.Format["eastAsianLayout.combine"] = NormalizeEalOnOff(ealCombine);
+            if (!string.IsNullOrEmpty(ealVertCompress))
+                node.Format["eastAsianLayout.vertCompress"] = ealVertCompress;
+            if (!string.IsNullOrEmpty(ealCombineBracket))
+                node.Format["eastAsianLayout.combineBrackets"] = ealCombineBracket;
         }
+        // BUG-DUMP-R32-1: collapse the boolean ST_OnOff spellings to "1" (the
+        // dotted-key contract the apply side already understands) while passing
+        // any non-boolean value (combine="lines"/"letters") through unchanged.
+        static string NormalizeEalOnOff(string raw) =>
+            raw is "true" or "on" or "1" ? "1"
+            : raw is "false" or "off" or "0" ? "0"
+            : raw;
         // Long-tail fallback: surface every rPr child the curated reader
         // didn't consume. Symmetric with the Set-side TryCreateTypedChild
         // fallback in SetElementRun (WordHandler.Set.Element.cs).
