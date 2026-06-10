@@ -3508,12 +3508,29 @@ public partial class WordHandler
                 {
                     if (sbCols.ColumnCount?.Value != null)
                         node.Format["sectionBreak.columns"] = (int)sbCols.ColumnCount.Value;
+                    // BUG-DUMP-R25-4: emit cols @w:space as RAW TWIPS (bare int),
+                    // not 2-decimal cm. pgMar/pgSz already round-trip raw twips;
+                    // the cols space was the lone cm-drift survivor (708→"1.25cm"
+                    // →709 on replay). Set's columns.space case feeds ParseTwips,
+                    // which reads a bare integer exactly.
                     if (sbCols.Space?.Value != null && uint.TryParse(sbCols.Space.Value, out var sbColSpaceTwips))
-                        node.Format["sectionBreak.columnSpace"] = FormatTwipsToCm(sbColSpaceTwips);
+                        node.Format["sectionBreak.columnSpace"] = sbColSpaceTwips.ToString();
                     if (sbCols.EqualWidth?.Value != null)
                         node.Format["sectionBreak.columns.equalWidth"] = sbCols.EqualWidth.Value;
                     if (sbCols.Separator?.Value == true)
                         node.Format["sectionBreak.columns.separator"] = true;
+                    // BUG-DUMP-R25-3: surface the explicit per-column widths/
+                    // spaces for an unequal-width (equalWidth="false") inline
+                    // section. Without these the carrier <w:cols equalWidth="0">
+                    // round-tripped with no <w:col> children, collapsing the
+                    // source's uneven columns to equal width. Mirrors the body-
+                    // section colWidths/colSpaces readback.
+                    var sbColDefs = sbCols.Elements<Column>().ToList();
+                    if (sbColDefs.Count > 0)
+                    {
+                        node.Format["sectionBreak.colWidths"] = string.Join(",", sbColDefs.Select(c => c.Width?.Value ?? "0"));
+                        node.Format["sectionBreak.colSpaces"] = string.Join(",", sbColDefs.Select(c => c.Space?.Value ?? "0"));
+                    }
                 }
 
                 var sbVAlign = inlineSectPr.GetFirstChild<VerticalTextAlignmentOnPage>();

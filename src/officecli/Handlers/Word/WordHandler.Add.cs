@@ -898,6 +898,13 @@ public partial class WordHandler
             if (pgMar.Footer?.Value != null) result["marginFooter"] = pgMar.Footer.Value.ToString();
             if (pgMar.Gutter?.Value != null) result["marginGutter"] = pgMar.Gutter.Value.ToString();
         }
+        // BUG-DUMP-R25-4: cols @w:space on the body-level sectPr also drifts
+        // through cm (708→"1.25cm"→709). Override the canonical columnSpace key
+        // with raw twips, mirroring the pgSz/pgMar handling above. The inline-
+        // section carrier path is fixed independently in Navigation.cs.
+        var cols = sectPr.GetFirstChild<Columns>();
+        if (cols?.Space?.Value != null && uint.TryParse(cols.Space.Value, out var colSpaceTwips))
+            result["columnSpace"] = colSpaceTwips.ToString();
         return result;
     }
 
