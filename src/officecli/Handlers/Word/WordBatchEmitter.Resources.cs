@@ -1533,6 +1533,19 @@ public static partial class WordBatchEmitter
                 // preserving CT_Tc order and the source's "SDT is the cell's
                 // leading content" shape. The append case (cell already has
                 // emitted content) already lands after tcPr + that content.
+                //
+                // BUG-DUMP-R28-4: the insert-after-tcPr placement is a TABLE-CELL
+                // rule and must fire ONLY when the host xpath actually resolves to
+                // a <w:tc>. This helper is reused for header/footer-body block
+                // SDTs (EmitHeaderFooter passes the /w:hdr or /w:ftr root as the
+                // host xpath); a header/footer root has no <w:tcPr>, so the
+                // `{host}/w:tcPr` selector matched nothing and replay threw
+                // ("XPath matched no elements: /w:ftr/w:tcPr"), losing the footer
+                // SDT entirely. Gate on a genuine cell host (xpath ending in
+                // `…/w:tc` or `…/w:tc[N]`); a non-cell host (hdr/ftr root) keeps
+                // the pre-R27-4 plain prepend into the host root.
+                bool hostIsCell = System.Text.RegularExpressions.Regex.IsMatch(
+                    cellXPath, @"/w:tc(\[\d+\])?$");
                 if (cellHasContent)
                 {
                     items.Add(new BatchItem
@@ -1544,7 +1557,7 @@ public static partial class WordBatchEmitter
                         Xml = rawXml
                     });
                 }
-                else
+                else if (hostIsCell)
                 {
                     items.Add(new BatchItem
                     {
@@ -1552,6 +1565,21 @@ public static partial class WordBatchEmitter
                         Part = rawPart,
                         Xpath = $"{cellXPath}/w:tcPr",
                         Action = "insertafter",
+                        Xml = rawXml
+                    });
+                }
+                else
+                {
+                    // Non-cell host (header/footer body root): no tcPr exists, so
+                    // prepend the SDT directly into the host root, ahead of the
+                    // auto-seeded leading paragraph (the original BUG-R11A(BUG3)
+                    // placement).
+                    items.Add(new BatchItem
+                    {
+                        Command = "raw-set",
+                        Part = rawPart,
+                        Xpath = cellXPath,
+                        Action = "prepend",
                         Xml = rawXml
                     });
                 }
