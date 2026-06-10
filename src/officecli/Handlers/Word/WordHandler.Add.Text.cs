@@ -1977,23 +1977,46 @@ public partial class WordHandler
             var sym = new SymbolChar();
             if (!string.IsNullOrEmpty(symFont)) sym.Font = symFont;
             if (!string.IsNullOrEmpty(symHex)) sym.Char = symHex.ToUpperInvariant();
-            newRun.AppendChild(sym);
 
-            // Strip the leading PUA glyph (the dump-prepended cached codepoint)
-            // from `text`; what remains is the run's real literal <w:t> content.
+            // BUG-DUMP-R44-2: the <w:sym> and any literal <w:t> must round-trip
+            // in their SOURCE child order. GetRunText walks children in document
+            // order, so the dump-cached glyph (the SymbolChar's PUA codepoint)
+            // sits at the glyph's ACTUAL position within `text` — leading when
+            // <w:sym> precedes <w:t> ("Symbol "), trailing when <w:t>
+            // precedes <w:sym> ("Symbol "). The old code unconditionally
+            // appended <w:sym> first and only stripped a LEADING glyph, which (a)
+            // hoisted the symbol before the text and (b) left a trailing glyph
+            // doubled as literal <w:t>. Split `text` at the glyph's index and
+            // emit text-before, <w:sym>, text-after in order — preserving the
+            // source interleave and stripping exactly the cached glyph wherever
+            // it sits.
             var runText = properties.GetValueOrDefault("text", "");
+            string glyph = "";
             if (!string.IsNullOrEmpty(symHex)
                 && int.TryParse(symHex, System.Globalization.NumberStyles.HexNumber,
                     System.Globalization.CultureInfo.InvariantCulture, out var symCode))
+                glyph = char.ConvertFromUtf32(symCode);
+
+            int g = glyph.Length > 0 ? runText.IndexOf(glyph, StringComparison.Ordinal) : -1;
+            if (g >= 0)
             {
-                var glyph = char.ConvertFromUtf32(symCode);
-                if (runText.StartsWith(glyph, StringComparison.Ordinal))
-                    runText = runText[glyph.Length..];
+                // text-before-glyph → <w:sym> → text-after-glyph (source order).
+                var before = runText[..g];
+                var after = runText[(g + glyph.Length)..];
+                if (!string.IsNullOrEmpty(before)) AppendTextWithBreaks(newRun, before);
+                newRun.AppendChild(sym);
+                if (!string.IsNullOrEmpty(after)) AppendTextWithBreaks(newRun, after);
             }
-            // Only emit a <w:t> when real text survives — a sym-only run leaves
-            // runText empty here and must NOT gain a spurious empty <w:t>.
-            if (!string.IsNullOrEmpty(runText))
-                AppendTextWithBreaks(newRun, runText);
+            else
+            {
+                // No cached glyph found in `text` (e.g. unresolvable codepoint)
+                // — preserve the legacy shape: <w:sym> first, then any literal
+                // text. Only emit a <w:t> when real text survives so a sym-only
+                // run never gains a spurious empty <w:t>.
+                newRun.AppendChild(sym);
+                if (!string.IsNullOrEmpty(runText))
+                    AppendTextWithBreaks(newRun, runText);
+            }
         }
         else
         {
