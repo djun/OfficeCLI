@@ -580,16 +580,13 @@ public partial class WordHandler
                     // don't leak into neighboring lines.
                     if (rule == "exact")
                     {
-                        var sizeStr = ResolveStyleFontSize(
-                            para.ParagraphProperties?.ParagraphStyleId?.Val?.Value ?? "")
-                            ?? $"{ReadDocDefaults().SizePt}pt";
-                        // ResolveStyleFontSize returns "Npt"; strip suffix.
-                        if (sizeStr.EndsWith("pt", StringComparison.Ordinal)
-                            && double.TryParse(sizeStr[..^2],
-                                System.Globalization.NumberStyles.Float,
-                                System.Globalization.CultureInfo.InvariantCulture,
-                                out var runSizePt)
-                            && runSizePt > 0 && linePt < runSizePt * 1.2)
+                        // Use the paragraph's principal (run) size, not the
+                        // style/doc-default, so an over-tall run triggers
+                        // clipping. Word clips when the exact box sits below
+                        // ~120% of the content's font size.
+                        var runSizePt = ResolveParaPrincipalSizePt(para)
+                            ?? ReadDocDefaults().SizePt;
+                        if (runSizePt > 0 && linePt < runSizePt * 1.2)
                             parts.Add("overflow:hidden");
                     }
                 }
@@ -1198,6 +1195,14 @@ public partial class WordHandler
                             var linePt = Units.TwipsToPt(lv);
                             var emitPt = rule == "atLeast" ? ResolveAtLeastPt(linePt, para) : linePt;
                             parts.Add($"line-height:{emitPt:0.##}pt");
+                            // exact pins the box and clips over-tall glyphs.
+                            if (rule == "exact")
+                            {
+                                var runSizePt = ResolveParaPrincipalSizePt(para)
+                                    ?? ReadDocDefaults().SizePt;
+                                if (runSizePt > 0 && linePt < runSizePt * 1.2)
+                                    parts.Add("overflow:hidden");
+                            }
                         }
                     }
                 }
@@ -1270,6 +1275,14 @@ public partial class WordHandler
                         var linePt = Units.TwipsToPt(lv);
                         var emitPt = rule == "atLeast" ? ResolveAtLeastPt(linePt, para) : linePt;
                         parts.Add($"line-height:{emitPt:0.##}pt");
+                        // exact pins the box and clips over-tall glyphs.
+                        if (rule == "exact")
+                        {
+                            var runSizePt = ResolveParaPrincipalSizePt(para)
+                                ?? ReadDocDefaults().SizePt;
+                            if (runSizePt > 0 && linePt < runSizePt * 1.2)
+                                parts.Add("overflow:hidden");
+                        }
                     }
                 }
             }
@@ -1362,17 +1375,26 @@ public partial class WordHandler
     /// §17.3.1.33.</summary>
     private string ResolveRunLineHeightCss(string? runFontName, double? runSizePt, Paragraph para)
     {
-        var paraSizePt = ResolveParaPrincipalSizePt(para);
-        bool sizeMatches = runSizePt == null
-            || (paraSizePt != null && Math.Abs(runSizePt.Value - paraSizePt.Value) < 0.01);
-        if (sizeMatches) return "line-height:1";
-
         var pProps = para.ParagraphProperties;
         var styleId = pProps?.ParagraphStyleId?.Val?.Value;
         var styleSpacing = ResolveSpacingFromStyle(styleId);
         var hasSpacing = pProps?.SpacingBetweenLines != null || styleSpacing != null;
         var lineVal = pProps?.SpacingBetweenLines?.Line?.Value ?? styleSpacing?.Line?.Value;
         var rule = pProps?.SpacingBetweenLines?.LineRule?.InnerText ?? styleSpacing?.LineRule?.InnerText;
+
+        // §17.3.1.33 exact: the paragraph pins the line box to a fixed height
+        // and clips over-tall glyphs (the paragraph path emits the fixed
+        // line-height + overflow:hidden). The run span must NOT emit its own
+        // line-height — line-height:1 on an over-tall run resolves to the
+        // run's font-size and would defeat the exact box. Inherit instead so
+        // the fixed value dominates regardless of run-vs-paragraph size match.
+        if (rule == "exact" && lineVal != null)
+            return "line-height:inherit";
+
+        var paraSizePt = ResolveParaPrincipalSizePt(para);
+        bool sizeMatches = runSizePt == null
+            || (paraSizePt != null && Math.Abs(runSizePt.Value - paraSizePt.Value) < 0.01);
+        if (sizeMatches) return "line-height:1";
 
         var font = runFontName ?? ResolveParaFontForLineHeight(para);
         var ratio = FontMetricsReader.GetRatio(font);
@@ -1384,8 +1406,7 @@ public partial class WordHandler
                 if ((rule == "auto" || rule == null)
                     && int.TryParse(lineVal, out var lvNum) && lvNum > 0)
                     return $"line-height:{ratio * (lvNum / 240.0):0.####}";
-                if (rule == "exact")
-                    return $"line-height:{Units.TwipsToPt(lineVal):0.##}pt";
+                // rule == "exact" handled at top (inherit, paragraph clips).
                 if (rule == "atLeast")
                 {
                     // §17.3.1.33 atLeast: floor; this run's natural single
