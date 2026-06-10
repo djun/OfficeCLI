@@ -3666,7 +3666,21 @@ public partial class WordHandler
         var hasTextRun = para.Elements<Run>()
             .Any(r => r.GetFirstChild<Text>() != null
                       && !string.IsNullOrEmpty(r.GetFirstChild<Text>()?.Text));
-        if (pmrpForDump != null && hasTextRun)
+        // BUG-DUMP-R27-2: a paragraph whose ONLY run is an inline drawing/
+        // picture (no <w:t> text) has hasTextRun == false, so the dotted
+        // block was suppressed. But the bare-key firstRun-fallback below
+        // ALSO can't carry the ¶-mark formatting: firstRun (a run with a
+        // <w:t>) is null, so it falls back to markRp and emits BARE keys
+        // (highlight / font.ea / …) onto the paragraph node — which the
+        // single-picture-run emit path then drops (the picture op carries
+        // its own font.ea but silently loses highlight). The para-mark
+        // formatting on a non-text run paragraph is just as distinct from
+        // the (non-textual) run content as in the text-run case, so emit
+        // the dotted form here too. The firstRun-fallback markRp branch is
+        // narrowed (below) to fire only when NO runs exist at all, so the
+        // two forms stay mutually exclusive (no DOUBLE).
+        var hasAnyRun = para.Elements<Run>().Any();
+        if (pmrpForDump != null && (hasTextRun || hasAnyRun))
         {
             var b = pmrpForDump.GetFirstChild<Bold>();
             if (b != null) node.Format["markRPr.bold"] = IsToggleOn(b);
@@ -3744,6 +3758,36 @@ public partial class WordHandler
                 node.Format["markRPr.charSpacing"] = $"{pmSpacing.Val.Value / 20.0:0.##}pt";
             var hl = pmrpForDump.GetFirstChild<Highlight>();
             if (hl?.Val?.HasValue == true) node.Format["markRPr.highlight"] = hl.Val.InnerText;
+            // BUG-DUMP-R27-1: ¶-mark character shading (<w:pPr><w:rPr><w:shd/>).
+            // Run-level shd already round-trips (shading.val/.fill/.color folded
+            // into a single `shading` key); the markRPr whitelist supported
+            // bold/color/kern/size/underline/font.* but not shd, so para-mark
+            // shading was silently dropped. Emit the same semicolon-encoded
+            // VAL;FILL[;COLOR] form `markRPr.highlight` uses (single key) so it
+            // routes through ApplyRunFormatting's `shading` case on replay.
+            var pmShd = pmrpForDump.GetFirstChild<Shading>();
+            if (pmShd != null)
+            {
+                var pmShdVal = pmShd.Val?.InnerText;
+                var pmShdFill = pmShd.Fill?.Value;
+                var pmShdColor = pmShd.Color?.Value;
+                // Skip the OOXML "no shading" form (clear + no fill/color) —
+                // mirrors the FilterEmittableProps shading-fold drop.
+                bool effectivelyNone = string.Equals(pmShdVal, "clear", StringComparison.OrdinalIgnoreCase)
+                    && string.IsNullOrEmpty(pmShdFill) && string.IsNullOrEmpty(pmShdColor);
+                if (!effectivelyNone)
+                {
+                    var v = string.IsNullOrEmpty(pmShdVal) ? "clear" : pmShdVal;
+                    string folded;
+                    if (!string.IsNullOrEmpty(pmShdColor))
+                        folded = $"{v};{(string.IsNullOrEmpty(pmShdFill) ? "" : ParseHelpers.FormatHexColor(pmShdFill))};{ParseHelpers.FormatHexColor(pmShdColor)}";
+                    else if (!string.IsNullOrEmpty(pmShdFill))
+                        folded = $"{v};{ParseHelpers.FormatHexColor(pmShdFill)}";
+                    else
+                        folded = v;
+                    node.Format["markRPr.shading"] = folded;
+                }
+            }
             // BUG-DUMP-MARKRPR-LANG: the ¶-mark's <w:lang> slots (val=latin /
             // eastAsia / bidi=cs) were never emitted under markRPr.*, so
             // dump→batch silently dropped them on every text-bearing paragraph.
@@ -3770,8 +3814,14 @@ public partial class WordHandler
         // Fall back to ParagraphMarkRunProperties when no runs exist (e.g. empty paragraph
         // that had formatting applied via Set before any text was added).
         var firstRun = para.Elements<Run>().FirstOrDefault(r => r.GetFirstChild<Text>() != null);
+        // BUG-DUMP-R27-2: only fall back to ParagraphMarkRunProperties for the
+        // bare-key path when the paragraph has NO runs at all (truly empty ¶).
+        // A picture/drawing-only paragraph has runs but no text run; its
+        // ¶-mark formatting is now carried by the dotted markRPr.* block above,
+        // so emitting bare keys here too would double-emit (and the bare
+        // highlight would be dropped by the single-picture-run emit anyway).
         var paraRp = firstRun?.RunProperties
-            ?? (firstRun == null ? para.ParagraphProperties?.ParagraphMarkRunProperties as OpenXmlCompositeElement : null);
+            ?? (firstRun == null && !hasAnyRun ? para.ParagraphProperties?.ParagraphMarkRunProperties as OpenXmlCompositeElement : null);
         if (paraRp != null)
         {
             RunProperties? rp = paraRp as RunProperties ?? null;
@@ -3883,6 +3933,35 @@ public partial class WordHandler
                 var kEmpty = markRp.GetFirstChild<Kern>();
                 if (kEmpty?.Val?.HasValue == true)
                     node.Format["kern"] = kEmpty.Val.Value.ToString();
+            }
+            // BUG-DUMP-R27-1: empty-paragraph ¶-mark character shading
+            // (<w:shd> inside ParagraphMarkRunProperties). The text/picture
+            // path surfaces this as markRPr.shading (pmrpForDump block above);
+            // here we cover the empty-paragraph case (markRp != null ⇒ no
+            // text run) and emit the bare `shading` key — AddParagraph's
+            // no-text hoist routes it back onto the ¶ mark rPr (mirrors how
+            // bare bold/color/highlight are hoisted to markRPr on replay).
+            if (markRp != null && !node.Format.ContainsKey("shading"))
+            {
+                var shdEmpty = markRp.GetFirstChild<Shading>();
+                if (shdEmpty != null)
+                {
+                    var sv = shdEmpty.Val?.InnerText;
+                    var sf = shdEmpty.Fill?.Value;
+                    var sc = shdEmpty.Color?.Value;
+                    bool none = string.Equals(sv, "clear", StringComparison.OrdinalIgnoreCase)
+                        && string.IsNullOrEmpty(sf) && string.IsNullOrEmpty(sc);
+                    if (!none)
+                    {
+                        var v = string.IsNullOrEmpty(sv) ? "clear" : sv;
+                        if (!string.IsNullOrEmpty(sc))
+                            node.Format["shading"] = $"{v};{(string.IsNullOrEmpty(sf) ? "" : ParseHelpers.FormatHexColor(sf))};{ParseHelpers.FormatHexColor(sc)}";
+                        else if (!string.IsNullOrEmpty(sf))
+                            node.Format["shading"] = $"{v};{ParseHelpers.FormatHexColor(sf)}";
+                        else
+                            node.Format["shading"] = v;
+                    }
+                }
             }
             // BUG-R10A(BUG3): empty-paragraph ¶-mark character spacing
             // (<w:spacing> inside ParagraphMarkRunProperties). The

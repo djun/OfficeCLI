@@ -146,6 +146,11 @@ public partial class WordHandler
         // re-emerge (e.g. `style=TOC2 size=11pt` → 12pt because TOC2's
         // base size is 12pt). Mirrors the size.cs/italic.cs/bold.cs hoist
         // above. Only applied when there is no text run carrier.
+        // BUG-DUMP-R27-1: when a no-text paragraph's shd is hoisted to the
+        // mark rPr, this flag suppresses the pPr-level <w:shd> handler below
+        // so a paragraph-mark shading is not also stamped as whole-line
+        // background shading (different semantics).
+        bool shadingHoistedToMarkRPr = false;
         if (!properties.ContainsKey("text"))
         {
             ParagraphMarkRunProperties? noTextMarkRPr = null;
@@ -188,6 +193,25 @@ public partial class WordHandler
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "color", ntColor);
             if (properties.TryGetValue("highlight", out var ntHighlight))
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "highlight", ntHighlight);
+            // BUG-DUMP-R27-1: ¶-mark character shading on a no-text paragraph
+            // must hoist onto the mark rPr (<w:pPr><w:rPr><w:shd/>), NOT the
+            // paragraph-level pPr/shd. Without this, the bare `shading` key
+            // emitted by Navigation's empty-paragraph fallback would route to
+            // pProps.Shading (line ~390) and the round-trip would relocate the
+            // shd from markRPr to pPr. Mirrors the highlight hoist above; the
+            // `shd` alias matches the run-level shading key vocabulary.
+            if (properties.TryGetValue("shading", out var ntShd)
+                || properties.TryGetValue("shd", out ntShd))
+            {
+                ApplyRunFormatting(EnsureNoTextMarkRPr(), "shading", ntShd);
+                // Mark the shading as consumed by the ¶-mark hoist so the
+                // pPr-level shading handler below (which runs LATER in this
+                // method) does NOT also stamp a paragraph-level <w:pPr><w:shd>.
+                // The two are different semantics: mark rPr shd shades the ¶
+                // glyph only; pPr shd paints the whole-line background. For a
+                // no-text paragraph the source shd lives on the mark rPr alone.
+                shadingHoistedToMarkRPr = true;
+            }
             if (properties.TryGetValue("underline", out var ntUl)
                 || properties.TryGetValue("font.underline", out ntUl))
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "underline", ntUl);
@@ -353,7 +377,8 @@ public partial class WordHandler
         {
             ApplyTabsShorthand(pProps, pTabsVal);
         }
-        if (properties.TryGetValue("shd", out var pShdVal) || properties.TryGetValue("shading", out pShdVal) || properties.TryGetValue("fill", out pShdVal))
+        if (!shadingHoistedToMarkRPr
+            && (properties.TryGetValue("shd", out var pShdVal) || properties.TryGetValue("shading", out pShdVal) || properties.TryGetValue("fill", out pShdVal)))
         {
             var shdParts = pShdVal.Split(';');
             var shd = new Shading();
