@@ -693,43 +693,31 @@ public partial class ExcelHandler
                 }
                 case "fill":
                 {
-                    var dxf = ResolveCfDxf(rule);
-                    if (dxf != null)
-                    {
-                        var normFill = ParseHelpers.NormalizeArgbColor(value);
-                        dxf.RemoveAllChildren<Fill>();
-                        dxf.Append(new Fill(new PatternFill(
-                            new BackgroundColor { Rgb = normFill })
-                        { PatternType = PatternValues.Solid }));
-                        _dirtyStylesheet = true;
-                    }
-                    else unsup.Add(key);
+                    var dxf = ResolveCfDxf(rule) ?? EnsureCfDxf(rule);
+                    var normFill = ParseHelpers.NormalizeArgbColor(value);
+                    dxf.RemoveAllChildren<Fill>();
+                    dxf.Append(new Fill(new PatternFill(
+                        new BackgroundColor { Rgb = normFill })
+                    { PatternType = PatternValues.Solid }));
+                    _dirtyStylesheet = true;
                     break;
                 }
                 case "font.color":
                 {
-                    var dxf = ResolveCfDxf(rule);
-                    if (dxf != null)
-                    {
-                        var font = dxf.GetFirstChild<Font>() ?? (Font)dxf.AppendChild(new Font());
-                        font.RemoveAllChildren<DocumentFormat.OpenXml.Spreadsheet.Color>();
-                        font.Append(new DocumentFormat.OpenXml.Spreadsheet.Color { Rgb = ParseHelpers.NormalizeArgbColor(value) });
-                        _dirtyStylesheet = true;
-                    }
-                    else unsup.Add(key);
+                    var dxf = ResolveCfDxf(rule) ?? EnsureCfDxf(rule);
+                    var font = dxf.GetFirstChild<Font>() ?? (Font)dxf.AppendChild(new Font());
+                    font.RemoveAllChildren<DocumentFormat.OpenXml.Spreadsheet.Color>();
+                    font.Append(new DocumentFormat.OpenXml.Spreadsheet.Color { Rgb = ParseHelpers.NormalizeArgbColor(value) });
+                    _dirtyStylesheet = true;
                     break;
                 }
                 case "font.bold":
                 {
-                    var dxf = ResolveCfDxf(rule);
-                    if (dxf != null)
-                    {
-                        var font = dxf.GetFirstChild<Font>() ?? (Font)dxf.AppendChild(new Font());
-                        font.RemoveAllChildren<Bold>();
-                        if (IsTruthy(value)) font.Append(new Bold());
-                        _dirtyStylesheet = true;
-                    }
-                    else unsup.Add(key);
+                    var dxf = ResolveCfDxf(rule) ?? EnsureCfDxf(rule);
+                    var font = dxf.GetFirstChild<Font>() ?? (Font)dxf.AppendChild(new Font());
+                    font.RemoveAllChildren<Bold>();
+                    if (IsTruthy(value)) font.Append(new Bold());
+                    _dirtyStylesheet = true;
                     break;
                 }
                 default:
@@ -753,6 +741,34 @@ public partial class ExcelHandler
         if (dxfList == null) return null;
         var id = (int)rule.FormatId.Value;
         return id >= 0 && id < dxfList.Count ? dxfList[id] : null;
+    }
+
+    /// <summary>
+    /// Create a fresh DifferentialFormat, append it to the stylesheet's
+    /// DifferentialFormats collection (creating the collection if absent), and
+    /// point rule.FormatId at the new index. Mirrors the dxf-create path in
+    /// AddCfExtended so that Set fill/font.color/font.bold work even when no
+    /// formatting props were supplied at Add time.
+    /// </summary>
+    private DifferentialFormat EnsureCfDxf(ConditionalFormattingRule? rule)
+    {
+        if (rule == null) throw new InvalidOperationException("Cannot create dxf: CF rule is null");
+        var wbPart = _doc.WorkbookPart ?? throw new InvalidOperationException("Workbook not found");
+        var styleMgr = new ExcelStyleManager(wbPart);
+        styleMgr.EnsureStylesPart();
+        var stylesheet = wbPart.WorkbookStylesPart!.Stylesheet!;
+        var dxfs = stylesheet.GetFirstChild<DifferentialFormats>();
+        if (dxfs == null)
+        {
+            dxfs = new DifferentialFormats { Count = 0 };
+            stylesheet.Append(dxfs);
+        }
+        var newDxf = new DifferentialFormat();
+        dxfs.Append(newDxf);
+        dxfs.Count = (uint)dxfs.Elements<DifferentialFormat>().Count();
+        rule.FormatId = dxfs.Count!.Value - 1;
+        _dirtyStylesheet = true;
+        return newDxf;
     }
 
     /// <summary>
