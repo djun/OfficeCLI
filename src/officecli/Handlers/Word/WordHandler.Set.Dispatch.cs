@@ -631,11 +631,32 @@ public partial class WordHandler
         if (firstPara == null) return;
         var pProps = firstPara.ParagraphProperties ?? firstPara.PrependChild(new ParagraphProperties());
         var contentRuns = comment.Descendants<Run>().ToList();
+        // BUG-DUMP-R45-3: snapshot whether the SOURCE comment paragraph already
+        // carried a paragraph-mark rPr BEFORE we lazily create one below. The
+        // dump emitter rides the comment body's first-run rPr (italic/bold/…) on
+        // `add comment`; without this guard the bare run keys below were mirrored
+        // onto the ¶ mark unconditionally — hoisting run-level direct formatting
+        // into the comment paragraph-mark rPr (reb gained <w:pPr><w:rPr><w:i/>>
+        // the source never had). Mirrors SetElementParagraph's markRPrPreExisted
+        // precedent: bare run keys only touch markRPr when the source already had
+        // one, or there are no content runs to carry the formatting. Genuine mark
+        // rPr round-trips through the explicit `markRPr.*` dotted keys below.
+        bool markRPrPreExisted = pProps.ParagraphMarkRunProperties != null;
         var markRPr = pProps.ParagraphMarkRunProperties ?? pProps.AppendChild(new ParagraphMarkRunProperties());
         foreach (var (key, value) in properties)
         {
             var lk = key.ToLowerInvariant();
             if (lk == "text" || lk == "author" || lk == "initials" || lk == "date") continue;
+            // BUG-DUMP-R45-3: explicit paragraph-mark-only formatting (the dotted
+            // `markRPr.*` form Navigation emits when the source comment paragraph
+            // genuinely carries a <w:pPr><w:rPr>). Writes ONLY to the ¶ mark,
+            // never to the content runs — mirrors the body paragraph markRPr.*
+            // case in SetElementParagraph.
+            if (lk.StartsWith("markrpr.", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyRunFormatting(markRPr, key.Substring("markRPr.".Length), value);
+                continue;
+            }
             // R21-WB-1c: direction is the canonical key for comment paragraph
             // bidi. Use explicit-override semantics so direction=ltr leaves a
             // readable <w:bidi w:val="0"/> marker (mirrors legacy rtl=false
@@ -661,7 +682,14 @@ public partial class WordHandler
             }
             if (runApplied)
             {
-                ApplyRunFormatting(markRPr, key, value);
+                // BUG-DUMP-R45-3: keep run-level direct formatting on the RUN.
+                // Only mirror onto the ¶ mark when the source paragraph already
+                // had a mark rPr (preserve existing-document semantics) or when
+                // there are no content runs (the lone ¶ glyph is the only place
+                // the formatting can live). Otherwise the bare run keys would
+                // fabricate a mark rPr the source comment never carried.
+                if (markRPrPreExisted || contentRuns.Count == 0)
+                    ApplyRunFormatting(markRPr, key, value);
                 continue;
             }
             unsupported.Add(key);
