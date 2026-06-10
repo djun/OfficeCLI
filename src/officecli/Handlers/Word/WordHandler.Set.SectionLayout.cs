@@ -135,12 +135,13 @@ public partial class WordHandler
                 var sectPr = EnsureSectionProperties();
                 var pb = EnsurePageBorders(sectPr);
                 var (style, size, color, space) = ParseBorderValue(value);
+                var sf = ParseBorderShadowFrame(value);
                 switch (key)
                 {
-                    case "pgborders.top":    pb.TopBorder    = MakeBorder<TopBorder>(style, size, color, space); break;
-                    case "pgborders.left":   pb.LeftBorder   = MakeBorder<LeftBorder>(style, size, color, space); break;
-                    case "pgborders.bottom": pb.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space); break;
-                    case "pgborders.right":  pb.RightBorder  = MakeBorder<RightBorder>(style, size, color, space); break;
+                    case "pgborders.top":    pb.TopBorder    = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame); break;
+                    case "pgborders.left":   pb.LeftBorder   = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame); break;
+                    case "pgborders.bottom": pb.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame); break;
+                    case "pgborders.right":  pb.RightBorder  = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame); break;
                 }
                 return true;
             }

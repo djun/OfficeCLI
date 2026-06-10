@@ -2048,13 +2048,24 @@ public partial class WordHandler
             var bdrSize = rBdr.Size?.Value;
             var bdrColor = rBdr.Color?.Value;
             var bdrSpace = rBdr.Space?.Value;
-            node.Format["bdr"] = string.Join(';', new[]
+            // BUG-DUMP-R36-1: append w:shadow / w:frame as positional segments
+            // 5/6 (STYLE;SIZE;COLOR;SPACE;SHADOW;FRAME). Emit only when present
+            // so a plain border keeps its 4-field shape (back-compat) and does
+            // not gain a spurious shadow="false"/frame="false" on replay.
+            var segs = new System.Collections.Generic.List<string>
             {
-                bdrStyle,
+                bdrStyle ?? "single",
                 bdrSize?.ToString() ?? "",
                 string.IsNullOrEmpty(bdrColor) ? "" : ParseHelpers.FormatHexColor(bdrColor),
                 bdrSpace?.ToString() ?? "0"
-            });
+            };
+            bool? bdrShadow = rBdr.Shadow?.Value;
+            bool? bdrFrame = rBdr.Frame?.Value;
+            if (bdrShadow.HasValue || bdrFrame.HasValue)
+                segs.Add(bdrShadow == true ? "true" : "false");
+            if (bdrFrame.HasValue)
+                segs.Add(bdrFrame == true ? "true" : "false");
+            node.Format["bdr"] = string.Join(';', segs);
         }
         if (run.RunProperties?.Shading != null)
         {
@@ -5086,6 +5097,12 @@ public partial class WordHandler
         if (border.Size?.Value is uint sz) node.Format[$"{key}.sz"] = sz;
         if (border.Color?.Value is { } c) node.Format[$"{key}.color"] = ParseHelpers.FormatHexColor(c);
         if (border.Space?.Value is uint sp) node.Format[$"{key}.space"] = sp;
+        // BUG-DUMP-R36-1: w:shadow (drop-shadow) / w:frame (border on the OUTSIDE
+        // edge of text) are render-relevant and were previously dropped on
+        // round-trip. Emit as .shadow / .frame sub-keys only when present so a
+        // plain border round-trips without a spurious shadow="false".
+        if (border.Shadow?.Value is bool sh) node.Format[$"{key}.shadow"] = sh;
+        if (border.Frame?.Value is bool fr) node.Format[$"{key}.frame"] = fr;
     }
 
     // OOXML localNames that curated style/paragraph/run readers already map

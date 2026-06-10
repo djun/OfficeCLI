@@ -88,7 +88,9 @@ public static partial class WordBatchEmitter
         // the 2-segment key applies an empty-style border and the 3-segment
         // subkeys hit unsupported (BUG BT-6: Title/Intense Quote lose bottom
         // border on round-trip). Fold the 4 keys into one before validation.
-        var pbdrFold = new Dictionary<string, (string? style, string? sz, string? color, string? space)>(
+        // BUG-DUMP-R36-1: fold tuple carries shadow/frame so the compound
+        // string can append them as segments 5/6 (STYLE;SIZE;COLOR;SPACE;SHADOW;FRAME).
+        var pbdrFold = new Dictionary<string, (string? style, string? sz, string? color, string? space, string? shadow, string? frame)>(
             StringComparer.OrdinalIgnoreCase);
         foreach (var (key, val) in raw)
         {
@@ -107,6 +109,8 @@ public static partial class WordBatchEmitter
                     case "sz": cur.sz = sval; break;
                     case "color": cur.color = sval; break;
                     case "space": cur.space = sval; break;
+                    case "shadow": cur.shadow = sval; break;
+                    case "frame": cur.frame = sval; break;
                 }
             }
             pbdrFold[side] = cur;
@@ -125,7 +129,7 @@ public static partial class WordBatchEmitter
         // partial spec here and prepend an explicit `border=none` wipe so
         // genuine three-line / banner-line tables round-trip with the same
         // visible result. CONSISTENCY(border-default-overlay).
-        var borderFold = new Dictionary<string, (string? style, string? sz, string? color, string? space)>(
+        var borderFold = new Dictionary<string, (string? style, string? sz, string? color, string? space, string? shadow, string? frame)>(
             StringComparer.OrdinalIgnoreCase);
         foreach (var (key, val) in raw)
         {
@@ -144,6 +148,8 @@ public static partial class WordBatchEmitter
                     case "sz": cur.sz = sval; break;
                     case "color": cur.color = sval; break;
                     case "space": cur.space = sval; break;
+                    case "shadow": cur.shadow = sval; break;
+                    case "frame": cur.frame = sval; break;
                 }
             }
             borderFold[side] = cur;
@@ -283,19 +289,7 @@ public static partial class WordBatchEmitter
                 var side = $"{parts[0]}.{parts[1]}";
                 if (pbdrFold.TryGetValue(side, out var folded) && folded.style != null)
                 {
-                    // ParseBorderValue format: STYLE[;SIZE[;COLOR[;SPACE]]] — empties
-                    // for missing intermediates so positional parts stay aligned.
-                    var sz = folded.sz ?? "";
-                    var col = folded.color ?? "";
-                    var sp = folded.space ?? "";
-                    var v = folded.style!;
-                    if (folded.sz != null || folded.color != null || folded.space != null)
-                        v += ";" + sz;
-                    if (folded.color != null || folded.space != null)
-                        v += ";" + col;
-                    if (folded.space != null)
-                        v += ";" + sp;
-                    result[key] = v;
+                    result[key] = FoldBorderValue(folded);
                 }
                 continue;
             }
@@ -311,17 +305,7 @@ public static partial class WordBatchEmitter
                 var bside = $"{bparts[0]}.{bparts[1]}";
                 if (borderFold.TryGetValue(bside, out var folded) && folded.style != null)
                 {
-                    var sz = folded.sz ?? "";
-                    var col = folded.color ?? "";
-                    var sp = folded.space ?? "";
-                    var v = folded.style!;
-                    if (folded.sz != null || folded.color != null || folded.space != null)
-                        v += ";" + sz;
-                    if (folded.color != null || folded.space != null)
-                        v += ";" + col;
-                    if (folded.space != null)
-                        v += ";" + sp;
-                    result[key] = v;
+                    result[key] = FoldBorderValue(folded);
                 }
                 continue;
             }
@@ -420,5 +404,25 @@ public static partial class WordBatchEmitter
         var bounded = pt < 0.5 ? 0.5 : 4000.0;
         clamped = bounded.ToString(System.Globalization.CultureInfo.InvariantCulture) + "pt";
         return true;
+    }
+
+    // BUG-DUMP-R36-1: fold a captured border tuple into ParseBorderValue's
+    // positional form STYLE[;SIZE[;COLOR[;SPACE[;SHADOW[;FRAME]]]]]. A trailing
+    // segment is only emitted when it (or a later segment) is present, so plain
+    // borders keep the legacy 4-field (or shorter) shape and never gain a
+    // spurious shadow="false"/frame="false" on replay. Empty intermediates keep
+    // positional alignment.
+    private static string FoldBorderValue(
+        (string? style, string? sz, string? color, string? space, string? shadow, string? frame) f)
+    {
+        bool hasSz = f.sz != null, hasCol = f.color != null, hasSp = f.space != null,
+             hasSh = f.shadow != null, hasFr = f.frame != null;
+        var v = f.style!;
+        if (hasSz || hasCol || hasSp || hasSh || hasFr) v += ";" + (f.sz ?? "");
+        if (hasCol || hasSp || hasSh || hasFr) v += ";" + (f.color ?? "");
+        if (hasSp || hasSh || hasFr) v += ";" + (f.space ?? "");
+        if (hasSh || hasFr) v += ";" + (f.shadow ?? "");
+        if (hasFr) v += ";" + (f.frame ?? "");
+        return v;
     }
 }

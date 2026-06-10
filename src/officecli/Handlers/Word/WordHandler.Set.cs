@@ -729,6 +729,22 @@ public partial class WordHandler
         return (style, size, color, space);
     }
 
+    // BUG-DUMP-R36-1: the compound border string carries two optional boolean
+    // segments AFTER space — STYLE;SIZE;COLOR;SPACE;SHADOW;FRAME. w:shadow draws
+    // a drop-shadow, w:frame draws the border on the OUTSIDE edge of text; both
+    // change rendering and were previously dropped on round-trip. Segments are
+    // "true"/"false"/"" (empty = not specified). Back-compat: a 4-field string
+    // returns (null, null) so MakeBorder stamps neither attribute.
+    private static (bool? shadow, bool? frame) ParseBorderShadowFrame(string value)
+    {
+        var parts = value.Split(';');
+        bool? Slot(int i) =>
+            (parts.Length > i && !string.IsNullOrEmpty(parts[i].Trim()))
+                ? IsTruthy(parts[i].Trim())
+                : (bool?)null;
+        return (Slot(4), Slot(5));
+    }
+
     // CONSISTENCY(border-size-roundtrip): expose whether the caller provided
     // a SIZE segment so MakeBorder can suppress w:sz on nil borders that
     // never had it in the source. Mirrors the w:space "only when given"
@@ -789,7 +805,7 @@ public partial class WordHandler
         return (style, size, color, space, sizeProvided);
     }
 
-    private static T MakeBorder<T>(BorderValues style, uint size, string? color, uint? space) where T : BorderType, new()
+    private static T MakeBorder<T>(BorderValues style, uint size, string? color, uint? space, bool? shadow = null, bool? frame = null) where T : BorderType, new()
     {
         // BUG-R2-P2-7: only emit w:space attribute when the caller actually
         // provided one. Writing space=0 explicitly round-trips into a
@@ -806,6 +822,11 @@ public partial class WordHandler
         if (!(style == BorderValues.Nil && size == 0)) b.Size = size;
         if (space.HasValue) b.Space = space.Value;
         if (color != null) b.Color = color;
+        // BUG-DUMP-R36-1: stamp w:shadow / w:frame only when the source carried
+        // them (bool? null = absent) so a plain border round-trips without a
+        // spurious shadow="false"/frame="false" attribute.
+        if (shadow.HasValue) b.Shadow = shadow.Value;
+        if (frame.HasValue) b.Frame = frame.Value;
         return b;
     }
 
@@ -1146,33 +1167,34 @@ public partial class WordHandler
             pProps.ParagraphBorders = borders; // typed setter maintains CT_PPr schema order
         }
         var (style, size, color, space) = ParseBorderValue(value);
+        var sf = ParseBorderShadowFrame(value);
 
         switch (key.ToLowerInvariant())
         {
             case "pbdr.all" or "pbdr" or "border.all" or "border":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space);
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space);
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space);
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
-                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "pbdr.top" or "border.top":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "pbdr.bottom" or "border.bottom":
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "pbdr.left" or "border.left":
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "pbdr.right" or "border.right":
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "pbdr.between" or "border.between":
-                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space);
+                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "pbdr.bar" or "border.bar":
-                borders.BarBorder = MakeBorder<BarBorder>(style, size, color, space);
+                borders.BarBorder = MakeBorder<BarBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
         }
     }
@@ -1191,33 +1213,34 @@ public partial class WordHandler
             Core.SchemaOrder.Place(spPr, borders);
         }
         var (style, size, color, space) = ParseBorderValue(value);
+        var sf = ParseBorderShadowFrame(value);
 
         switch (key.ToLowerInvariant())
         {
             case "pbdr.all" or "pbdr" or "border.all" or "border":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space);
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space);
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space);
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
-                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "pbdr.top" or "border.top":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "pbdr.bottom" or "border.bottom":
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "pbdr.left" or "border.left":
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "pbdr.right" or "border.right":
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "pbdr.between" or "border.between":
-                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space);
+                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "pbdr.bar" or "border.bar":
-                borders.BarBorder = MakeBorder<BarBorder>(style, size, color, space);
+                borders.BarBorder = MakeBorder<BarBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
         }
     }
@@ -1226,34 +1249,35 @@ public partial class WordHandler
     {
         var borders = tblPr.TableBorders ?? tblPr.AppendChild(new TableBorders());
         var (style, size, color, space) = ParseBorderValue(value);
+        var sf = ParseBorderShadowFrame(value);
 
         switch (key.ToLowerInvariant())
         {
             case "border.all" or "border":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space);
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space);
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space);
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
-                borders.InsideHorizontalBorder = MakeBorder<InsideHorizontalBorder>(style, size, color, space);
-                borders.InsideVerticalBorder = MakeBorder<InsideVerticalBorder>(style, size, color, space);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.InsideHorizontalBorder = MakeBorder<InsideHorizontalBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.InsideVerticalBorder = MakeBorder<InsideVerticalBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "border.top":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "border.bottom":
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "border.left":
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "border.right":
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "border.insideh" or "border.horizontal":
-                borders.InsideHorizontalBorder = MakeBorder<InsideHorizontalBorder>(style, size, color, space);
+                borders.InsideHorizontalBorder = MakeBorder<InsideHorizontalBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "border.insidev" or "border.vertical":
-                borders.InsideVerticalBorder = MakeBorder<InsideVerticalBorder>(style, size, color, space);
+                borders.InsideVerticalBorder = MakeBorder<InsideVerticalBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
         }
     }
@@ -1322,32 +1346,33 @@ public partial class WordHandler
             InsertTcPrChildInOrder(tcPr, borders);
         }
         var (style, size, color, space) = ParseBorderValue(value);
+        var sf = ParseBorderShadowFrame(value);
 
         switch (key.ToLowerInvariant())
         {
             case "border.all" or "border":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space);
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space);
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space);
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "border.top":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "border.bottom":
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "border.left":
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "border.right":
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "border.tl2br":
-                borders.TopLeftToBottomRightCellBorder = MakeBorder<TopLeftToBottomRightCellBorder>(style, size, color, space);
+                borders.TopLeftToBottomRightCellBorder = MakeBorder<TopLeftToBottomRightCellBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
             case "border.tr2bl":
-                borders.TopRightToBottomLeftCellBorder = MakeBorder<TopRightToBottomLeftCellBorder>(style, size, color, space);
+                borders.TopRightToBottomLeftCellBorder = MakeBorder<TopRightToBottomLeftCellBorder>(style, size, color, space, sf.shadow, sf.frame);
                 break;
         }
     }

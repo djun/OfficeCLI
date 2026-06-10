@@ -951,6 +951,12 @@ public partial class WordHandler
                     var bdr = new Border { Val = bStyle, Size = bSize };
                     if (bSpace.HasValue) bdr.Space = bSpace.Value;
                     if (bColor != null) bdr.Color = bColor;
+                    // BUG-DUMP-R36-1: round-trip w:shadow / w:frame (segments 5/6
+                    // of STYLE;SIZE;COLOR;SPACE;SHADOW;FRAME); stamp only when the
+                    // source carried them so a plain border stays plain.
+                    var (bShadow, bFrame) = ParseBorderShadowFrame(value);
+                    if (bShadow.HasValue) bdr.Shadow = bShadow.Value;
+                    if (bFrame.HasValue) bdr.Frame = bFrame.Value;
                     InsertRunPropInSchemaOrder(props, bdr);
                 }
                 return true;
