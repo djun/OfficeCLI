@@ -1943,25 +1943,36 @@ public static partial class WordBatchEmitter
             // (<wps:cNvCnPr>, e.g. a letterhead separator), autoshapes, groups
             // — and textboxes whose typed emit failed fall back to a raw-set
             // append so the shape survives round-trip instead of vanishing.
-            if (parentPath == "/body" && !probeXml.Contains("r:embed") && !probeXml.Contains("r:id")
-                && !DrawingHasUnreconstructableRel(probeXml))
+            // BUG-DUMP-R47-1: the host now resolves via ResolveRawSetHost
+            // (body / header / footer / table cell), mirroring the wps:wsp
+            // DrawingML-shape path below — a cell/header/footer-hosted legacy
+            // VML/non-textbox shape was previously dropped because this gate
+            // hardcoded parentPath == "/body" and the body anchor. The external-rel
+            // guards are unchanged: drawings carrying an r:embed/r:id we can't
+            // re-anchor still fall through to the warn+drop below.
+            // BUG-R1-01 (preserved): ResolveRawSetHost("/body") returns exactly
+            // ("/document", "/w:document/w:body/w:p[last()]") — attach to the
+            // most-recently-emitted paragraph via last(), NOT the navigation
+            // pIndex (targetIndex). pIndex deliberately does not advance for an
+            // oMathPara-bearing paragraph (EmitBody: display equations resolve as
+            // /body/oMathPara[N], not /body/p[N]), but in the LITERAL XML the
+            // equation is a real <w:p> wrapping <m:oMathPara>. So a numeric
+            // w:p[{pIndex}] under-counts by one per preceding equation and the
+            // shape lands on the wrong paragraph. The host paragraph was just
+            // added by this same EmitParagraph call, so it is always the last
+            // w:p at replay time — the same last()-relative attach the typed
+            // picture/textbox path uses. So body-hosted shapes round-trip
+            // byte-identically to the previous hardcoded anchor.
+            if (!probeXml.Contains("r:embed") && !probeXml.Contains("r:id")
+                && !DrawingHasUnreconstructableRel(probeXml)
+                && ctx != null
+                && ResolveRawSetHost(parentPath, ctx) is { } drawHost)
             {
                 items.Add(new BatchItem
                 {
                     Command = "raw-set",
-                    Part = "/document",
-                    // BUG-R1-01: attach to the most-recently-emitted paragraph
-                    // via last(), NOT the navigation pIndex (targetIndex). pIndex
-                    // deliberately does not advance for an oMathPara-bearing
-                    // paragraph (EmitBody: display equations resolve as
-                    // /body/oMathPara[N], not /body/p[N]), but in the LITERAL XML
-                    // the equation is a real <w:p> wrapping <m:oMathPara>. So a
-                    // numeric w:p[{pIndex}] under-counts by one per preceding
-                    // equation and the shape lands on the wrong paragraph. The
-                    // host paragraph was just added by this same EmitParagraph
-                    // call, so it is always the last w:p at replay time — the same
-                    // last()-relative attach the typed picture/textbox path uses.
-                    Xpath = "/w:document/w:body/w:p[last()]",
+                    Part = drawHost.Part,
+                    Xpath = drawHost.XPath,
                     Action = "append",
                     Xml = probeXml
                 });
