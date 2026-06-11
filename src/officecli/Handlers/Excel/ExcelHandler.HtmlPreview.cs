@@ -1482,6 +1482,12 @@ public partial class ExcelHandler
             var kind = type == X14.SparklineTypeValues.Column ? "column"
                      : type == X14.SparklineTypeValues.Stacked ? "stacked"
                      : "line";
+            // Series color: mirror the reader (Helpers.Node) — fall back to
+            // default blue only when no <x14:colorSeries rgb=...> is stored.
+            var seriesRgb = group.SeriesColor?.Rgb?.Value;
+            var seriesColor = seriesRgb != null
+                ? ParseHelpers.FormatHexColor(seriesRgb)
+                : "#4472C4";
             foreach (var spk in group.Descendants<X14.Sparkline>())
             {
                 var dataRange = spk.Formula?.Text;
@@ -1492,14 +1498,14 @@ public partial class ExcelHandler
                 // host cell may be a range like "F1:F1" — take the first ref.
                 var host = hostCell.Contains(':') ? hostCell.Split(':')[0] : hostCell;
                 host = host.Contains('!') ? host.Split('!')[1] : host;
-                result[host] = BuildSparklineSvg(values, kind);
+                result[host] = BuildSparklineSvg(values, kind, seriesColor);
             }
         }
         return result;
     }
 
     /// <summary>Render a sparkline's values as a small inline SVG (~80x20px).</summary>
-    private static string BuildSparklineSvg(double[] values, string kind)
+    private static string BuildSparklineSvg(double[] values, string kind, string seriesColor)
     {
         const double w = 80, h = 18;
         var min = values.Min();
@@ -1524,7 +1530,7 @@ public partial class ExcelHandler
                 var valY = h - (v - zeroFloor) / zeroRange * h;
                 var top = Math.Min(zeroY, valY);
                 var bh = Math.Max(1, Math.Abs(valY - zeroY));
-                var color = v < 0 ? "#C0504D" : "#4472C4";
+                var color = v < 0 ? "#C0504D" : seriesColor;
                 sb.Append($"<rect x=\"{i * bw + 0.5:0.#}\" y=\"{top:0.#}\" width=\"{Math.Max(1, bw - 1):0.#}\" height=\"{bh:0.#}\" fill=\"{color}\"/>");
             }
         }
@@ -1538,7 +1544,7 @@ public partial class ExcelHandler
                 var y = h - (values[i] - min) / range * h;
                 pts.Add($"{x:0.#},{y:0.#}");
             }
-            sb.Append($"<polyline points=\"{string.Join(" ", pts)}\" fill=\"none\" stroke=\"#4472C4\" stroke-width=\"1\"/>");
+            sb.Append($"<polyline points=\"{string.Join(" ", pts)}\" fill=\"none\" stroke=\"{seriesColor}\" stroke-width=\"1\"/>");
         }
         sb.Append("</svg>");
         return sb.ToString();
