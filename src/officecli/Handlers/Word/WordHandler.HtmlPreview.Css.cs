@@ -740,6 +740,21 @@ public partial class WordHandler
             RenderBorderCss(parts, pBdr.BottomBorder, "border-bottom");
             RenderBorderCss(parts, pBdr.LeftBorder, "border-left");
             RenderBorderCss(parts, pBdr.RightBorder, "border-right");
+            // w:between draws a rule BETWEEN consecutive paragraphs that share
+            // the same pBdr (OOXML §17.3.1.24). HTML has no native "between"
+            // border, so approximate as a bottom-border on the upper paragraph
+            // when the following sibling paragraph also carries a matching
+            // pBdr — and only when no explicit w:bottom already painted that
+            // edge (an explicit bottom wins on the para's own outer box).
+            if (pBdr.BetweenBorder != null && pBdr.BottomBorder == null
+                && para.NextSibling() is Paragraph nextPara
+                && (nextPara.ParagraphProperties?.ParagraphBorders
+                    ?? ResolveStyleParagraphBorders(nextPara.ParagraphProperties?.ParagraphStyleId?.Val?.Value))
+                   is ParagraphBorders nextBdr
+                && (nextBdr.BetweenBorder != null || nextBdr.TopBorder != null))
+            {
+                RenderBorderCss(parts, pBdr.BetweenBorder, "border-bottom");
+            }
         }
 
         // Page break before
