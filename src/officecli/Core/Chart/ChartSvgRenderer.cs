@@ -77,12 +77,14 @@ internal partial class ChartSvgRenderer
     public int FirstSliceAngle { get; set; }
     // Per-series fill opacity parsed from <a:solidFill><a:alpha val="…"/>.
     // Index = series index. Null/absent entry → use the renderer's default
-    // (0.85 for filled charts). Synced from ChartInfo.SeriesFillOpacities.
+    // (1.0 = opaque, matching native). Synced from ChartInfo.SeriesFillOpacities.
     public List<double?> SeriesFillOpacities { get; set; } = [];
 
     // Series fill opacity for index s, falling back to the supplied default
-    // when the series declared no explicit <a:alpha>.
-    private string FillOpacity(int s, double fallback = 0.85)
+    // when the series declared no explicit <a:alpha>. Default is full opacity
+    // (1.0) to match native Office, which renders chart fills opaque unless an
+    // explicit alpha is set; a stale 0.85 default washed every chart ~15%.
+    private string FillOpacity(int s, double fallback = 1.0)
     {
         var op = s >= 0 && s < SeriesFillOpacities.Count ? SeriesFillOpacities[s] : null;
         return (op ?? fallback).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
@@ -2567,7 +2569,7 @@ internal partial class ChartSvgRenderer
     /// <summary>Extract per-series fill opacity from the series spPr
     /// (pie/doughnut: per data-point dPt spPr) <a:solidFill><a:alpha val="…"/>.
     /// Returns null per entry when no explicit alpha is declared, so the
-    /// renderer keeps its 0.85 default for that series.</summary>
+    /// renderer uses its opaque (1.0) default for that series.</summary>
     private static List<double?> ExtractFillOpacities(List<OpenXmlElement> serElements,
         List<(string name, double[] values)> series, bool isPieType)
     {
