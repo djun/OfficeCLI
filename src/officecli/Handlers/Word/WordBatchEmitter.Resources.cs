@@ -1868,10 +1868,28 @@ public static partial class WordBatchEmitter
         {
             // External relationship references (hyperlink r:id, image r:embed/
             // r:link) would dangle in the blank target — raw injection does not
-            // recreate the matching rels. Fall back to the text emit and surface
-            // the loss rather than producing a file with broken references.
+            // recreate the matching rels. Ship the SDT through the inlined-parts
+            // carrier instead (verbatim sdtXml + part{N}/ext{N} data, rel ids
+            // rewritten on replay), same as the activex/diagram/vmlshape runs.
+            // Only when a referenced part can't be resolved fall back to the
+            // text emit and surface the loss.
             if (HasExternalRelRef(rawXml!))
             {
+                var sdtData = word.GetSdtEmitData(sourcePath);
+                if (sdtData != null)
+                {
+                    var carrierProps = PackInlinedPartsProps(sdtData);
+                    carrierProps["sdtXml"] = carrierProps["runXml"];
+                    carrierProps.Remove("runXml");
+                    items.Add(new BatchItem
+                    {
+                        Command = "add",
+                        Parent = "/body",
+                        Type = "sdt",
+                        Props = carrierProps,
+                    });
+                    return;
+                }
                 ctx.Warnings.Add(new DocxUnsupportedWarning(
                     Element: "sdt.richContent",
                     Path: sourcePath,

@@ -1712,6 +1712,23 @@ public partial class WordHandler
         var body = _doc.MainDocumentPart?.Document?.Body
             ?? throw new InvalidOperationException("Document body not found");
 
+        // Verbatim carrier (dump-emitted): a rich BLOCK content control whose
+        // content references parts/relationships (a cover page with anchored
+        // textboxes and a logo image). Same shape as the activex/diagram/
+        // vmlshape carriers — sdtXml is the whole <w:sdt> element verbatim,
+        // part{N}/ext{N} ship the referenced parts; rel ids are rewritten to
+        // the freshly assigned ones before injection.
+        if (properties.TryGetValue("sdtXml", out var sdtCarrierXml)
+            && !string.IsNullOrEmpty(sdtCarrierXml))
+        {
+            var carrierHost = ResolveImageHostPart(parent);
+            var rewrite = MaterializeInlinedParts(carrierHost, properties, "sdt");
+            var sdtBlock = new SdtBlock(rewrite(sdtCarrierXml));
+            AppendToParent(parent, sdtBlock);
+            var sdtIdx2 = parent.Elements<SdtBlock>().ToList().IndexOf(sdtBlock) + 1;
+            return $"{parentPath}/sdt[{sdtIdx2}]";
+        }
+
         // Case-insensitive lookup to support camelCase keys like "sdtType", "controlType", etc.
         // CONSISTENCY(tracking-preservation): mirror WordHandler.Add.cs:32-40 — never copy a
         // TrackingPropertyDictionary into a plain Dictionary, otherwise every TryGetValue

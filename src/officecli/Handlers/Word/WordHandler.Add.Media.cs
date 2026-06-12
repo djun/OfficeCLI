@@ -783,6 +783,56 @@ public partial class WordHandler
             }
         }
 
+        var rewriteRelIds = MaterializeInlinedParts(hostPart, properties, opName);
+
+        var rewritten = rewriteRelIds(runXml);
+
+        var axRun = new Run(rewritten);
+
+        string resultPath;
+        if (parent is Paragraph axPara)
+        {
+            axPara.AppendChild(axRun);
+            var axRunIdx = GetAllRuns(axPara).IndexOf(axRun) + 1;
+            // CONSISTENCY(para-path-canonical): canonicalize to paraId-form.
+            resultPath = $"{ReplaceTrailingParaSegment(parentPath, axPara)}/r[{axRunIdx}]";
+        }
+        else if (parent is TableCell axCell)
+        {
+            var firstCellPara = axCell.Elements<Paragraph>().FirstOrDefault();
+            Paragraph hostPara;
+            if (firstCellPara != null && !firstCellPara.Elements<Run>().Any())
+            {
+                firstCellPara.AppendChild(axRun);
+                hostPara = firstCellPara;
+            }
+            else
+            {
+                hostPara = new Paragraph(axRun);
+                AssignParaId(hostPara);
+                axCell.AppendChild(hostPara);
+            }
+            var axPIdx = axCell.Elements<Paragraph>().ToList().IndexOf(hostPara) + 1;
+            var axCellRunIdx = GetAllRuns(hostPara).IndexOf(axRun) + 1;
+            resultPath = $"{parentPath}/{BuildParaPathSegment(hostPara, axPIdx)}/r[{axCellRunIdx}]";
+        }
+        else
+        {
+            var hostPara = new Paragraph(axRun);
+            AssignParaId(hostPara);
+            AppendToParent(parent, hostPara);
+            var axPIdx = parent.Elements<Paragraph>().ToList().IndexOf(hostPara) + 1;
+            resultPath = $"{parentPath}/{BuildParaPathSegment(hostPara, axPIdx)}/r[1]";
+        }
+        return resultPath;
+    }
+
+    // Shared by AddInlinedPartsRun and the sdtXml carrier in AddSdt: create
+    // every part{N} (with part{N}.child{M}) and ext{N} relationship on
+    // <paramref name="hostPart"/>, then return the two-phase rel-id rewriter
+    // mapping every source id to its freshly assigned one.
+    private Func<string, string> MaterializeInlinedParts(OpenXmlPart hostPart, Dictionary<string, string> properties, string opName)
+    {
         // Pass 1: create every top-level part empty, so the complete old→new
         // id map exists before any content is written. A collected XML part's
         // bytes can reference a SIBLING part's host-part relationship (the
@@ -863,46 +913,7 @@ public partial class WordHandler
             }
         }
 
-        var rewritten = RewriteRelIds(runXml);
-
-        var axRun = new Run(rewritten);
-
-        string resultPath;
-        if (parent is Paragraph axPara)
-        {
-            axPara.AppendChild(axRun);
-            var axRunIdx = GetAllRuns(axPara).IndexOf(axRun) + 1;
-            // CONSISTENCY(para-path-canonical): canonicalize to paraId-form.
-            resultPath = $"{ReplaceTrailingParaSegment(parentPath, axPara)}/r[{axRunIdx}]";
-        }
-        else if (parent is TableCell axCell)
-        {
-            var firstCellPara = axCell.Elements<Paragraph>().FirstOrDefault();
-            Paragraph hostPara;
-            if (firstCellPara != null && !firstCellPara.Elements<Run>().Any())
-            {
-                firstCellPara.AppendChild(axRun);
-                hostPara = firstCellPara;
-            }
-            else
-            {
-                hostPara = new Paragraph(axRun);
-                AssignParaId(hostPara);
-                axCell.AppendChild(hostPara);
-            }
-            var axPIdx = axCell.Elements<Paragraph>().ToList().IndexOf(hostPara) + 1;
-            var axCellRunIdx = GetAllRuns(hostPara).IndexOf(axRun) + 1;
-            resultPath = $"{parentPath}/{BuildParaPathSegment(hostPara, axPIdx)}/r[{axCellRunIdx}]";
-        }
-        else
-        {
-            var hostPara = new Paragraph(axRun);
-            AssignParaId(hostPara);
-            AppendToParent(parent, hostPara);
-            var axPIdx = parent.Elements<Paragraph>().ToList().IndexOf(hostPara) + 1;
-            resultPath = $"{parentPath}/{BuildParaPathSegment(hostPara, axPIdx)}/r[1]";
-        }
-        return resultPath;
+        return RewriteRelIds;
     }
 
     // Part factory for the inlined-parts carriers. Top-level parts hang off the

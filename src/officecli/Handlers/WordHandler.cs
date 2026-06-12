@@ -444,11 +444,28 @@ public partial class WordHandler : IDocumentHandler
         return CollectInlinedPartsEmitData(run, run);
     }
 
+    /// <summary>
+    /// dump→batch: extract the verbatim &lt;w:sdt&gt; XML and every referenced
+    /// part / external relationship for a rich BLOCK content control (a cover
+    /// page with anchored textboxes and a logo image). Same carrier shape as
+    /// the ActiveX / diagram / vmlshape paths; returns null when the SDT
+    /// references nothing (the plain raw-set passthrough already handles that)
+    /// or a reference can't be resolved.
+    /// </summary>
+    internal ActiveXEmitData? GetSdtEmitData(string sdtPath)
+    {
+        OpenXmlElement? element;
+        try { element = NavigateToElement(ParsePath(sdtPath)); }
+        catch { return null; }
+        if (element is not SdtBlock sdt) return null;
+        return CollectInlinedPartsEmitData(sdt, sdt);
+    }
+
     // Shared collector for the `add activex` / `add diagram` carriers: every
     // relationship-namespace attribute in the subtree (r:id, r:dm, r:lo, …)
     // names a part on the run's host part; ship each part's bytes plus its
     // direct children (activeX binary blob, diagram rendered drawing).
-    private ActiveXEmitData? CollectInlinedPartsEmitData(Run run, OpenXmlElement subtree)
+    private ActiveXEmitData? CollectInlinedPartsEmitData(OpenXmlElement run, OpenXmlElement subtree)
     {
         var hostPart = ResolveImageHostPart(run);
         var relIds = new List<string>();
@@ -542,7 +559,7 @@ public partial class WordHandler : IDocumentHandler
         return ms.ToArray();
     }
 
-    private OpenXmlPart ResolveImageHostPart(Run run)
+    private OpenXmlPart ResolveImageHostPart(OpenXmlElement run)
     {
         var headerAncestor = run.Ancestors<Header>().FirstOrDefault();
         if (headerAncestor != null)
