@@ -1254,15 +1254,27 @@ public partial class WordHandler
             styleRPr.FontSize = new FontSize { Val = ((int)Math.Round(ParseFontSize(sSize) * 2, MidpointRounding.AwayFromZero)).ToString() };
             hasRPr = true;
         }
-        if (properties.TryGetValue("bold", out var sBold) && IsTruthy(sBold))
+        // CONSISTENCY(toggle-explicit-false): a style whose rPr declares
+        // <w:b w:val="0"/> overrides an inherited bold (TOC2 un-bolding
+        // TOC1). Truthy-only handling dropped the explicit-off and the
+        // inherited bold bled through on replay.
+        if (properties.TryGetValue("bold", out var sBold))
         {
-            styleRPr.Bold = new Bold();
-            hasRPr = true;
+            if (IsTruthy(sBold)) { styleRPr.Bold = new Bold(); hasRPr = true; }
+            else if (IsExplicitFalseAddOverride(sBold))
+            {
+                styleRPr.Bold = new Bold { Val = OnOffValue.FromBoolean(false) };
+                hasRPr = true;
+            }
         }
-        if (properties.TryGetValue("italic", out var sItalic) && IsTruthy(sItalic))
+        if (properties.TryGetValue("italic", out var sItalic))
         {
-            styleRPr.Italic = new Italic();
-            hasRPr = true;
+            if (IsTruthy(sItalic)) { styleRPr.Italic = new Italic(); hasRPr = true; }
+            else if (IsExplicitFalseAddOverride(sItalic))
+            {
+                styleRPr.Italic = new Italic { Val = OnOffValue.FromBoolean(false) };
+                hasRPr = true;
+            }
         }
         if (properties.TryGetValue("color", out var sColor))
         {
