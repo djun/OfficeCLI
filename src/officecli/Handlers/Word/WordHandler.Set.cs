@@ -1261,6 +1261,29 @@ public partial class WordHandler
             "decimalenclosedcirclechinese" => NumberFormatValues.DecimalEnclosedCircleChinese,
             "decimalenclosedfullstop" => NumberFormatValues.DecimalEnclosedFullstop,
             "decimalenclosedparen" => NumberFormatValues.DecimalEnclosedParen,
+            // Page-number and locale formats the Get readback emits verbatim
+            // (pgNumType/@w:fmt, lvl/@w:numFmt) but Add/Set previously rejected,
+            // so a dump→batch round-trip of any document using them aborted the
+            // section/numbering add. numberInDash is the common one — "-1-"
+            // page numbers in government/legal templates.
+            "numberindash" => NumberFormatValues.NumberInDash,
+            "hex" => NumberFormatValues.Hex,
+            "chicago" => NumberFormatValues.Chicago,
+            "decimalhalfwidth" => NumberFormatValues.DecimalHalfWidth,
+            "decimalfullwidth2" => NumberFormatValues.DecimalFullWidth2,
+            "aiueo" => NumberFormatValues.Aiueo,
+            "aiueofullwidth" => NumberFormatValues.AiueoFullWidth,
+            "chosung" => NumberFormatValues.Chosung,
+            "koreandigital2" => NumberFormatValues.KoreanDigital2,
+            "ideographzodiactraditional" => NumberFormatValues.IdeographZodiacTraditional,
+            "ideographlegaltraditional" => NumberFormatValues.IdeographLegalTraditional,
+            "taiwanesecounting" => NumberFormatValues.TaiwaneseCounting,
+            "taiwanesecountingthousand" => NumberFormatValues.TaiwaneseCountingThousand,
+            "taiwanesedigital" => NumberFormatValues.TaiwaneseDigital,
+            "vietnamesecounting" => NumberFormatValues.VietnameseCounting,
+            "russianlower" => NumberFormatValues.RussianLower,
+            "russianupper" => NumberFormatValues.RussianUpper,
+            "custom" => NumberFormatValues.Custom,
             "none" => NumberFormatValues.None,
             _ => throw new ArgumentException(
                 $"Unknown numbering format '{value}'. Common values: decimal, lowerRoman, upperRoman, "
