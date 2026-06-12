@@ -1268,6 +1268,29 @@ public partial class PowerPointHandler
                     node.Format["bold"] = endRPrShape.Bold.Value;
                 if (endRPrShape.Italic?.HasValue == true)
                     node.Format["italic"] = endRPrShape.Italic.Value;
+                // CONSISTENCY(rpr-attr-fallback): underline/strike on runless
+                // shapes land on endParaRPr (Add's RunPropTargets fallback,
+                // same as bold/italic) — surface them here, mirroring the
+                // run-present readers at line ~1141/~1198.
+                if (endRPrShape.Underline?.HasValue == true && endRPrShape.Underline.Value != Drawing.TextUnderlineValues.None)
+                {
+                    var epUlInner = endRPrShape.Underline.InnerText;
+                    node.Format["underline"] = epUlInner switch
+                    {
+                        "sng" => "single",
+                        "dbl" => "double",
+                        _ => epUlInner
+                    };
+                }
+                if (endRPrShape.Strike?.HasValue == true)
+                {
+                    node.Format["strike"] = endRPrShape.Strike.Value switch
+                    {
+                        var v when v == Drawing.TextStrikeValues.DoubleStrike => "double",
+                        var v when v == Drawing.TextStrikeValues.NoStrike => "none",
+                        _ => "single",
+                    };
+                }
                 // BUG3: cap readback on runless shapes — mirror the run-present
                 // path at line ~1139 which uses Capital.InnerText ("all"/"small").
                 var epCapAttr = endRPrShape.GetAttributes().FirstOrDefault(a => a.LocalName == "cap");
