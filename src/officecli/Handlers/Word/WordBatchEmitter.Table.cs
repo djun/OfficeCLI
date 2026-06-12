@@ -590,6 +590,18 @@ public static partial class WordBatchEmitter
                     break;
                 }
 
+                // Cross-paragraph field spans INSIDE this cell (a TOC whose
+                // fldChar begin lives in the first cell paragraph and its end
+                // paragraphs later). The per-paragraph field collapse cannot
+                // pair them, so the begin chain was warn-dropped and the end
+                // silently filtered — the rebuilt TOC lost its field wrapper
+                // (entries restyled as bare hyperlinks, lead text duplicated).
+                // Mirror the body-level span machinery: raw-set each member
+                // paragraph verbatim into the cell.
+                var cellSpanParas = cellRawXPath != null
+                    ? GetCellCrossParagraphFieldParaOrdinals(word, cellChildren)
+                    : new HashSet<int>();
+
                 if (!cellHasCustomXml)
                 for (int k = 0; k < cellChildren.Count; k++)
                 {
@@ -597,6 +609,29 @@ public static partial class WordBatchEmitter
                     if (cc.Type == "paragraph" || cc.Type == "p")
                     {
                         cellParaIdx++;
+                        if (cellSpanParas.Contains(cellParaIdx))
+                        {
+                            var rawSpanP = word.GetElementXml(cc.Path);
+                            if (!string.IsNullOrEmpty(rawSpanP) && !HasExternalRelRef(rawSpanP))
+                            {
+                                var rawSpanPart = containerPath == "/body" ? "/document" : containerPath;
+                                items.Add(new BatchItem
+                                {
+                                    Command = "raw-set",
+                                    Part = rawSpanPart,
+                                    // The first cell paragraph replaces the
+                                    // seeded empty paragraph AddTable created;
+                                    // later members append after it.
+                                    Xpath = firstParaSeen ? cellRawXPath! : $"{cellRawXPath}/w:p[1]",
+                                    Action = firstParaSeen ? "append" : "replace",
+                                    Xml = rawSpanP
+                                });
+                                firstParaSeen = true;
+                                continue;
+                            }
+                            // Unresolvable (external rel inside the span):
+                            // fall through to the typed emit and its warning.
+                        }
                         // BUG-R4 (DBF-R4-02): a display equation (<m:oMathPara>)
                         // inside a cell surfaces here as a plain paragraph child
                         // whose Get returns an empty paragraph — EmitParagraph
@@ -1012,5 +1047,55 @@ public static partial class WordBatchEmitter
             }
         }
         return FilterEmittableProps(filtered);
+    }
+
+    // Cross-paragraph field spans inside a single table cell: returns the
+    // 1-based paragraph-child ordinals covered by any span whose fldChar
+    // begin/end pair straddles paragraph boundaries. Mirrors
+    // WordHandler.GetCrossParagraphFieldSpanRanges (body-level); a non-
+    // paragraph child interrupts an open span, and an unterminated span is
+    // abandoned so its paragraphs fall back to the typed emit.
+    private static HashSet<int> GetCellCrossParagraphFieldParaOrdinals(
+        WordHandler word, List<DocumentNode> cellChildren)
+    {
+        var members = new HashSet<int>();
+        var pending = new List<int>();
+        int paraOrdinal = 0, depth = 0;
+        bool open = false;
+        foreach (var cc in cellChildren)
+        {
+            if (cc.Type != "paragraph" && cc.Type != "p")
+            {
+                if (open) { open = false; depth = 0; pending.Clear(); }
+                continue;
+            }
+            paraOrdinal++;
+            var xml = word.GetElementXml(cc.Path) ?? "";
+            int begins = System.Text.RegularExpressions.Regex.Matches(
+                xml, "fldCharType=\"begin\"").Count;
+            int ends = System.Text.RegularExpressions.Regex.Matches(
+                xml, "fldCharType=\"end\"").Count;
+            if (!open)
+            {
+                if (begins > ends)
+                {
+                    open = true;
+                    depth = begins - ends;
+                    pending.Clear();
+                    pending.Add(paraOrdinal);
+                }
+            }
+            else
+            {
+                pending.Add(paraOrdinal);
+                depth += begins - ends;
+                if (depth <= 0)
+                {
+                    foreach (var o in pending) members.Add(o);
+                    open = false; depth = 0; pending.Clear();
+                }
+            }
+        }
+        return members;
     }
 }
