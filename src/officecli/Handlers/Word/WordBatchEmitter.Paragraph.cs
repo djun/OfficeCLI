@@ -2114,13 +2114,13 @@ public static partial class WordBatchEmitter
                 // no positionH/V at all, so the regex simply won't match (safe).
                 var hPosMatch = System.Text.RegularExpressions.Regex.Match(
                     picXml,
-                    @"<wp:positionH\b[^>]*>.*?<wp:posOffset>(\d+)</wp:posOffset>.*?</wp:positionH>",
+                    @"<wp:positionH\b[^>]*>.*?<wp:posOffset>(-?\d+)</wp:posOffset>.*?</wp:positionH>",
                     System.Text.RegularExpressions.RegexOptions.Singleline);
                 if (hPosMatch.Success)
                     picProps["hPosition"] = hPosMatch.Groups[1].Value + "emu";
                 var vPosMatch = System.Text.RegularExpressions.Regex.Match(
                     picXml,
-                    @"<wp:positionV\b[^>]*>.*?<wp:posOffset>(\d+)</wp:posOffset>.*?</wp:positionV>",
+                    @"<wp:positionV\b[^>]*>.*?<wp:posOffset>(-?\d+)</wp:posOffset>.*?</wp:positionV>",
                     System.Text.RegularExpressions.RegexOptions.Singleline);
                 if (vPosMatch.Success)
                     picProps["vPosition"] = vPosMatch.Groups[1].Value + "emu";
