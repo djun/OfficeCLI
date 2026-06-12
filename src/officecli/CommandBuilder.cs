@@ -1105,6 +1105,20 @@ static partial class CommandBuilder
         // Strip help text suffix if present (e.g. "key (valid props: ...)")
         var rawInput = input.Contains(' ') ? input[..input.IndexOf(' ')] : input;
         var lower = rawInput.ToLowerInvariant();
+
+        // Table cell-content keys are 1-based (r1c1, r1c2, …) across all
+        // handlers (pptx AddTable, word AddTable). A 0-based r0c0 / cN starting
+        // at 0 is the single most common miss. Point straight
+        // at the 1-based form rather than letting Levenshtein guess a far-off
+        // KnownProp.
+        var rcMatch = System.Text.RegularExpressions.Regex.Match(lower, @"^r(\d+)c(\d+)$");
+        if (rcMatch.Success)
+        {
+            var rr = int.Parse(rcMatch.Groups[1].Value);
+            var cc = int.Parse(rcMatch.Groups[2].Value);
+            if (rr == 0 || cc == 0)
+                return ($"r{rr + 1}c{cc + 1} (cell keys are 1-based)", 1, true);
+        }
         string? best = null;
         int bestDist = int.MaxValue;
         int bestCount = 0; // how many props share the best distance

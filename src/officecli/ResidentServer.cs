@@ -1721,11 +1721,20 @@ public class ResidentServer : IDisposable
     // alternative props (e.g. "fill (valid slide props: background, ...)"), the
     // generic "use raw-set instead" prefix misdirects the user away from the
     // real fix. Drop the prefix in that case and let the handler hint stand.
-    private static string FormatUnsupportedLine(List<string> unsupported)
+    private static string FormatUnsupportedLine(List<string> unsupported, string? scope = null)
     {
         bool hasNamedAlternative = unsupported.Any(u => u.Contains("(valid ", StringComparison.Ordinal));
         var prefix = hasNamedAlternative ? "UNSUPPORTED props" : "UNSUPPORTED props (use raw-set instead)";
-        return $"{prefix}: {string.Join(", ", unsupported)}";
+        // Attach per-key "did you mean" suggestions (mirrors the non-resident
+        // CommandBuilder.FormatUnsupported path) so guidance like the 1-based
+        // cell-key hint for a 0-based r0c0 reaches resident-mode users too.
+        var parts = unsupported.Select(u =>
+        {
+            if (u.Contains("(valid ", StringComparison.Ordinal)) return u; // handler already hinted
+            var s = CommandBuilder.SuggestPropertyScoped(u, scope);
+            return s != null ? $"{u} (did you mean: {s}?)" : u;
+        });
+        return $"{prefix}: {string.Join(", ", parts)}";
     }
 
     private void ExecuteAdd(ResidentRequest req)
@@ -1773,7 +1782,14 @@ public class ResidentServer : IDisposable
                 }
                 else
                 {
-                    Console.Error.WriteLine(FormatUnsupportedLine(allUnsupported));
+                    string? scope = _handler switch
+                    {
+                        ExcelHandler => "excel",
+                        WordHandler => "word",
+                        PowerPointHandler => "pptx",
+                        _ => null,
+                    };
+                    Console.Error.WriteLine(FormatUnsupportedLine(allUnsupported, scope));
                 }
             }
         }

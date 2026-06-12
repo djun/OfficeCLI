@@ -225,9 +225,21 @@ public partial class PowerPointHandler
                 // table-level border element — borders are per-cell lnL/lnR/lnT/lnB,
                 // so border.all / border.top / etc. are applied to every cell.
                 // border.horizontal / border.vertical mean inside row/column dividers.
-                var tblBorderProps = properties
-                    .Where(kv => kv.Key.StartsWith("border", StringComparison.OrdinalIgnoreCase))
-                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+                //
+                // ARCHITECTURE(handler-as-truth): iterate properties.Keys (which
+                // does NOT route through the TrackingPropertyDictionary enumerator)
+                // and read matches via TryGetValue, so only border.* keys we
+                // actually consume get marked accessed. A LINQ .Where() over
+                // `properties` here would route through the tracking enumerator and
+                // mark EVERY key accessed (TrackingPropertyDictionary.cs:117-128),
+                // silently suppressing unsupported_property for real typos and for
+                // 0-based r0c0 cell keys (the supported cell syntax is 1-based
+                // r1c1). Iterate Keys + TryGetValue so only consumed keys are marked.
+                var tblBorderProps = new Dictionary<string, string>();
+                foreach (var key in properties.Keys.ToList())
+                    if (key.StartsWith("border", StringComparison.OrdinalIgnoreCase)
+                        && properties.TryGetValue(key, out var bv))
+                        tblBorderProps[key] = bv;
                 if (tblBorderProps.Count > 0)
                     ApplyTableBorderFanOut(table, tblBorderProps);
 
