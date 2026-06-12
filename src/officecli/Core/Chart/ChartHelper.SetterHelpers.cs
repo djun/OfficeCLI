@@ -297,17 +297,58 @@ internal static partial class ChartHelper
 
     // ==================== Border / Outline Helpers ====================
 
+    /// <summary>
+    /// a:ln/@w schema ceiling (ST_LineWidth MaxInclusive): 20116800 EMU = 1584pt.
+    /// </summary>
+    internal const int MaxLineWidthEmu = 20116800;
+
+    /// <summary>
+    /// Parse one line-width token (the width slot of "color:width[:dash]" specs
+    /// and the dotted *.width keys) into EMU for a:ln/@w.
+    /// - Bare numbers are POINTS — the documented colon-spec unit
+    ///   (schemas/help: "color:width", examples 0.5 / 1 / 1.5).
+    /// - Unit-qualified values ("1pt", "0.5mm", "0.02in", "12700emu") go through
+    ///   EmuConverter.ParseEmu.
+    /// - Bare integers too large to be a legal point width (&gt; 1584pt) are RAW
+    ///   EMU — the ParseEmu raw-integer convention. Width values copied out of
+    ///   real OOXML (e.g. "…:12700" = 1pt) must round-trip as-is instead of
+    ///   being re-multiplied by 12700 into schema-invalid XML.
+    /// The result is clamped to [0, MaxLineWidthEmu] so Set never emits an
+    /// a:ln/@w that fails OOXML validation.
+    /// </summary>
+    internal static bool TryParseLineWidthEmu(string? token, out int emu)
+    {
+        emu = 0;
+        token = token?.Trim();
+        if (string.IsNullOrEmpty(token)) return false;
+        if (char.IsLetter(token[^1]))
+        {
+            try { emu = (int)Math.Clamp(EmuConverter.ParseEmu(token), 0, MaxLineWidthEmu); }
+            catch (ArgumentException) { return false; }
+            return true;
+        }
+        if (!double.TryParse(token, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var num)
+            || double.IsNaN(num) || double.IsInfinity(num) || num < 0)
+            return false;
+        var asPointsEmu = num * EmuConverter.EmuPerPointF;
+        emu = asPointsEmu > MaxLineWidthEmu && num == Math.Floor(num)
+            ? (int)Math.Min(num, MaxLineWidthEmu)   // raw EMU integer
+            : (int)Math.Min(asPointsEmu, MaxLineWidthEmu);
+        return true;
+    }
+
     internal static Drawing.Outline BuildOutlineElement(string spec)
     {
         // Format: "color" or "color:width" or "color:width:dash"
         // e.g. "000000", "333333:1.5", "666666:1:dash"
         var parts = spec.Split(':');
         var color = parts[0].Trim();
-        var widthPt = parts.Length > 1 && double.TryParse(parts[1],
-            System.Globalization.CultureInfo.InvariantCulture, out var w) ? w : 0.75;
+        var widthEmu = parts.Length > 1 && TryParseLineWidthEmu(parts[1], out var w)
+            ? w : (int)(0.75 * EmuConverter.EmuPerPoint);
         var dash = parts.Length > 2 ? parts[2].Trim() : null;
 
-        var outline = new Drawing.Outline { Width = (int)(widthPt * EmuConverter.EmuPerPoint) };
+        var outline = new Drawing.Outline { Width = widthEmu };
         var sf = new Drawing.SolidFill();
         sf.AppendChild(BuildChartColorElement(color));
         outline.AppendChild(sf);
@@ -842,7 +883,11 @@ internal static partial class ChartHelper
 
             case "linewidth":
             case "outlinewidth":
-                ApplySeriesLineWidth(ser, (int)(ParseHelpers.SafeParseDouble(value, "series.lineWidth") * EmuConverter.EmuPerPoint));
+                if (TryParseLineWidthEmu(value, out var lnWidthEmu))
+                    ApplySeriesLineWidth(ser, lnWidthEmu);
+                else
+                    // Preserve the structured invalid_value error for garbage input.
+                    ParseHelpers.SafeParseDouble(value, "series.lineWidth");
                 return true;
 
             case "linedash" or "dash":

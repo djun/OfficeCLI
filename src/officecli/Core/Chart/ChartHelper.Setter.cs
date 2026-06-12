@@ -1033,7 +1033,12 @@ internal static partial class ChartHelper
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea2 == null) { unsupported.Add(key); break; }
-                    var widthEmu = (int)(ParseHelpers.SafeParseDouble(value, "linewidth") * EmuConverter.EmuPerPoint);
+                    if (!TryParseLineWidthEmu(value, out var widthEmu))
+                    {
+                        // Preserve the structured invalid_value error for garbage input.
+                        ParseHelpers.SafeParseDouble(value, "linewidth");
+                        break;
+                    }
                     foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
                         ApplySeriesLineWidth(ser, widthEmu);
                     break;
@@ -1344,8 +1349,9 @@ internal static partial class ChartHelper
                         spPr.RemoveAllChildren<Drawing.Outline>();
                         if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
                         {
-                            var widthPt = outParts.Length > 1 && double.TryParse(outParts[1], System.Globalization.CultureInfo.InvariantCulture, out var w) ? w : 0.5;
-                            var outline = new Drawing.Outline { Width = (int)(widthPt * EmuConverter.EmuPerPoint) };
+                            var widthEmu = outParts.Length > 1 && TryParseLineWidthEmu(outParts[1], out var w)
+                                ? w : (int)(0.5 * EmuConverter.EmuPerPoint);
+                            var outline = new Drawing.Outline { Width = widthEmu };
                             var sf = new Drawing.SolidFill();
                             sf.AppendChild(BuildChartColorElement(outParts[0]));
                             outline.AppendChild(sf);
@@ -3320,10 +3326,11 @@ internal static partial class ChartHelper
     {
         var parts = spec.Split(':');
         var color = parts[0].Trim();
-        var widthPt = parts.Length > 1 && double.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out var w) ? w : 0.5;
+        var widthEmu = parts.Length > 1 && TryParseLineWidthEmu(parts[1], out var w)
+            ? w : (int)(0.5 * EmuConverter.EmuPerPoint);
         var dash = parts.Length > 2 ? parts[2].Trim() : null;
 
-        var outline = new Drawing.Outline { Width = (int)(widthPt * EmuConverter.EmuPerPoint) };
+        var outline = new Drawing.Outline { Width = widthEmu };
         var solidFill = new Drawing.SolidFill();
         solidFill.AppendChild(BuildChartColorElement(color));
         outline.AppendChild(solidFill);
@@ -3376,11 +3383,10 @@ internal static partial class ChartHelper
 
     private static bool SetGridlineWidth(OpenXmlCompositeElement gridlines, string value)
     {
-        if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var widthPt))
+        if (!TryParseLineWidthEmu(value, out var widthEmu))
             return false;
         var outline = GetOrCreateGridlineOutline(gridlines);
-        outline.Width = (int)(widthPt * EmuConverter.EmuPerPoint);
+        outline.Width = widthEmu;
         return true;
     }
 
@@ -3437,10 +3443,9 @@ internal static partial class ChartHelper
             }
             case "width":
             {
-                if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var widthPt))
+                if (!TryParseLineWidthEmu(value, out var widthEmu))
                     return false;
-                outline.Width = (int)(widthPt * EmuConverter.EmuPerPoint);
+                outline.Width = widthEmu;
                 return true;
             }
             case "dash":
