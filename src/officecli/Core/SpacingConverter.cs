@@ -291,11 +291,18 @@ internal static class SpacingConverter
         if (!double.TryParse(lineVal, CultureInfo.InvariantCulture, out var twips))
             return lineVal;
 
-        // Auto → multiplier
+        // Auto → multiplier. Word stores the multiplier in 240ths
+        // (1.0 = 240), so two decimals can't represent the grid: 265 twips
+        // (1.1042x) printed as "1.1x" and re-parsed back to 264, shaving a
+        // twip off every line of an auto-spaced paragraph — enough cumulative
+        // drift to move page breaks on dump→batch. Four decimals keep the
+        // round-trip exact (max format error 0.00005 × 240 = 0.012 twips,
+        // well under the parser's Math.Round half-twip threshold) while
+        // common values (1.5x, 1.15x) keep their short form.
         if (lineRule == null || lineRule.Equals("auto", StringComparison.OrdinalIgnoreCase))
         {
             var multiplier = twips / WordAutoLineSpacingUnit;
-            return $"{multiplier:0.##}x";
+            return $"{multiplier:0.####}x";
         }
 
         // Exact or AtLeast → fixed points
