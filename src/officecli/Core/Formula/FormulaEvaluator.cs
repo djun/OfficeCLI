@@ -902,13 +902,26 @@ internal partial class FormulaEvaluator
                     || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
                     return FormulaResult.Error("#NUM!");
                 _sameSheetDepth++;
+                // _parseDepth bounds PER-FORMULA paren nesting only (the
+                // dos-hardening cap in ParseConcat). The referenced cell's
+                // formula re-enters ParseConcat while THIS formula's parse is
+                // still on the stack, so without a reset the counter
+                // accumulates one frame per chain link and a >MaxRecursionDepth
+                // simple chain (B[N]=B[N-1]+A[N]) trips the cap mid-chain —
+                // ParseConcat bails with pos=0, EvaluateFormula returns null,
+                // and the link silently degrades to Blank()/0. Cross-link depth
+                // is already guarded above by the stack probe + the
+                // MaxSameSheetDepth backstop; each formula's parse recursion
+                // must be counted from zero.
+                var savedParseDepth = _parseDepth;
+                _parseDepth = 0;
                 try
                 {
                     var evaluated = EvaluateFormula(ModernFunctionQualifier.Unqualify(cell.CellFormula.Text));
                     if (evaluated != null) return evaluated;
                 }
                 catch { /* fall through to cached value */ }
-                finally { _sameSheetDepth--; }
+                finally { _sameSheetDepth--; _parseDepth = savedParseDepth; }
             }
 
             // InlineString cells store their text in <is><t>…</t></is>, NOT in
