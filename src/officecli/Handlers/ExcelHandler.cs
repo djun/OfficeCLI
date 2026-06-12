@@ -23,6 +23,13 @@ public partial class ExcelHandler : IDocumentHandler
     // mid-session `save` snapshots to be useful to third-party consumers
     // (issue #114).
     private FileStream? _backingStream;
+    // Issue #149: when the package contained bloat-filtered worksheets the
+    // SDK is opened over this slimmed in-memory copy instead of the backing
+    // FileStream (which stays open purely for locking + write-back).
+    // See Core/WorksheetBloatFilter.cs for the removal rules and why this
+    // is semantically lossless.
+    private MemoryStream? _filteredPackageStream;
+    private readonly bool _editable;
     // Row index cache: SheetData → sorted map of rowIndex → Row.
     // Turns the O(n) linear scan in FindOrCreateCell into O(1) lookup + O(log n) insert.
     // Invalidated by InvalidateRowIndex() whenever rows are structurally modified (shift, remove).
@@ -39,15 +46,45 @@ public partial class ExcelHandler : IDocumentHandler
     /// </summary>
     internal bool Modified { get; set; }
 
+    /// <summary>
+    /// Number of bare empty cell declarations removed at open by
+    /// <see cref="OfficeCli.Core.WorksheetBloatFilter"/> (issue #149).
+    /// Zero for normal files.
+    /// </summary>
+    public long BloatCellsRemoved { get; private set; }
+
     public ExcelHandler(string filePath, bool editable)
     {
         _filePath = filePath;
+        _editable = editable;
         try
         {
             var share = editable ? FileShare.Read : FileShare.ReadWrite;
             var access = editable ? FileAccess.ReadWrite : FileAccess.Read;
             _backingStream = new FileStream(filePath, FileMode.Open, access, share);
-            _doc = SpreadsheetDocument.Open(_backingStream, editable);
+
+            // Issue #149: sheets that declare millions of empty cells make
+            // the SDK DOM balloon to GBs. Filter them out (lossless — both
+            // Excel and LibreOffice discard such cells on load) before the
+            // SDK ever parses the part. Gated: normal files take the
+            // original path untouched.
+            var bloat = OfficeCli.Core.WorksheetBloatFilter.TryFilter(_backingStream);
+            if (bloat.Package != null)
+            {
+                _filteredPackageStream = bloat.Package;
+                BloatCellsRemoved = bloat.RemovedCells;
+                try
+                {
+                    Console.Error.WriteLine(
+                        $"warning: {Path.GetFileName(filePath)} declares {bloat.RemovedCells:N0} empty cells " +
+                        $"with no value, formula or style ({string.Join(", ", bloat.FilteredParts)}); " +
+                        "they were skipped on load and will be omitted on save (Excel and LibreOffice do the same).");
+                }
+                catch { /* stderr unavailable (resident) — property still set */ }
+            }
+
+            _doc = SpreadsheetDocument.Open(
+                (Stream?)_filteredPackageStream ?? _backingStream, editable);
             // Force early validation: access WorkbookPart to catch corrupt packages now
             _ = _doc.WorkbookPart?.Workbook;
             // Capture initial sheet names to detect duplicate additions
@@ -360,7 +397,25 @@ public partial class ExcelHandler : IDocumentHandler
             catch { /* best-effort audit trail */ }
         }
         _doc.Save();
+        WriteBackFilteredPackage();
         _backingStream?.Flush();
+    }
+
+    // Issue #149: when the SDK operates on the bloat-filtered in-memory
+    // copy, saves land in that MemoryStream — push the bytes out to the
+    // backing FileStream so mid-session `save` snapshots (issue #114) and
+    // final closes hit the disk file exactly like the direct-stream path.
+    // Read-only sessions never write back: the disk file stays untouched.
+    private void WriteBackFilteredPackage()
+    {
+        if (_filteredPackageStream == null || _backingStream == null || !_editable)
+            return;
+        var pos = _filteredPackageStream.Position;
+        _filteredPackageStream.Position = 0;
+        _backingStream.Position = 0;
+        _backingStream.SetLength(0);
+        _filteredPackageStream.CopyTo(_backingStream);
+        _filteredPackageStream.Position = pos;
     }
 
     public void Dispose()
@@ -377,7 +432,14 @@ public partial class ExcelHandler : IDocumentHandler
             catch { /* best-effort audit trail */ }
         }
         try { _doc.Save(); } catch { /* read-only or already disposed */ }
+        // Write back while the MemoryStream is guaranteed alive — the SDK
+        // may close the stream it was opened over during _doc.Dispose().
+        // After _doc.Save() the in-memory zip is complete (same contract
+        // the direct FileStream path relies on for mid-session saves).
+        try { WriteBackFilteredPackage(); } catch { /* best-effort */ }
         _doc.Dispose();
+        _filteredPackageStream?.Dispose();
+        _filteredPackageStream = null;
         _backingStream?.Dispose();
         _backingStream = null;
     }
