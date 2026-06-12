@@ -540,7 +540,12 @@ public partial class WordHandler
         // link instead of inlining a hardcoded vertAlign superscript (which
         // severs the style link). With no referenceStyle, keep the legacy
         // inline superscript.
-        var fnRefMarkRPr = properties.TryGetValue("referenceStyle", out var fnRefStyle)
+        var fnRefMarkRPr = properties.TryGetValue("referenceMarkRPr", out var fnMarkRPrXml)
+                && !string.IsNullOrEmpty(fnMarkRPrXml)
+            // Verbatim in-note mark rPr forwarded by the dump (rStyle PLUS any
+            // direct rFonts/sz the source put on the mark run).
+            ? new RunProperties(fnMarkRPrXml)
+            : properties.TryGetValue("referenceStyle", out var fnRefStyle)
                 && !string.IsNullOrEmpty(fnRefStyle)
             ? new RunProperties(new RunStyle { Val = fnRefStyle })
             : new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript });
@@ -565,7 +570,14 @@ public partial class WordHandler
         // CONSISTENCY(rtl-cascade): if the host paragraph is RTL, stamp
         // <w:rtl/> on the reference run's rPr so the superscript number
         // renders on the correct side of an Arabic / Hebrew paragraph.
-        var fnRefRPr = new RunProperties(new RunStyle { Val = "FootnoteReference" });
+        // The body reference run can carry direct formatting beyond the char
+        // style (run-level rFonts/sz shrinking the superscript mark). When the
+        // dump forwards the verbatim <w:rPr> (referenceRPr), restore it; else
+        // keep the bare style link.
+        var fnRefRPr = properties.TryGetValue("referenceRPr", out var fnRefRPrXml)
+                && !string.IsNullOrEmpty(fnRefRPrXml)
+            ? new RunProperties(fnRefRPrXml)
+            : new RunProperties(new RunStyle { Val = "FootnoteReference" });
         if (fnPara.ParagraphProperties?.BiDi != null)
             ApplyRunFormatting(fnRefRPr, "rtl", "true");
         var fnRefRun = new Run(fnRefRPr, new FootnoteReference { Id = fnId });
@@ -600,7 +612,10 @@ public partial class WordHandler
         // BUG-DUMP-R42-1: mirror AddFootnote — restore the EndnoteReference
         // char-style link from the carried `referenceStyle` prop, else fall
         // back to the inline vertAlign superscript.
-        var enRefMarkRPr = properties.TryGetValue("referenceStyle", out var enRefStyle)
+        var enRefMarkRPr = properties.TryGetValue("referenceMarkRPr", out var enMarkRPrXml)
+                && !string.IsNullOrEmpty(enMarkRPrXml)
+            ? new RunProperties(enMarkRPrXml)
+            : properties.TryGetValue("referenceStyle", out var enRefStyle)
                 && !string.IsNullOrEmpty(enRefStyle)
             ? new RunProperties(new RunStyle { Val = enRefStyle })
             : new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript });
@@ -622,7 +637,12 @@ public partial class WordHandler
         // pPr as first child (InsertIntoParagraph clamps forward past pPr).
         // CONSISTENCY(rtl-cascade): mirror the footnote case — RTL host
         // paragraphs stamp <w:rtl/> on the reference run's rPr.
-        var enRefRPr = new RunProperties(new RunStyle { Val = "EndnoteReference" });
+        // Mirror AddFootnote: restore the body reference run's verbatim rPr
+        // when the dump forwards it (referenceRPr).
+        var enRefRPr = properties.TryGetValue("referenceRPr", out var enRefRPrXml)
+                && !string.IsNullOrEmpty(enRefRPrXml)
+            ? new RunProperties(enRefRPrXml)
+            : new RunProperties(new RunStyle { Val = "EndnoteReference" });
         if (enPara.ParagraphProperties?.BiDi != null)
             ApplyRunFormatting(enRefRPr, "rtl", "true");
         var enRefRun = new Run(enRefRPr, new EndnoteReference { Id = enId });

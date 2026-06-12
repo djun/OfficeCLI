@@ -1484,7 +1484,8 @@ public static partial class WordBatchEmitter
     // run (footnoteRef/endnoteRef, empty text) is skipped: AddFootnote/AddEndnote
     // recreates it on replay.
     private static void EmitNoteReference(WordHandler word, string kind, int sourceNoteIdx,
-                                          int targetNoteIdx, string carrierPath, List<BatchItem> items)
+                                          int targetNoteIdx, string carrierPath, List<BatchItem> items,
+                                          DocumentNode? bodyRefRun = null)
     {
         // BUG-DUMP-ENDNOTE-ID: the source-side `/{kind}[N]` path resolves by
         // note Id (== N), NOT by ordinal position among the user notes —
@@ -1599,7 +1600,42 @@ public static partial class WordBatchEmitter
                         refRaw, "<w:rStyle\\s+w:val=\"([^\"]*)\"");
                     if (rsMatch.Success && !string.IsNullOrEmpty(rsMatch.Groups[1].Value))
                         noteProps["referenceStyle"] = rsMatch.Groups[1].Value;
+                    // The in-note mark run can ALSO carry direct formatting
+                    // (rFonts/sz alongside the rStyle) — same hazard as the
+                    // body-side reference run. Carry the verbatim <w:rPr>.
+                    try
+                    {
+                        var refRunEl = System.Xml.Linq.XElement.Parse(refRaw);
+                        var wNs3 = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+                        var refRPrEl = refRunEl.Element(wNs3 + "rPr");
+                        if (refRPrEl != null)
+                            noteProps["referenceMarkRPr"] = refRPrEl.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+                    }
+                    catch { /* keep the rStyle-only fallback */ }
                 }
+            }
+        }
+        // The BODY-side reference run (the <w:footnoteReference>/<w:endnoteReference>
+        // host in the document text) can carry direct formatting beyond the
+        // FootnoteReference char style — real documents shrink the superscript
+        // mark with run-level rFonts/sz (e.g. Gill Sans sz=18). AddFootnote/
+        // AddEndnote rebuilt that run with ONLY the rStyle, so the mark rendered
+        // at the inherited size, inflating every host line and shifting the page.
+        // Carry the run's verbatim <w:rPr> so the apply side restores it.
+        if (bodyRefRun != null)
+        {
+            var bodyRunXml = word.GetElementXml(bodyRefRun.Path);
+            if (!string.IsNullOrEmpty(bodyRunXml))
+            {
+                try
+                {
+                    var runEl = System.Xml.Linq.XElement.Parse(bodyRunXml);
+                    var wNs2 = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+                    var rPrEl = runEl.Element(wNs2 + "rPr");
+                    if (rPrEl != null)
+                        noteProps["referenceRPr"] = rPrEl.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+                }
+                catch { /* malformed run XML — keep the rStyle-only fallback */ }
             }
         }
         if (firstParaRuns.Count > 0)

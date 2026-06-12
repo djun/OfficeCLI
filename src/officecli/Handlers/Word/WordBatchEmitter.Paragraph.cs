@@ -667,13 +667,13 @@ public static partial class WordBatchEmitter
                     if (carrierNoteKind == NoteRefKind.Footnote)
                     {
                         int idx = ++ctx!.FootnoteCursor.Index;
-                        EmitNoteReference(word, "footnote", idx, idx, carrierPath, items);
+                        EmitNoteReference(word, "footnote", idx, idx, carrierPath, items, run);
                         continue;
                     }
                     if (carrierNoteKind == NoteRefKind.Endnote)
                     {
                         int idx = ++ctx!.EndnoteCursor.Index;
-                        EmitNoteReference(word, "endnote", idx, idx, carrierPath, items);
+                        EmitNoteReference(word, "endnote", idx, idx, carrierPath, items, run);
                         continue;
                     }
                     var rProps = FilterEmittableProps(run.Format);
@@ -3000,13 +3000,13 @@ public static partial class WordBatchEmitter
         if (noteKind == NoteRefKind.Footnote)
         {
             int idx = ++ctx.FootnoteCursor.Index; // 1-based source/target index
-            EmitNoteReference(word, "footnote", idx, idx, paraTargetPath, items);
+            EmitNoteReference(word, "footnote", idx, idx, paraTargetPath, items, run);
             return true;
         }
         if (noteKind == NoteRefKind.Endnote)
         {
             int idx = ++ctx.EndnoteCursor.Index; // 1-based source/target index
-            EmitNoteReference(word, "endnote", idx, idx, paraTargetPath, items);
+            EmitNoteReference(word, "endnote", idx, idx, paraTargetPath, items, run);
             return true;
         }
         return false;
