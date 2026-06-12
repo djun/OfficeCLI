@@ -187,12 +187,17 @@ public static partial class WordBatchEmitter
         // must follow EmitStyles so it overwrites the blank's stamped block
         // rather than being clobbered by it. See EmitDocDefaultsRaw.
         EmitDocDefaultsRaw(word, items);
+        // latentStyles must land AFTER the docDefaults replace so its
+        // insertafter anchor is the final docDefaults block.
+        EmitLatentStylesRaw(word, items);
         EmitThemeRaw(word, items, warnings);
         EmitSettingsRaw(word, items);
         // BUG-DUMP-R42-3: round-trip word/fontTable.xml (font-face + altName
         // substitutions). No ordering dependency on body refs; emit alongside
         // the other raw resource parts.
         EmitFontTableRaw(word, items, warnings);
+        EmitCustomXmlRaw(word, items);
+        EmitWebSettingsRaw(word, items);
         EmitSection(word, items);
         // Headers/footers run AFTER body: multi-section docs now emit
         // `add header parent="/section[N]"` (see EmitHeaderFooterPart), and

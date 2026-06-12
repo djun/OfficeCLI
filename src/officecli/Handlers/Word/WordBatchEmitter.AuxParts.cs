@@ -54,6 +54,7 @@ public static partial class WordBatchEmitter
         "/word/footnotes.xml",
         "/word/endnotes.xml",
         "/word/fontTable.xml",           // BUG-DUMP-R42-3: EmitFontTableRaw round-trips faces + altName subs
+        "/word/webSettings.xml",         // EmitWebSettingsRaw round-trips the whole part verbatim
         // OPC auto-managed
         "/docProps/core.xml",            // restamped by OfficeCliMetadata
         "/docProps/app.xml",             // restamped by OfficeCliMetadata
@@ -71,7 +72,8 @@ public static partial class WordBatchEmitter
         "/word/charts/",           // chart XML + embedded xlsx — chart run emit
         "/word/embeddings/",       // OLE payloads — warning already raised per-run
         "/word/diagrams/",         // SmartArt — partial coverage via shape emit
-        "/word/activeX/",          // ActiveX controls (form-control aux)
+        "/word/activeX/",          // ActiveX controls — `add activex` inlined-parts carrier
+        "/customXml/",             // customXml data stores — EmitCustomXmlRaw embed-binary pairs
         "/word/printerSettings/",  // SDK strips on save
         "/word/customizations.xml", // legacy customizations
     };
@@ -80,14 +82,10 @@ public static partial class WordBatchEmitter
     // Order matters: prefixes are tested in declaration order; first match wins.
     private static readonly (string Prefix, string Element, string Reason)[] UnsupportedReasons = new[]
     {
-        ("/customXml/itemProps",       "customXmlProps",         "customXml schema-store reference dropped on dump"),
-        ("/customXml/item",            "customXml",              "customXml data store (SDT/content-control bindings) dropped on dump"),
-        ("/customXml/",                "customXml",              "customXml part dropped on dump"),
         ("/word/glossary/",            "glossary",               "Building Blocks / AutoText repository dropped on dump"),
         ("/word/people.xml",           "people",                 "modern-comment author metadata dropped on dump"),
         ("/word/commentsIds.xml",      "commentsIds",            "modern-comment durable-id metadata dropped on dump"),
         ("/word/commentsExtensible.xml","commentsExtensible",    "modern-comment extension metadata dropped on dump"),
-        ("/word/webSettings.xml",      "webSettings",            "web-publishing settings dropped on dump"),
         ("/word/vbaProject.bin",       "vbaProject",             "VBA macro project dropped on dump"),
         ("/word/vbaData.xml",          "vbaData",                "VBA macro metadata dropped on dump"),
     };

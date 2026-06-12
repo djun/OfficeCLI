@@ -296,6 +296,41 @@ public static partial class WordBatchEmitter
         });
     }
 
+    // <w:latentStyles> (the built-in style visibility/priority table Word
+    // writes on every authored document) was dropped on dump: the blank
+    // rebuild has none and nothing re-emitted it. Mostly UI metadata, but its
+    // defaults (defSemiHidden/defUIPriority and per-style lsdExceptions)
+    // change how Word surfaces styles. Round-trip verbatim: insert after the
+    // docDefaults block (CT_Styles order: docDefaults, latentStyles, style*),
+    // or prepend when the source has no docDefaults.
+    private static void EmitLatentStylesRaw(WordHandler word, List<BatchItem> items)
+    {
+        string stylesXml;
+        try { stylesXml = word.Raw("/styles"); }
+        catch { return; }
+        if (string.IsNullOrEmpty(stylesXml) || !stylesXml.StartsWith("<")) return;
+        string? ls;
+        bool hasDocDefaults;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(stylesXml);
+            var wNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+            ls = doc.Root?.Element(wNs + "latentStyles")?.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+            hasDocDefaults = doc.Root?.Element(wNs + "docDefaults") != null;
+        }
+        catch { return; }
+        if (string.IsNullOrEmpty(ls)) return; // source had none; blank has none — consistent
+
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = "/styles",
+            Xpath = hasDocDefaults ? "/w:styles/w:docDefaults" : "/w:styles",
+            Action = hasDocDefaults ? "insertafter" : "prepend",
+            Xml = ls
+        });
+    }
+
     // BUG-R4B(BUG6): the theme part (word/theme/theme1.xml) can carry a
     // <a:blipFill><a:blip r:embed="rIdN"/> referencing an image relationship in
     // theme1.xml.rels (a custom fmtScheme bg fill). The dump round-trips the
@@ -581,6 +616,59 @@ public static partial class WordBatchEmitter
     // the embed elements (keeping the face declarations + altName subs — the
     // rendering-relevant part) so the rebuilt part validates with no dangling
     // rel. A doc with NO fontTable emits nothing.
+    // customXml data stores (item.xml + itemProps.xml): SDT content controls
+    // bind to a store through the itemProps datastore-item GUID, so shipping
+    // the part bytes verbatim (with the item recreated under its SOURCE rel id
+    // so the props op can address it) restores the bindings. Previously the
+    // whole /customXml tree was warn-dropped.
+    private static void EmitCustomXmlRaw(WordHandler word, List<BatchItem> items)
+    {
+        foreach (var (relId, bytes, ct, props) in word.GetCustomXmlEmitData())
+        {
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = "/customXml",
+                Xpath = relId,
+                Action = "embed-binary",
+                Xml = $"data:{ct};base64,{Convert.ToBase64String(bytes)}",
+            });
+            if (props is { } p)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = $"/customXml/{relId}",
+                    Xpath = p.RelId,
+                    Action = "embed-binary",
+                    Xml = $"data:{p.ContentType};base64,{Convert.ToBase64String(p.Bytes)}",
+                });
+            }
+        }
+    }
+
+    // word/webSettings.xml (web-publishing div/frame settings). Verbatim
+    // whole-part raw-set; the apply side creates the part lazily. Previously
+    // warn-dropped.
+    private static void EmitWebSettingsRaw(WordHandler word, List<BatchItem> items)
+    {
+        string xml;
+        try { xml = word.Raw("/webSettings"); }
+        catch { return; }
+        if (string.Equals(xml.Trim(), "(no webSettings)", StringComparison.Ordinal))
+            return;
+        xml = CanonicalizeRawXml(xml);
+        if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return;
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = "/webSettings",
+            Xpath = "/w:webSettings",
+            Action = "replace",
+            Xml = xml
+        });
+    }
+
     private static void EmitFontTableRaw(WordHandler word, List<BatchItem> items,
                                          List<DocxUnsupportedWarning>? warnings = null)
     {

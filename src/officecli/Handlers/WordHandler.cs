@@ -556,6 +556,35 @@ public partial class WordHandler : IDocumentHandler
     // round-tripped embed refs (kept verbatim in the fontTable XML) resolve.
     // The .odttf bytes are obfuscated with the w:fontKey already in the XML —
     // they round-trip raw, no de/re-obfuscation needed.
+    // customXml data stores (item.xml + itemProps.xml pairs). SDT content
+    // controls bind to a store through the itemProps datastore-item GUID, not
+    // a relationship id, so recreating the parts with their bytes verbatim is
+    // sufficient for the bindings to resolve. The dump ships each pair as
+    // `raw-set /customXml --action embed-binary` (item) plus
+    // `raw-set /customXml/<itemRelId> --action embed-binary` (its props child).
+    internal List<(string RelId, byte[] Bytes, string ContentType,
+                   (string RelId, byte[] Bytes, string ContentType)? Props)> GetCustomXmlEmitData()
+    {
+        var result = new List<(string, byte[], string, (string, byte[], string)?)>();
+        var mainPart = _doc.MainDocumentPart;
+        if (mainPart == null) return result;
+        foreach (var part in mainPart.CustomXmlParts)
+        {
+            byte[] bytes;
+            try { bytes = ReadPartBytes(part); }
+            catch { continue; }
+            (string, byte[], string)? props = null;
+            var pp = part.CustomXmlPropertiesPart;
+            if (pp != null)
+            {
+                try { props = (part.GetIdOfPart(pp), ReadPartBytes(pp), pp.ContentType); }
+                catch { /* props are optional; item still round-trips */ }
+            }
+            result.Add((mainPart.GetIdOfPart(part), bytes, part.ContentType, props));
+        }
+        return result;
+    }
+
     internal List<(string RelId, byte[] Bytes, string ContentType)> GetEmbeddedFontParts()
     {
         var result = new List<(string, byte[], string)>();
@@ -641,6 +670,7 @@ public partial class WordHandler : IDocumentHandler
             // Without it Word substitutes different faces — a real visual
             // change. FontTablePart has a typed Fonts root we read verbatim.
             "/fonttable" => mainPart.FontTablePart?.Fonts?.OuterXml ?? "(no fontTable)",
+            "/websettings" => mainPart.WebSettingsPart?.WebSettings?.OuterXml ?? "(no webSettings)",
             _ when partPath.StartsWith("/header") => GetHeaderRawXml(partPath),
             _ when partPath.StartsWith("/footer") => GetFooterRawXml(partPath),
             _ when partPath.StartsWith("/chart") => GetChartRawXml(partPath),
@@ -700,6 +730,19 @@ public partial class WordHandler : IDocumentHandler
                 numPart.Numbering.Save();
             }
             rootElement = numPart.Numbering;
+        }
+        else if (lowerPath is "/websettings")
+        {
+            // CONSISTENCY(raw-set-create-missing-part): blank docs have no
+            // webSettings part; dump→batch from a Word-authored source emits
+            // raw-set /webSettings replace, so create the part lazily.
+            var wsPart = mainPart.WebSettingsPart ?? mainPart.AddNewPart<WebSettingsPart>();
+            if (wsPart.WebSettings == null)
+            {
+                wsPart.WebSettings = new WebSettings();
+                wsPart.WebSettings.Save();
+            }
+            rootElement = wsPart.WebSettings;
         }
         else if (lowerPath is "/comments")
             rootElement = mainPart.WordprocessingCommentsPart?.Comments ?? throw new InvalidOperationException("No comments part");
@@ -878,10 +921,42 @@ public partial class WordHandler : IDocumentHandler
             using var ms = new MemoryStream(bytes);
             ip.FeedData(ms);
         }
+        else if (lowerPath is "/customxml")
+        {
+            // customXml data store item — recreate with the SOURCE rel id so
+            // the companion props op can address it as /customXml/<relId>.
+            // Nothing in any XML references this id, so reuse is collision-
+            // safe (the rebuilt main part's auto ids use a different scheme).
+            var ct = string.IsNullOrEmpty(contentType) ? "application/xml" : contentType;
+            var cxp = mainPart.AddNewPart<CustomXmlPart>(ct, relId);
+            using var ms = new MemoryStream(bytes);
+            cxp.FeedData(ms);
+        }
+        else if (lowerPath.StartsWith("/customxml/", StringComparison.Ordinal))
+        {
+            // itemProps child of a previously attached customXml item part.
+            var itemRelId = partPath.Substring("/customXml/".Length);
+            OpenXmlPart item;
+            try { item = mainPart.GetPartById(itemRelId); }
+            catch
+            {
+                throw new InvalidOperationException(
+                    $"embed-binary: no customXml item part with rel id '{itemRelId}'");
+            }
+            if (item is not CustomXmlPart customItem)
+                throw new InvalidOperationException(
+                    $"embed-binary: rel id '{itemRelId}' is not a customXml part");
+            var ct = string.IsNullOrEmpty(contentType)
+                ? "application/vnd.openxmlformats-officedocument.customXmlProperties+xml"
+                : contentType;
+            var propsPart = customItem.AddNewPart<CustomXmlPropertiesPart>(ct, relId);
+            using var ms = new MemoryStream(bytes);
+            propsPart.FeedData(ms);
+        }
         else
         {
             throw new ArgumentException(
-                $"embed-binary not supported for part '{partPath}' (only /fontTable, /numbering).");
+                $"embed-binary not supported for part '{partPath}' (only /fontTable, /numbering, /customXml).");
         }
     }
 
