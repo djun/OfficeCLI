@@ -1255,7 +1255,8 @@ internal partial class ChartSvgRenderer
         else
         {
             var baseY = ZeroY();
-            var renderOrder = Enumerable.Range(0, series.Count).OrderByDescending(s => series[s].values.DefaultIfEmpty(0).Max()).ToList();
+            // Forward index order: series0 bottom-most, seriesN on top — matches native PowerPoint
+            var renderOrder = Enumerable.Range(0, series.Count).ToList();
             foreach (var s in renderOrder)
             {
                 var topPoints = new List<string>();
