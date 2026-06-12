@@ -392,6 +392,18 @@ public partial class ExcelHandler
             if (hr > maxRow) maxRow = hr;
         }
 
+        // Extend maxRow/maxCol to cover conditional-formatting ranges: blank
+        // in-range cells (e.g. containsBlanks fill on D1:D5 with only D1
+        // populated) must exist in the grid for their CF style to display.
+        // The CF contribution is clamped by the same render caps applied
+        // below, so a whole-column sqref cannot inflate the grid (or the
+        // truncation warning) past what would render anyway.
+        var (cfMaxRow, cfMaxCol) = CfRangeExtents(ws.Elements<ConditionalFormatting>());
+        cfMaxRow = Math.Min(cfMaxRow, GetHtmlRowCap());
+        cfMaxCol = Math.Min(cfMaxCol, 200);
+        if (cfMaxRow > maxRow) maxRow = cfMaxRow;
+        if (cfMaxCol > maxCol) maxCol = cfMaxCol;
+
         // Empty sheet (no cells and no charts)
         if (maxRow == 0 || maxCol == 0)
         {
@@ -1111,6 +1123,13 @@ public partial class ExcelHandler
 
         var evaluator = new Core.FormulaEvaluator(sheetData, workbookPart);
         var (cfBoundRow, cfBoundCol) = UsedBounds(sheetData);
+        // Blank-sensitive rules (containsBlanks / notContains*) must evaluate
+        // cells beyond the used data extent — those cells render too (the grid
+        // dimensions are extended the same way). Clamp the CF contribution with
+        // the same caps UsedBounds applies so a whole-column sqref stays bounded.
+        var (cfExtRow, cfExtCol) = CfRangeExtents(cfElements);
+        cfBoundRow = Math.Max(cfBoundRow, Math.Min(cfExtRow, GetHtmlRowCap()));
+        cfBoundCol = Math.Max(cfBoundCol, Math.Min(cfExtCol, 200));
 
         foreach (var cf in cfElements)
         {
@@ -2032,6 +2051,38 @@ public partial class ExcelHandler
                 if (ci > maxCol) maxCol = ci;
             }
         return (Math.Min(maxRow, GetHtmlRowCap()), Math.Min(maxCol, 200));
+    }
+
+    // Raw row/col extents of conditional-formatting sqrefs. Blank in-range
+    // cells (e.g. a containsBlanks fill on D1:D5 with only D1 populated) live
+    // beyond the used data extent; both the rendered grid and the CF passes
+    // must cover them or the fill can never display. Callers merge these
+    // extents into their bounds CLAMPED by the same html render caps as
+    // UsedBounds (GetHtmlRowCap()/200), so a whole-column sqref
+    // (A1:A1048576) cannot explode the grid. Refs that don't parse as plain
+    // A1-style cells (defensive: malformed files) are skipped.
+    private static (int maxRow, int maxCol) CfRangeExtents(IEnumerable<ConditionalFormatting> cfElements)
+    {
+        int maxRow = 0, maxCol = 0;
+        foreach (var cf in cfElements)
+        {
+            var items = cf.SequenceOfReferences?.Items;
+            if (items == null) continue;
+            foreach (var item in items)
+                foreach (var part in (item.Value ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var end = part.Contains(':') ? part.Split(':')[1] : part;
+                    try
+                    {
+                        var (colName, row) = ParseCellReference(end);
+                        if (row > maxRow) maxRow = row;
+                        var ci = ColumnNameToIndex(colName);
+                        if (ci > maxCol) maxCol = ci;
+                    }
+                    catch (ArgumentException) { /* skip non-A1 refs (e.g. whole-column "A:A") */ }
+                }
+        }
+        return (maxRow, maxCol);
     }
 
     private List<(string cellRef, int row, int col)> ExpandSqref(string sqref, int maxRow, int maxCol)
