@@ -1135,20 +1135,29 @@ internal static class FormulaParser
                 if (envName is "align" or "align*" or "aligned" or "gathered" or "eqnarray"
                     or "eqnarray*" or "split")
                 {
-                    // Multi-line equation environments mapped via matrix parser (m:m)
-                    // These use \\ for row breaks and & for alignment points
+                    // Multi-line equation environments map to m:eqArr (equation
+                    // array — a vertical stack of equations), NOT m:m. m:m is a
+                    // matrix grid; using it here made \begin{aligned} round-trip
+                    // as \begin{matrix}. Rows are tokenized via the matrix parser
+                    // (\\ row breaks, & alignment points), then each m:mr row is
+                    // flattened into one m:e of the equation array.
                     var matrixEl = ParseMatrix(envName, tokens, ref pos);
-                    // ParseMatrix wraps some environments in a delimiter
-                    // For align/gathered, we want the raw m:m (matrix) without delimiters
-                    if (matrixEl is M.Delimiter delim)
+                    // ParseMatrix may wrap the matrix in a delimiter; guard like
+                    // WrapInOfficeMath (single node returned directly).
+                    var rowsMatrix = matrixEl as M.Matrix
+                        ?? matrixEl.Descendants<M.Matrix>().FirstOrDefault();
+                    if (rowsMatrix == null)
+                        return matrixEl;
+                    var eqArr = new M.EquationArray();
+                    foreach (var mr in rowsMatrix.Elements<M.MatrixRow>())
                     {
-                        // Extract the matrix from inside the delimiter
-                        var innerBase = delim.GetFirstChild<M.Base>();
-                        var innerMatrix = innerBase?.GetFirstChild<M.Matrix>();
-                        if (innerMatrix != null)
-                            return innerMatrix.CloneNode(true);
+                        var rowBase = new M.Base();
+                        foreach (var cell in mr.Elements<M.Base>())
+                            foreach (var child in cell.ChildElements)
+                                rowBase.AppendChild(child.CloneNode(true));
+                        eqArr.AppendChild(rowBase);
                     }
-                    return matrixEl;
+                    return eqArr;
                 }
 
                 // Unknown environment, render as text
