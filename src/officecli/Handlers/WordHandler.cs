@@ -150,6 +150,80 @@ public partial class WordHandler : IDocumentHandler
         return names;
     }
 
+    // One section's header/footer references for the batch emitter.
+    internal sealed record SectionHfRef(
+        bool IsFinal,
+        // replay-side `/section[N]` ordinal (1-based document order among
+        // INLINE sectPr, i.e. those carried in a paragraph mark); 0 for the
+        // body-final sectPr (addressed as "/").
+        int ReplayOrdinal,
+        // type ("default"/"first"/"even") → header part Get path "/header[N]"
+        List<(string Type, string PartPath)> Headers,
+        List<(string Type, string PartPath)> Footers);
+
+    // Enumerate EVERY section's header/footer references in document order,
+    // INCLUDING inline sectPr nested inside an SDT (which `query section` /
+    // the body-paragraph /section[N] walk does not surface). The batch
+    // emitter needs this because a dump unwraps an SDT-wrapped section into a
+    // normal body paragraph on replay, so its sectPr joins the document-order
+    // /section[N] sequence — and a header attributed by the SDT-blind
+    // ordinal would land on the wrong section. Resolves each reference's
+    // rel id to the part's /header[N] / /footer[N] Get path (mainPart part
+    // index + 1), matching the readback in BuildSectionNode.
+    internal List<SectionHfRef> EnumerateSectionHeaderFooterRefs()
+    {
+        var result = new List<SectionHfRef>();
+        var mainPart = _doc.MainDocumentPart;
+        var body = mainPart?.Document?.Body;
+        if (mainPart == null || body == null) return result;
+        var headerParts = mainPart.HeaderParts.ToList();
+        var footerParts = mainPart.FooterParts.ToList();
+
+        List<(string, string)> ResolveRefs<TRef>(SectionProperties sp,
+            Func<TRef, string?> idOf, Func<TRef, string?> typeOf,
+            Func<string, OpenXmlPart?> partFor, List<OpenXmlPart> parts, string kind)
+            where TRef : OpenXmlElement
+        {
+            var refs = new List<(string, string)>();
+            foreach (var r in sp.Elements<TRef>())
+            {
+                var id = idOf(r);
+                if (string.IsNullOrEmpty(id)) continue;
+                var type = typeOf(r) ?? "default";
+                try
+                {
+                    var part = partFor(id!);
+                    var idx = part != null ? parts.IndexOf(part) : -1;
+                    if (idx >= 0) refs.Add((type, $"/{kind}[{idx + 1}]"));
+                }
+                catch { /* dangling rel — skip */ }
+            }
+            return refs;
+        }
+
+        int inlineOrdinal = 0;
+        // Descendants<SectionProperties>() yields all sectPr in document
+        // order, including those inside SDTs / cells. The body-final sectPr
+        // is a direct Body child; every other is carried in a ParagraphProperties.
+        foreach (var sp in body.Descendants<SectionProperties>())
+        {
+            bool isFinal = sp.Parent is Body;
+            int ord = 0;
+            if (!isFinal) ord = ++inlineOrdinal;
+            var headers = ResolveRefs<HeaderReference>(sp,
+                r => r.Id?.Value, r => r.Type?.InnerText,
+                id => mainPart.GetPartById(id) as DocumentFormat.OpenXml.Packaging.HeaderPart,
+                headerParts.Cast<OpenXmlPart>().ToList(), "header");
+            var footers = ResolveRefs<FooterReference>(sp,
+                r => r.Id?.Value, r => r.Type?.InnerText,
+                id => mainPart.GetPartById(id) as DocumentFormat.OpenXml.Packaging.FooterPart,
+                footerParts.Cast<OpenXmlPart>().ToList(), "footer");
+            if (headers.Count > 0 || footers.Count > 0)
+                result.Add(new SectionHfRef(isFinal, ord, headers, footers));
+        }
+        return result;
+    }
+
     public WordHandler(string filePath, bool editable)
     {
         _filePath = filePath;

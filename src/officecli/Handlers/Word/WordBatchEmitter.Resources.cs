@@ -844,46 +844,25 @@ public static partial class WordBatchEmitter
         // header/footer was typed "default" — round-trip failed when a doc
         // had both default + first headers. Walk all section children to
         // build the path→type map.
-        void HarvestRefs(DocumentNode node, string? sectionPath)
+        // Attribute each referenced header/footer part to the section whose
+        // sectPr references it, using the REPLAY-side document-order ordinal.
+        // EnumerateSectionHeaderFooterRefs walks every sectPr including inline
+        // ones nested in an SDT (which `query section` misses) — required
+        // because a dump unwraps an SDT-wrapped section into a normal body
+        // paragraph, so its sectPr joins the /section[N] sequence and a header
+        // attributed by the SDT-blind ordinal would land on the wrong section
+        // (the symptom: a landscape figure section's header rendered on the
+        // first portrait page and the real first-page header vanished).
+        foreach (var sref in word.EnumerateSectionHeaderFooterRefs())
         {
-            foreach (var (key, val) in node.Format)
-            {
-                if (val == null) continue;
-                var s = val.ToString();
-                if (string.IsNullOrEmpty(s)) continue;
-                if (key.StartsWith("headerRef.", StringComparison.OrdinalIgnoreCase))
-                {
-                    var t = key["headerRef.".Length..];
-                    if (!headerPathInfo.ContainsKey(s))
-                        headerPathInfo[s] = (t, sectionPath);
-                }
-                else if (key.StartsWith("footerRef.", StringComparison.OrdinalIgnoreCase))
-                {
-                    var t = key["footerRef.".Length..];
-                    if (!footerPathInfo.ContainsKey(s))
-                        footerPathInfo[s] = (t, sectionPath);
-                }
-            }
+            var parent = sref.IsFinal ? "/" : $"/section[{sref.ReplayOrdinal}]";
+            foreach (var (type, partPath) in sref.Headers)
+                if (!headerPathInfo.ContainsKey(partPath))
+                    headerPathInfo[partPath] = (type, parent);
+            foreach (var (type, partPath) in sref.Footers)
+                if (!footerPathInfo.ContainsKey(partPath))
+                    footerPathInfo[partPath] = (type, parent);
         }
-        // Harvest sections FIRST so real section attribution wins over the
-        // body-level sectPr fallback. Then harvest root: root.Format mirrors
-        // the body-level <w:sectPr> (which OOXML treats as the FINAL section's
-        // properties), so any ref that only appears at root belongs to the
-        // last section. Emitting `parent="/"` for those is fine because
-        // AddHeader's `/` resolver also falls back to the body-level sectPr —
-        // both ends agree on the same section. Earlier the order was reversed
-        // (root first, sections second) and the `if !ContainsKey` guard
-        // wrongly let root entries shadow real section attribution.
-        List<DocumentNode> sectionList = new();
-        try
-        {
-            var sections = word.Query("section");
-            if (sections != null) sectionList = sections.ToList();
-        }
-        catch { /* missing section info — fall through with default typing */ }
-        foreach (var sec in sectionList) HarvestRefs(sec, sec.Path);
-        var rootFallbackSection = sectionList.Count > 0 ? sectionList[^1].Path : null;
-        HarvestRefs(root, rootFallbackSection);
 
         int hIdx = 0, fIdx = 0;
         foreach (var child in root.Children)
