@@ -1069,7 +1069,13 @@ public partial class WordHandler
                   // belong on the paragraph mark when no runs exist yet.
                   // ApplyRunFormatting handles each individually.
                   or "kern" or "bdr" or "lang" or "lang.latin" or "lang.val"
-                  or "lang.ea" or "lang.eastasia" or "lang.cs" or "lang.bidi":
+                  or "lang.ea" or "lang.eastasia" or "lang.cs" or "lang.bidi"
+                  // <w:rFonts w:hint> is run-bound: falling through to the
+                  // dotted pPr fallback wrote it on the paragraph MARK only,
+                  // so a CJK run lost its eastAsia hint (different font
+                  // metrics, re-wrapped table rows) while the mark gained a
+                  // phantom one. charspacing/charscale are rPr-bound too.
+                  or "font.hint" or "charspacing" or "charscale" or "w":
                     // Apply run-level formatting to all runs in the paragraph.
                     var allParaRuns = para.Descendants<Run>().ToList();
                     // Paragraph-mark run properties (<w:rPr> inside <w:pPr>)
