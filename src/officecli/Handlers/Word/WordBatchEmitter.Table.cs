@@ -660,7 +660,15 @@ public static partial class WordBatchEmitter
                             firstParaSeen = true;
                             continue;
                         }
-                        bool isTrailingAutoP = k == trailingAutoP;
+                        // The FIRST paragraph after ANY nested table is also
+                        // auto-present: at replay time `add table` momentarily
+                        // leaves the cell ending in a table, so AddTable seeds
+                        // an empty paragraph right after it. A plain `add p`
+                        // then stacked a second paragraph and every following
+                        // block shifted down (an extra blank line per nested
+                        // table, eventually reflowing pages).
+                        bool isTrailingAutoP = k == trailingAutoP
+                            || (k > 0 && cellChildren[k - 1].Type == "table");
                         // BUG-DUMP-R26-7: publish THIS cell's raw-set XPath so the
                         // paragraph's inline raw-set fallbacks target the right
                         // cell. Re-set per paragraph because a preceding nested
