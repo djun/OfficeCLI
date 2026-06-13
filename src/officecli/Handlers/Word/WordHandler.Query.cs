@@ -550,11 +550,11 @@ public partial class WordHandler
             // never exposed them. dump→batch round-trip therefore always
             // dropped frame dimensions and replay used the 15×10cm default.
             // pptx already returns them; this aligns docx with that contract.
-            var inlineExtent = chartInfo.Inline?.Extent;
-            if (inlineExtent?.Cx?.HasValue == true)
-                chartNode.Format["width"] = $"{inlineExtent.Cx.Value / EmuConverter.EmuPerCmF:F1}cm";
-            if (inlineExtent?.Cy?.HasValue == true)
-                chartNode.Format["height"] = $"{inlineExtent.Cy.Value / EmuConverter.EmuPerCmF:F1}cm";
+            var frameExtent = chartInfo.Extent;
+            if (frameExtent?.Cx?.HasValue == true)
+                chartNode.Format["width"] = $"{frameExtent.Cx.Value / EmuConverter.EmuPerCmF:F1}cm";
+            if (frameExtent?.Cy?.HasValue == true)
+                chartNode.Format["height"] = $"{frameExtent.Cy.Value / EmuConverter.EmuPerCmF:F1}cm";
 
             if (chartInfo.IsExtended)
             {

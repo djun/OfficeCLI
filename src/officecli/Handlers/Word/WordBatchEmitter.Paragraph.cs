@@ -2333,6 +2333,13 @@ public static partial class WordBatchEmitter
                     chartProps["width"] = chartExtMatch.Groups[1].Value + "emu";
                     chartProps["height"] = chartExtMatch.Groups[2].Value + "emu";
                 }
+                // A chart wrapped in <wp:anchor> is a FLOATING chart — capture
+                // its wrap + position so AddChart rebuilds the anchor instead of
+                // flattening it to an inline frame (which drops it entirely on
+                // replay, since only inline charts ever got a spec). Inline
+                // charts have no <wp:anchor>, so none of these fire. Mirrors the
+                // floating-picture capture above.
+                CaptureChartAnchorProps(chartXml!, chartProps);
             }
             items.Add(new BatchItem
             {
@@ -2439,6 +2446,70 @@ public static partial class WordBatchEmitter
         // the drawing as unreconstructable so the raw-set sites skip it cleanly
         // and the caller surfaces a loss warning (mirrors the SmartArt path).
         xml.Contains("r:link");
+
+    // Capture a floating chart's <wp:anchor> wrap + positioning into props that
+    // AddChart/BuildChartFrame consume (anchor / wrap / hposition / vposition /
+    // halign / valign / hrelative / vrelative / behindtext / relativeHeight /
+    // effectExtent / wrapDist). No-op when the drawing is an inline chart (no
+    // <wp:anchor>). Regex-scoped per positionH/positionV block so H→hposition
+    // and V→vposition map correctly. Mirrors the floating-picture capture.
+    private static void CaptureChartAnchorProps(string chartXml, Dictionary<string, string> props)
+    {
+        var anchorMatch = System.Text.RegularExpressions.Regex.Match(chartXml, @"<wp:anchor\b([^>]*)>");
+        if (!anchorMatch.Success) return;
+        props["anchor"] = "true";
+        var attrs = anchorMatch.Groups[1].Value;
+
+        string Attr(string scope, string n) =>
+            System.Text.RegularExpressions.Regex.Match(scope, n + "=\"(-?\\d+)\"") is { Success: true } m
+                ? m.Groups[1].Value : "0";
+
+        if (System.Text.RegularExpressions.Regex.Match(attrs, "behindDoc=\"(1|true)\"").Success)
+            props["behindtext"] = "true";
+        var rh = System.Text.RegularExpressions.Regex.Match(attrs, "relativeHeight=\"(\\d+)\"");
+        if (rh.Success) props["relativeHeight"] = rh.Groups[1].Value;
+
+        var wt = Attr(attrs, "distT"); var wb = Attr(attrs, "distB");
+        var wl = Attr(attrs, "distL"); var wr = Attr(attrs, "distR");
+        if (!(wt == "0" && wb == "0" && wl == "114300" && wr == "114300"))
+            props["wrapDist"] = $"{wt},{wb},{wl},{wr}";
+
+        var ee = System.Text.RegularExpressions.Regex.Match(
+            chartXml,
+            @"wp:effectExtent\b[^>]*\bl=""(-?\d+)""[^>]*\bt=""(-?\d+)""[^>]*\br=""(-?\d+)""[^>]*\bb=""(-?\d+)""");
+        if (ee.Success && !(ee.Groups[1].Value == "0" && ee.Groups[2].Value == "0"
+            && ee.Groups[3].Value == "0" && ee.Groups[4].Value == "0"))
+            props["effectExtent"] = $"{ee.Groups[1].Value},{ee.Groups[2].Value},{ee.Groups[3].Value},{ee.Groups[4].Value}";
+
+        // Wrap mode — which wp:wrap* child is present.
+        props["wrap"] =
+            chartXml.Contains("<wp:wrapSquare") ? "square" :
+            chartXml.Contains("<wp:wrapTight") ? "tight" :
+            chartXml.Contains("<wp:wrapThrough") ? "through" :
+            chartXml.Contains("<wp:wrapTopAndBottom") ? "topandbottom" :
+            chartXml.Contains("<wp:wrapNone") ? "none" : "square";
+
+        // Per-axis relativeFrom + posOffset/align, scoped to each block.
+        var hBlock = System.Text.RegularExpressions.Regex.Match(
+            chartXml, @"<wp:positionH\b[^>]*>.*?</wp:positionH>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        var vBlock = System.Text.RegularExpressions.Regex.Match(
+            chartXml, @"<wp:positionV\b[^>]*>.*?</wp:positionV>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+
+        void AxisProps(System.Text.RegularExpressions.Match block, string relKey, string posKey, string alignKey)
+        {
+            if (!block.Success) return;
+            var rel = System.Text.RegularExpressions.Regex.Match(block.Value, "relativeFrom=\"([^\"]+)\"");
+            if (rel.Success) props[relKey] = rel.Groups[1].Value;
+            var align = System.Text.RegularExpressions.Regex.Match(block.Value, @"<wp:align>([^<]+)</wp:align>");
+            if (align.Success) { props[alignKey] = align.Groups[1].Value; return; }
+            var off = System.Text.RegularExpressions.Regex.Match(block.Value, @"<wp:posOffset>(-?\d+)</wp:posOffset>");
+            if (off.Success) props[posKey] = off.Groups[1].Value + "emu";
+        }
+        AxisProps(hBlock, "hrelative", "hposition", "halign");
+        AxisProps(vBlock, "vrelative", "vposition", "valign");
+    }
 
     // BUG-DUMP-R45-4: capture the inner XML of the FIRST <a:blip> inside a
     // picture's drawing (the recolor/alpha children — duotone / biLevel /

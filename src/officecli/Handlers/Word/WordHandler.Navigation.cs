@@ -1083,7 +1083,7 @@ public partial class WordHandler
             var n = first.Index.Value;
             if (n >= 1 && n <= charts.Count)
             {
-                OpenXmlElement? cur = charts[n - 1].Inline;
+                OpenXmlElement? cur = charts[n - 1].Container;
                 while (cur != null && cur is not Paragraph) cur = cur.Parent;
                 if (cur is Paragraph chartPara) return chartPara;
             }

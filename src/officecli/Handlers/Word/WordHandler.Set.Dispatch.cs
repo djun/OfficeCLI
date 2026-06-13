@@ -129,9 +129,9 @@ public partial class WordHandler
         // CONSISTENCY(chart-position-set): same vocabulary as Excel and
         // PPTX. x/y are silently dropped (flagged as unsupported) since
         // inline mode has no absolute position.
-        if (!isSeriesPath && chartInfo.Inline != null)
+        if (!isSeriesPath && chartInfo.Container != null)
         {
-            ApplyWordChartPositionSet(chartInfo.Inline, chartProps, unsupported);
+            ApplyWordChartPositionSet(chartInfo, chartProps, unsupported);
             // Drop ALL position keys (x/y/width/height) from chartProps
             // after handling — unsupported ones were already reported by
             // ApplyWordChartPositionSet. Forwarding them to ChartHelper

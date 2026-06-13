@@ -100,24 +100,13 @@ public partial class WordHandler
             var cxRelId = chartMainPart.GetIdOfPart(extChartPart);
             var cxChartRef = new DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.RelId { Id = cxRelId };
 
-            var cxInline = new DW.Inline(
-                new DW.Extent { Cx = chartCx, Cy = chartCy },
-                new DW.EffectExtent { LeftEdge = 0, TopEdge = 0, RightEdge = 0, BottomEdge = 0 },
-                new DW.DocProperties { Id = docPropId, Name = chartName },
-                new DW.NonVisualGraphicFrameDrawingProperties(),
-                new A.Graphic(
-                    new A.GraphicData(cxChartRef)
-                    { Uri = "http://schemas.microsoft.com/office/drawing/2014/chartex" }
-                )
-            )
-            {
-                DistanceFromTop = 0U,
-                DistanceFromBottom = 0U,
-                DistanceFromLeft = 0U,
-                DistanceFromRight = 0U
-            };
+            var cxGraphic = new A.Graphic(
+                new A.GraphicData(cxChartRef)
+                { Uri = "http://schemas.microsoft.com/office/drawing/2014/chartex" }
+            );
+            var cxFrame = BuildChartFrame(cxGraphic, chartCx, chartCy, docPropId, chartName, properties);
 
-            var cxRun = new Run(new Drawing(cxInline));
+            var cxRun = new Run(new Drawing(cxFrame));
             Paragraph cxPara;
             if (parent is Paragraph existingCxPara)
             {
@@ -140,7 +129,7 @@ public partial class WordHandler
             // (GetAllWordCharts). CountWordCharts is insertion-order and
             // disagrees whenever --before/--after inserts mid-document.
             var cxAllCharts = GetAllWordCharts();
-            var cxDocOrderIdx = cxAllCharts.FindIndex(c => ReferenceEquals(c.Inline, cxInline));
+            var cxDocOrderIdx = cxAllCharts.FindIndex(c => ReferenceEquals(c.Container, cxFrame));
             return $"/chart[{(cxDocOrderIdx >= 0 ? cxDocOrderIdx + 1 : cxAllCharts.Count)}]";
         }
 
@@ -169,27 +158,16 @@ public partial class WordHandler
 
         var chartRelId = chartMainPart.GetIdOfPart(chartPart);
 
-        // Build Drawing/Inline with ChartReference
-        var inline = new DW.Inline(
-            new DW.Extent { Cx = chartCx, Cy = chartCy },
-            new DW.EffectExtent { LeftEdge = 0, TopEdge = 0, RightEdge = 0, BottomEdge = 0 },
-            new DW.DocProperties { Id = docPropId, Name = chartName },
-            new DW.NonVisualGraphicFrameDrawingProperties(),
-            new A.Graphic(
-                new A.GraphicData(
-                    new DocumentFormat.OpenXml.Drawing.Charts.ChartReference { Id = chartRelId }
-                )
-                { Uri = "http://schemas.openxmlformats.org/drawingml/2006/chart" }
+        // Build Drawing frame (inline or floating anchor) with ChartReference.
+        var chartGraphic = new A.Graphic(
+            new A.GraphicData(
+                new DocumentFormat.OpenXml.Drawing.Charts.ChartReference { Id = chartRelId }
             )
-        )
-        {
-            DistanceFromTop = 0U,
-            DistanceFromBottom = 0U,
-            DistanceFromLeft = 0U,
-            DistanceFromRight = 0U
-        };
+            { Uri = "http://schemas.openxmlformats.org/drawingml/2006/chart" }
+        );
+        var frame = BuildChartFrame(chartGraphic, chartCx, chartCy, docPropId, chartName, properties);
 
-        var chartRun = new Run(new Drawing(inline));
+        var chartRun = new Run(new Drawing(frame));
         Paragraph chartPara;
         if (parent is Paragraph existingChartPara)
         {
@@ -210,7 +188,7 @@ public partial class WordHandler
 
         // Return document-order position (matches GetAllWordCharts resolver).
         var allCharts = GetAllWordCharts();
-        var docOrderIdx = allCharts.FindIndex(c => ReferenceEquals(c.Inline, inline));
+        var docOrderIdx = allCharts.FindIndex(c => ReferenceEquals(c.Container, frame));
         return $"/chart[{(docOrderIdx >= 0 ? docOrderIdx + 1 : allCharts.Count)}]";
     }
 
