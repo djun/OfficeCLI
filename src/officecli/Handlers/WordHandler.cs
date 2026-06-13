@@ -465,7 +465,29 @@ public partial class WordHandler : IDocumentHandler
         if (element is not Run run) return null;
         if (!run.Descendants<DocumentFormat.OpenXml.Wordprocessing.Drawing>().Any())
             return null;
-        return CollectInlinedPartsEmitData(run, run);
+        return GuardCarrierContentTypes(CollectInlinedPartsEmitData(run, run));
+    }
+
+    // The inlined-parts factories (CreateInlinedPart) cover activeX, diagram
+    // and image parts. A subtree referencing anything else — a chart, a
+    // header/footer (an SDT wrapping a sectPr carries headerReference rel
+    // ids) — must NOT take the carrier: the apply side would reject the
+    // content type and fail the step. Returning null lets the caller fall
+    // back to its legacy path (typed chart emit, warn-and-flatten, …).
+    private static ActiveXEmitData? GuardCarrierContentTypes(ActiveXEmitData? data)
+    {
+        if (data == null) return null;
+        static bool Supported(string ct) =>
+            ct is "application/vnd.ms-office.activeX+xml"
+               or "application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml"
+               or "application/vnd.openxmlformats-officedocument.drawingml.diagramLayout+xml"
+               or "application/vnd.openxmlformats-officedocument.drawingml.diagramStyle+xml"
+               or "application/vnd.openxmlformats-officedocument.drawingml.diagramColors+xml"
+               or "application/vnd.ms-office.drawingml.diagramDrawing+xml"
+            || ct.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+        foreach (var part in data.Parts)
+            if (!Supported(part.ContentType)) return null;
+        return data;
     }
 
     internal ActiveXEmitData? GetSdtEmitData(string sdtPath)
@@ -474,7 +496,7 @@ public partial class WordHandler : IDocumentHandler
         try { element = NavigateToElement(ParsePath(sdtPath)); }
         catch { return null; }
         if (element is not SdtBlock sdt) return null;
-        return CollectInlinedPartsEmitData(sdt, sdt);
+        return GuardCarrierContentTypes(CollectInlinedPartsEmitData(sdt, sdt));
     }
 
     // Shared collector for the `add activex` / `add diagram` carriers: every

@@ -2520,6 +2520,11 @@ public static partial class WordBatchEmitter
     {
         if (string.IsNullOrEmpty(rawXml)) return false;
         if (IsTextboxDrawing(rawXml)) return false;          // textbox has its own path
+        // A drawing whose graphicData is a CHART must take the typed chart
+        // emit further down — claiming it here raw-set the chart's r:id
+        // verbatim with no chart part behind it, producing a file real Word
+        // refuses to open.
+        if (rawXml.Contains("drawingml/2006/chart", StringComparison.Ordinal)) return false;
         if (!rawXml.Contains("<wps:wsp", StringComparison.Ordinal)) return false;
         // A genuine shape carries a preset/custom geometry or its own shape
         // properties — that's what the picture path cannot represent.
