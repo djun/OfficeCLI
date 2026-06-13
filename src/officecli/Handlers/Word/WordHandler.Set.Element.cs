@@ -1146,9 +1146,18 @@ public partial class WordHandler
                     }
                     else
                     {
-                        // Use paragraph mark run properties as default for new run
+                        // Use paragraph mark run properties as default for new run.
+                        // EXCEPT when this same Set call carries explicit
+                        // markRPr.* keys: those are mark-ONLY by definition
+                        // (the dump emits them for a ¶ mark whose formatting
+                        // the visible runs deliberately don't share), and the
+                        // mark may have been created by an earlier iteration
+                        // of this very call — cloning it would leak mark bold
+                        // onto the rebuilt text run.
+                        bool setHasMarkKeys = properties.Keys.Any(pk =>
+                            pk.StartsWith("markRPr.", StringComparison.OrdinalIgnoreCase));
                         var newRun = new Run();
-                        var markProps = pProps.ParagraphMarkRunProperties;
+                        var markProps = setHasMarkKeys ? null : pProps.ParagraphMarkRunProperties;
                         if (markProps != null)
                         {
                             var cloned = new RunProperties();
